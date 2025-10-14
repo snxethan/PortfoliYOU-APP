@@ -1,9 +1,17 @@
 {
   "devDependencies": {
+    "@typescript-eslint/eslint-plugin": "^8.46.1",
+    "@typescript-eslint/parser": "^8.46.1",
     "@vitejs/plugin-react": "^5.0.4",
     "concurrently": "^9.2.1",
     "cross-env": "^10.1.0",
     "electron-builder": "^26.0.12",
+    "eslint": "^9.37.0",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-import": "^2.32.0",
+    "eslint-plugin-react": "^7.37.5",
+    "eslint-plugin-react-hooks": "^7.0.0",
+    "prettier": "^3.6.2",
     "typescript": "^5.9.3",
     "vite": "^7.1.9",
     "wait-on": "^9.0.1"
@@ -14,16 +22,28 @@
     "autoprefixer": "^10.4.21",
     "electron": "^38.2.2",
     "electron-updater": "^6.6.2",
+    "lint": "^0.8.19",
     "postcss": "^8.5.6",
     "react": "^19.2.0",
-    "react-dom": "^19.2.0"
+    "react-dom": "^19.2.0",
+    "typescript-eslint": "^8.46.1"
   },
   "main": "out/main/main.js",
   "scripts": {
     "dev": "concurrently -k -n TSC,VITE,ELECTRON \"tsc -w -p tsconfig.electron.json\" \"vite --config vite.config.mjs\" \"wait-on tcp:5173 && cross-env VITE_DEV_SERVER_URL=http://localhost:5173 electron .\"",
     "build:renderer": "vite build --config vite.config.mjs",
     "build": "tsc -p tsconfig.electron.json && npm run build:renderer && electron-builder --dir",
-    "dist": "tsc -p tsconfig.electron.json && npm run build:renderer && electron-builder -w -m"
+    "dist": "tsc -p tsconfig.electron.json && npm run build:renderer && electron-builder -w -m",
+    "lint": "eslint \"app/**/*.{ts,tsx,js,jsx}\"",
+    "lint:fix": "eslint \"app/**/*.{ts,tsx,js,jsx}\" --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
   },
-  "build": { "files": ["app/**", "dist/**", "out/**"] }
+  "build": {
+    "files": [
+      "app/**",
+      "dist/**",
+      "out/**"
+    ]
+  }
 }

@@ -11,3 +11,9 @@
   },
   "include": ["app/main/**/*.ts", "app/preload/**/*.ts"]
 }
+
+// tsconfig for Electron main and preload processes
+// compiles TypeScript files in app/main and app/preload directories
+// outputs compiled JavaScript files to the out directory
+// uses CommonJS module system and targets ES2020
+// includes type definitions for Node.js and Electron
