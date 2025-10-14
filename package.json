@@ -1,18 +1,29 @@
 {
   "devDependencies": {
     "@vitejs/plugin-react": "^5.0.4",
-    "vite": "^7.1.9"
+    "concurrently": "^9.2.1",
+    "cross-env": "^10.1.0",
+    "electron-builder": "^26.0.12",
+    "typescript": "^5.9.3",
+    "vite": "^7.1.9",
+    "wait-on": "^9.0.1"
   },
   "dependencies": {
     "@tailwindcss/cli": "^4.1.14",
     "@tailwindcss/postcss": "^4.1.14",
     "autoprefixer": "^10.4.21",
+    "electron": "^38.2.2",
+    "electron-updater": "^6.6.2",
     "postcss": "^8.5.6",
     "react": "^19.2.0",
     "react-dom": "^19.2.0"
   },
+  "main": "out/main/main.js",
   "scripts": {
-    "dev": "vite --config vite.config.mjs",
-    "build": "vite build --config vite.config.mjs"
-  }
+    "dev": "concurrently -k -n TSC,VITE,ELECTRON \"tsc -w -p tsconfig.electron.json\" \"vite --config vite.config.mjs\" \"wait-on tcp:5173 && cross-env VITE_DEV_SERVER_URL=http://localhost:5173 electron .\"",
+    "build:renderer": "vite build --config vite.config.mjs",
+    "build": "tsc -p tsconfig.electron.json && npm run build:renderer && electron-builder --dir",
+    "dist": "tsc -p tsconfig.electron.json && npm run build:renderer && electron-builder -w -m"
+  },
+  "build": { "files": ["app/**", "dist/**", "out/**"] }
 }
