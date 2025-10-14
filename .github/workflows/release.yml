@@ -1,0 +1,38 @@
+name: Release (draft)
+
+on:
+  push:
+    tags:
+      - "v*.*.*"   # e.g. v0.1.0
+
+permissions:
+  contents: write   # needed to create releases and upload assets
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node 20.19
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20.19
+          cache: npm
+
+      - run: npm ci
+
+      # type-check + build renderer
+      - run: npx tsc -p tsconfig.electron.json
+      - run: npm run build:renderer
+
+      # Package installers and upload to a **draft** Release
+      - name: Build + publish draft
+        run: npm run dist
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # electron-builder reads "publish" from package.json and pushes to GitHub
+          # ensure package.json->build.publish has "provider":"github"
