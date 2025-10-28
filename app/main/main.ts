@@ -5,7 +5,7 @@
 
 import path from "node:path";
 
-import { app, BrowserWindow } from "electron";
+import { app, BrowserWindow, shell } from "electron";
 
 const isDev = !!process.env.VITE_DEV_SERVER_URL;
 let win: BrowserWindow | null = null;
@@ -27,6 +27,48 @@ function create() {
   });
   if (isDev) win!.loadURL(process.env.VITE_DEV_SERVER_URL!);
   else win!.loadFile(path.join(__dirname, "../renderer/index.html"));
+
+  // Handle new window requests (popups)
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    // Allow Firebase/Google auth URLs to open in a popup window
+    if (url.includes("accounts.google.com") || url.includes("firebaseapp.com")) {
+      return {
+        action: "allow",
+        overrideBrowserWindowOptions: {
+          width: 600,
+          height: 700,
+          center: true,
+          webPreferences: {
+            nodeIntegration: false,
+            contextIsolation: true,
+          },
+        },
+      };
+    }
+    
+    // Open other external links in system browser
+    if (url.startsWith("http")) {
+      shell.openExternal(url);
+      return { action: "deny" };
+    }
+    
+    return { action: "allow" };
+  });
+
+  // Handle navigation within the main window
+  win.webContents.on("will-navigate", (event, url) => {
+    const isLocalDev = !!process.env.VITE_DEV_SERVER_URL && url.startsWith(process.env.VITE_DEV_SERVER_URL);
+    const isAppFile = url.startsWith("file://");
+    
+    // Allow local dev and app file navigations
+    if (isLocalDev || isAppFile) return;
+    
+    // Prevent navigation to external URLs in main window (open in system browser instead)
+    if (url.startsWith("http")) {
+      event.preventDefault();
+      shell.openExternal(url);
+    }
+  });
 }
 
 app.whenReady().then(create); // called when Electron has finished initialization and is ready to create browser windows

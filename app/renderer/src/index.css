@@ -1,1 +1,67 @@
 ﻿@import "tailwindcss";
+
+
+@layer base {
+:root {
+/* Dark cyan + orange theme */
+--bg: #0b1220; /* page background */
+--surface: #10192b; /* panels */
+--muted: #0e1726; /* sidebar / headers */
+--border: #1c2a3a; /* subtle borders */
+
+
+--fg: #e6f0ff; /* main text */
+--fg-muted: #9fb3c8; /* secondary text */
+
+
+--primary: #06b6d4; /* cyan */
+--primary-600: #0891b2;
+--primary-700: #0e7490;
+
+
+--accent: #fb923c; /* orange */
+--accent-600: #f97316;
+--accent-700: #ea580c;
+
+
+--focus: 0 0 0 3px rgba(6,182,212,0.35);
+}
+
+
+html, body, #root {
+height: 100%;
+}
+body {
+@apply bg-[color:var(--bg)] text-[color:var(--fg)];
+}
+}
+
+
+/* Semantic utilities (no inline colors in components) */
+@layer components {
+.surface { @apply bg-[color:var(--surface)] border border-[color:var(--border)] rounded-lg; }
+.muted { @apply bg-[color:var(--muted)]; }
+.btn {
+	@apply inline-flex items-center justify-center px-3 py-2 rounded-md border border-[color:var(--border)] text-sm font-medium transition-colors select-none;
+	@apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--primary)];
+	@apply disabled:opacity-50 disabled:cursor-not-allowed;
+}
+/* Do not @apply the custom .btn class here; apply .btn in markup alongside modifiers (e.g. class="btn btn-primary") */
+.btn-primary { @apply bg-[color:var(--primary)] text-black hover:bg-[color:var(--primary-600)] active:bg-[color:var(--primary-700)]; }
+.btn-ghost { @apply bg-transparent text-[color:var(--fg)] hover:bg-[color:var(--muted)] active:bg-[color:var(--muted)]; }
+.btn-outline { @apply bg-transparent text-[color:var(--fg)] border-[color:var(--primary)] hover:bg-[color:var(--muted)] active:bg-[color:var(--muted)]; }
+
+/* High-contrast Google button */
+.btn-google {
+	@apply bg-white text-[#111827] border-[#dadce0] hover:bg-[#f8f9fa] active:bg-[#f1f3f4];
+}
+
+
+.badge-live { @apply inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-[color:var(--accent)] text-black; }
+}
+
+
+/* Active nav indicator */
+@layer utilities {
+.nav-active { color: var(--primary); background-color: color-mix(in oklab, var(--primary) 12%, transparent); }
+}
