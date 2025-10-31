@@ -1,5 +1,33 @@
-import { contextBridge } from "electron";
-contextBridge.exposeInMainWorld("api", { ping: () => "pong" }); // exposes a safe API to the renderer process
+import { contextBridge, ipcRenderer } from "electron";
+
+// Safe, minimal API surface exposed to renderer
+contextBridge.exposeInMainWorld("api", {
+	ping: () => "pong",
+	// Save a file to disk (Electron only)
+	saveFile: async (options: { defaultPath?: string; data: string }) => {
+		return ipcRenderer.invoke("py:saveFile", options);
+	},
+	// Open a file dialog and read the file contents
+	openFileDialog: async (options: { filters?: { name: string; extensions: string[] }[] }) => {
+		return ipcRenderer.invoke("py:openFileDialog", options);
+	},
+		writeFile: async (options: { filePath: string; data: string }) => {
+			return ipcRenderer.invoke("py:writeFile", options);
+		},
+		deleteFile: async (options: { filePath: string }) => {
+			return ipcRenderer.invoke("py:deleteFile", options);
+		},
+		showItemInFolder: async (options: { filePath: string }) => {
+			return ipcRenderer.invoke("py:showItemInFolder", options);
+		},
+		renameFile: async (options: { fromPath: string; toPath: string }) => {
+			return ipcRenderer.invoke("py:renameFile", options);
+		},
+		// Fetch text via main process to bypass renderer CORS restrictions (dev convenience)
+		fetchText: async (options: { url: string; headers?: Record<string, string> }) => {
+			return ipcRenderer.invoke("py:fetchText", options);
+		},
+}); // exposes a safe API to the renderer process
 
 
 // this file is main process of Electron, started as first thing when the  app starts

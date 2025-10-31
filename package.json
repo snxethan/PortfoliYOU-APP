@@ -1,4 +1,11 @@
 {
+  "name": "portfoli-you-app",
+  "version": "0.1.0",
+  "description": "Portfoli-YOU desktop app built with Electron, Vite, and React.",
+  "author": "",
+  "engines": {
+    "node": ">=20.19.0 <21 || >=22.12.0"
+  },
   "devDependencies": {
     "@types/react": "^19.2.2",
     "@types/react-dom": "^19.2.2",
@@ -7,7 +14,8 @@
     "@vitejs/plugin-react": "^5.0.4",
     "concurrently": "^9.2.1",
     "cross-env": "^10.1.0",
-    "electron-builder": "^26.0.12",
+  "electron": "^38.2.2",
+  "electron-builder": "^26.0.12",
     "eslint": "^9.37.0",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-import": "^2.32.0",
@@ -22,8 +30,7 @@
     "@tailwindcss/cli": "^4.1.14",
     "@tailwindcss/postcss": "^4.1.14",
     "autoprefixer": "^10.4.21",
-    "electron": "^38.2.2",
-    "electron-updater": "^6.6.2",
+  "electron-updater": "^6.6.2",
     "firebase": "^12.4.0",
     "lint": "^1.1.2",
     "lucide-react": "^0.546.0",

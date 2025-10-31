@@ -1,9 +1,10 @@
-import { auth } from "./firebase";
 import {
   GoogleAuthProvider, signInWithPopup,
   createUserWithEmailAndPassword, signInWithEmailAndPassword,
   sendEmailVerification, signOut
 } from "firebase/auth";
+
+import { auth } from "./firebase";
 
 export const signInGoogle = async () => {
   const provider = new GoogleAuthProvider();
@@ -21,7 +22,7 @@ export const signInGoogle = async () => {
     // TODO: Analytics - Track sign-in event with provider
     // analytics.logEvent('login', { method: 'google' });
     return result.user;
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('❌ Google Sign-In Error:', error);
     // TODO: Analytics - Track sign-in failure
     // analytics.logEvent('login_failed', { method: 'google', error: error.code });
@@ -42,7 +43,7 @@ export async function emailSignUp(email: string, password: string) {
     // TODO: Analytics - Track sign-up event
     // analytics.logEvent('sign_up', { method: 'email' });
     return cred.user;
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('❌ Email Sign-Up Error:', error);
     // TODO: Analytics - Track sign-up failure
     // analytics.logEvent('sign_up_failed', { method: 'email', error: error.code });
@@ -62,7 +63,7 @@ export const emailSignIn = async (email: string, password: string) => {
     // TODO: Analytics - Track sign-in event
     // analytics.logEvent('login', { method: 'email' });
     return result;
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('❌ Email Sign-In Error:', error);
     // TODO: Analytics - Track sign-in failure
     // analytics.logEvent('login_failed', { method: 'email', error: error.code });
@@ -82,7 +83,7 @@ export const logout = async () => {
     // analytics.logEvent('logout');
     await signOut(auth);
     console.log('✅ Sign-Out Success');
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('❌ Sign-Out Error:', error);
     throw error;
   }

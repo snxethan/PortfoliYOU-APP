@@ -1,0 +1,28 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Users
+    match /users/{uid} {
+      allow read: if request.auth != null && request.auth.uid == uid;
+      // Allow updates by the user but prevent tampering with plan/counters
+      allow create: if request.auth != null && request.auth.uid == uid;
+      allow update: if request.auth != null && request.auth.uid == uid &&
+        !(request.resource.data.diff(resource.data).changedKeys().hasAny(['plan', 'counters']));
+    }
+
+    // Projects - top-level
+    match /projects/{projectId} {
+      // Only the owner can read
+      allow read: if request.auth != null && resource.data.ownerUid == request.auth.uid;
+
+      // No client-side creates; must go through Cloud Function (admin)
+      allow create: if false;
+
+      // Owner can update/delete only if serverCreated is true and immutable fields aren't changed
+      allow update, delete: if request.auth != null && resource.data.ownerUid == request.auth.uid &&
+        resource.data.serverCreated == true &&
+        !('ownerUid' in request.resource.data.diff(resource.data).changedKeys()) &&
+        !('serverCreated' in request.resource.data.diff(resource.data).changedKeys());
+    }
+  }
+}

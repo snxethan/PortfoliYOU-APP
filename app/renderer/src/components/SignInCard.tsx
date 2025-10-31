@@ -1,8 +1,9 @@
-﻿import { useState } from "react";
+﻿import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { LogOut, Mail, Lock, AlertCircle, Loader2 } from "lucide-react";
+
 import { useAuth } from "../providers/AuthProvider";
 import { signInGoogle, emailSignIn, emailSignUp, logout } from "../lib/auth";
-import { LogOut, Mail, Lock, AlertCircle, Loader2 } from "lucide-react";
 
 export default function SignInCard() {
   const { user } = useAuth();
@@ -17,19 +18,27 @@ export default function SignInCard() {
     setIsGoogleLoading(true);
     try {
       await signInGoogle();
-    } catch (error: any) {
-      setMsg(error.message || "Failed to sign in with Google");
+    } catch (error: unknown) {
+      const e = error as { message?: string } | undefined;
+      setMsg(e?.message || "Failed to sign in with Google");
     } finally {
       setIsGoogleLoading(false);
     }
   };
+
+  // If user closes the Google popup window, focus returns to our app; ensure button resets immediately
+  useEffect(() => {
+    const onFocus = () => setIsGoogleLoading(false);
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, []);
 
   const handleLogout = async () => {
     try {
       await logout();
       // Clear local state and redirect to home/landing page
       navigate('/', { replace: true });
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Failed to logout:', error);
     }
   };
@@ -47,7 +56,7 @@ export default function SignInCard() {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="Email"
-              className="w-full border border-[color:var(--border)] rounded-md pl-8 pr-3 py-2 text-sm bg-[color:var(--bg)] focus:outline-none focus:ring-2 focus:ring-[color:var(--primary)]"
+              className="input pl-8"
             />
           </div>
           <div className="relative">
@@ -57,16 +66,16 @@ export default function SignInCard() {
               onChange={(e) => setPw(e.target.value)}
               placeholder="Password"
               type="password"
-              className="w-full border border-[color:var(--border)] rounded-md pl-8 pr-3 py-2 text-sm bg-[color:var(--bg)] focus:outline-none focus:ring-2 focus:ring-[color:var(--primary)]"
+              className="input pl-8"
             />
           </div>
           <div className="flex gap-2">
             <button
               onClick={async () => {
                 setMsg(null);
-                try { await emailSignIn(email, pw); } catch (e:any) { setMsg(e.message); }
+                try { await emailSignIn(email, pw); } catch (e: unknown) { const ex = e as { message?: string } | undefined; setMsg(ex?.message || 'Failed to sign in'); }
               }}
-              className="btn btn-primary flex-1"
+              className="btn btn-outline flex-1"
             >
               Sign in
             </button>
@@ -74,7 +83,7 @@ export default function SignInCard() {
               onClick={async () => {
                 setMsg(null);
                 try { await emailSignUp(email, pw); setMsg("Verification email sent."); }
-                catch (e:any) { setMsg(e.message); }
+                catch (e: unknown) { const ex = e as { message?: string } | undefined; setMsg(ex?.message || 'Failed to sign up'); }
               }}
               className="btn btn-outline flex-1"
             >
@@ -128,10 +137,16 @@ export default function SignInCard() {
   return (
     <div className="space-y-3">
       <div className="text-xs font-semibold uppercase tracking-wide text-[color:var(--fg-muted)]">Account</div>
-      <div className="text-xs leading-relaxed bg-[color:var(--bg)] border border-[color:var(--border)] rounded-md p-3">
-        <div className="font-medium text-[color:var(--fg)]">Signed in</div>
-        <div className="text-[color:var(--fg-muted)] break-all mt-1">{user.email ?? user.uid}</div>
-      </div>
+      <ClickableAccountCard
+        email={user.email ?? user.uid}
+        onClick={() => {
+          // Navigate first, then trigger highlight after the Home page mounts
+          navigate('/', { replace: false });
+          setTimeout(() => {
+            window.dispatchEvent(new CustomEvent('py:highlight-account'));
+          }, 100);
+        }}
+      />
       {!verified && (
         <div className="flex items-start gap-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md p-2">
           <AlertCircle size={14} className="mt-0.5 flex-shrink-0" />
@@ -140,11 +155,25 @@ export default function SignInCard() {
       )}
       <button 
         onClick={handleLogout} 
-        className="w-full flex items-center justify-center gap-2 rounded-md border border-[color:var(--border)] py-2 text-sm font-medium hover:bg-[color:var(--muted)] transition-colors"
+        className="btn btn-ghost hover-accent w-full gap-2"
       >
         <LogOut size={14} />
         Sign out
       </button>
     </div>
+  );
+}
+
+function ClickableAccountCard({ email, onClick }: { email: string; onClick: () => void; }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="text-xs w-full text-left leading-relaxed bg-[color:var(--bg)] border border-[color:var(--accent)] rounded-md p-3 hover:border-[color:var(--accent-600)] hover:bg-[color:var(--muted)]/60 hover-accent transition-colors"
+      title="Go to account section"
+    >
+      <div className="font-medium text-[color:var(--fg)]">Logged in</div>
+      <div className="text-[color:var(--fg-muted)] break-all mt-1">{email}</div>
+    </button>
   );
 }
