@@ -8,6 +8,8 @@ const ModifyPage = lazy(() => import("./pages/Modify"));
 const DeployPage = lazy(() => import("./pages/Deploy"));
 import ProtectedRoute from "./components/ProtectedRoute";
 import { ProjectsProvider, useProjects } from "./providers/ProjectsProvider";
+import { NotificationsProvider } from "./providers/NotificationsProvider";
+import NotificationsUI from "./components/Notifications";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { useAuth } from "./providers/AuthProvider";
 
@@ -30,8 +32,10 @@ export default function App() {
 return (
   <ErrorBoundary>
     <BrowserRouter>
+      <NotificationsProvider>
       <ProjectsProvider>
         <SaveHotkeys />
+        <NotificationsUI />
         <div className="min-h-screen grid grid-cols-[15rem_1fr]">
           <Sidebar />
           <div className="min-h-screen flex flex-col">
@@ -66,6 +70,7 @@ return (
           </div>
         </div>
       </ProjectsProvider>
+      </NotificationsProvider>
     </BrowserRouter>
   </ErrorBoundary>
 );

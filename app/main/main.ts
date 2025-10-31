@@ -12,6 +12,8 @@ import { app, BrowserWindow, shell, ipcMain, dialog } from "electron";
 
 const isDev = !!process.env.VITE_DEV_SERVER_URL;
 let win: BrowserWindow | null = null;
+let bounceId: number | null = null; // macOS dock bounce id
+let flashTimer: NodeJS.Timeout | null = null;
 
 // creates a BrowserWindow and loads index.html in the window
 // https://www.electronjs.org/docs/latest/api/browser-window
@@ -71,6 +73,18 @@ function create() {
       event.preventDefault();
       shell.openExternal(url);
     }
+  });
+
+  // Stop flashing when window gains focus
+  win.on("focus", () => {
+    try {
+      if (process.platform === "darwin") {
+        if (bounceId !== null) { app.dock?.cancelBounce?.(bounceId); bounceId = null; }
+      } else {
+        win?.flashFrame(false);
+      }
+      if (flashTimer) { clearTimeout(flashTimer); flashTimer = null; }
+    } catch { /* ignore */ }
   });
 }
 
@@ -178,5 +192,45 @@ ipcMain.handle("py:fetchText", async (_event, opts?: { url?: string; headers?: R
     return { ok: true, text };
   } catch (e) {
     return { ok: false, error: String(e) };
+  }
+});
+
+// IPC: Request the app to flash/bounce to attract attention
+ipcMain.handle("py:flashFrame", async (_event, opts?: { durationMs?: number; urgent?: boolean }) => {
+  const durationMs = Math.max(1000, opts?.durationMs ?? 6000);
+  try {
+    if (process.platform === "darwin") {
+      // informational bounce; store id so we can cancel later
+      if (app.dock && typeof app.dock.bounce === "function") {
+        if (bounceId !== null) app.dock.cancelBounce(bounceId);
+        bounceId = app.dock.bounce("informational");
+      }
+    } else {
+      // Windows/Linux taskbar flash until stopped or timeout
+      win?.flashFrame(true);
+      if (flashTimer) { clearTimeout(flashTimer); flashTimer = null; }
+      flashTimer = setTimeout(() => {
+        try { win?.flashFrame(false); } catch { /* ignore */ }
+        flashTimer = null;
+      }, durationMs);
+    }
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: String(e) } as const;
+  }
+});
+
+// IPC: Stop flashing/bouncing
+ipcMain.handle("py:stopFlashFrame", async () => {
+  try {
+    if (process.platform === "darwin") {
+      if (bounceId !== null) { app.dock?.cancelBounce?.(bounceId); bounceId = null; }
+    } else {
+      win?.flashFrame(false);
+    }
+    if (flashTimer) { clearTimeout(flashTimer); flashTimer = null; }
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: String(e) } as const;
   }
 });

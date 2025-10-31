@@ -27,6 +27,13 @@ contextBridge.exposeInMainWorld("api", {
 		fetchText: async (options: { url: string; headers?: Record<string, string> }) => {
 			return ipcRenderer.invoke("py:fetchText", options);
 		},
+		// Request taskbar/dock attention (flash) for notifications
+		flashFrame: async (options?: { durationMs?: number; urgent?: boolean }) => {
+			return ipcRenderer.invoke("py:flashFrame", options || {});
+		},
+		stopFlashFrame: async () => {
+			return ipcRenderer.invoke("py:stopFlashFrame");
+		},
 }); // exposes a safe API to the renderer process
 
 

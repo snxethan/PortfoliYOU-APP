@@ -4,19 +4,19 @@ import { Trash2, Edit3, UploadCloud, Cloud, Download, CheckCircle2, X, Plus, Fol
 
 import { useAuth } from "../providers/AuthProvider";
 import { useProjects } from "../providers/ProjectsProvider";
-import { AuthCta } from "../components/AuthCta";
+// CTA is now shown via a popup from the sidebar Account section when not signed in
+import { useNotifications } from "../providers/NotificationsProvider";
+import type { NotificationType } from "../providers/NotificationsProvider";
 
 // Dashboard section combining welcome, links, and notifications
 function Dashboard({
 	onToggleNotifications,
 	notifBadge,
 	notificationsOpen,
-	loggedIn,
 }: {
 	onToggleNotifications: () => void;
 	notifBadge: number;
 	notificationsOpen: boolean;
-	loggedIn: boolean;
 }) {
 	return (
 		<section className="surface p-5">
@@ -43,11 +43,7 @@ function Dashboard({
 						<div className="w-10 h-10 rounded-full bg-[color:var(--accent)]/20 border border-[color:var(--accent)] mb-1" />
 						<h2 className="text-xl font-semibold tracking-wide uppercase">Portfoli-YOU</h2>
 						<p className="text-sm text-[color:var(--fg-muted)]">A portfolio for you, by you</p>
-						{!loggedIn && (
-							<div className="mt-3 w-full max-w-xl mx-auto px-2">
-								<AuthCta />
-							</div>
-						)}
+						{/* CTA moved to sidebar Account info popup when not signed in */}
 					</div>
 				</div>
 				{/* Right: website & FAQs */}
@@ -65,6 +61,7 @@ type QuickstartMode = 'default' | 'create' | 'import';
 export default function HomePage() {
 	const { user } = useAuth();
 	const { projects, hasAny, importProject, exportProject, createProjectWithSave, selectProject, renameProject, deleteProject, syncProject, unsyncProject, saveProject, selectedProjectId, cloudMaxProjects, cloudBytesUsed, cloudProjectsCount, listCloudProjects, importProjectFromCloud, importProjectFromCloudLocalOnly, getCloudObjectInfo, getCloudObjectInfoByCloudId, renameCloudProject, deleteCloudProjectByCloudId, saving, lastSavedAt, reconcileCloudLinks } = useProjects();
+    const { notifications, dismiss, clearAll } = useNotifications();
 	const navigate = useNavigate();
 	const [qsMode, setQsMode] = useState<QuickstartMode>('default');
 	const [nameDraft, setNameDraft] = useState('');
@@ -111,10 +108,8 @@ export default function HomePage() {
 		const interval = setInterval(() => { if (user) fetchCloud(); }, 60000);
 		return () => { alive = false; clearInterval(interval); };
 	}, [user, projects.map(p => p._cloudId ? p._cloudId : '').join(','), cloudOpen]);
-	type Notif = { id: string; type: 'info' | 'success' | 'warn' | 'error'; message: string; time: string; persistent?: boolean; durationMs?: number };
-	const [notifs, setNotifs] = useState<Notif[]>([]);
-	const [notificationsOpen, setNotificationsOpen] = useState(false);
-	const unseenCount = useMemo(() => notifs.length, [notifs.length]);
+    const [notificationsOpen, setNotificationsOpen] = useState(false);
+    const unseenCount = useMemo(() => notifications.length, [notifications.length]);
 
 	// Highlight + scroll interop
 	const [pulseList, setPulseList] = useState(false);
@@ -148,45 +143,7 @@ export default function HomePage() {
 		};
 	}, [hasAny, recent.length]);
 
-	// Notification event listener: window.dispatchEvent(new CustomEvent('py:notify', { detail: { type, message, persistent?: boolean, durationMs?: number } }))
-	useEffect(() => {
-		const onNotify = (e: Event) => {
-			const ce = e as CustomEvent<{ type?: 'info' | 'success' | 'warn' | 'error'; message?: string; persistent?: boolean; durationMs?: number }>;
-			const type = ce.detail?.type ?? 'info';
-			const message = ce.detail?.message || '';
-			const persistent = ce.detail?.persistent ?? false;
-			const durationMs = ce.detail?.durationMs ?? 4000;
-			setNotifs(prev => [{ id: crypto.randomUUID(), type, message, time: new Date().toISOString(), persistent, durationMs }, ...prev].slice(0, 50));
-		};
-		window.addEventListener('py:notify', onNotify);
-		return () => window.removeEventListener('py:notify', onNotify);
-	}, []);
-
-	// Auto-dismiss newest notification even when center is closed (transient toast behavior)
-	useEffect(() => {
-		if (notificationsOpen) return; // center handles auto-advance when open
-		if (notifs.length === 0) return;
-		const current = notifs[0];
-		if (current.persistent) return; // keep persistent items until user opens center
-		const t = setTimeout(() => {
-			setNotifs(prev => prev.filter(n => n.id !== current.id));
-		}, Math.max(1200, current.durationMs ?? 4000));
-		return () => clearTimeout(t);
-	}, [notifs, notificationsOpen]);
-
-	// Auto-advance timed notifications when center is open and dropdown closed
-	const [activeNotifId, setActiveNotifId] = useState<string | null>(null);
-	useEffect(() => {
-		if (!notificationsOpen) return;
-		const current = notifs.find(n => !n.persistent) || notifs[0];
-		if (!current) { setActiveNotifId(null); return; }
-		setActiveNotifId(current.id);
-		if (current.persistent) return; // don't auto-remove
-		const t = setTimeout(() => {
-			setNotifs(prev => prev.filter(n => n.id !== current.id));
-		}, Math.max(1200, current.durationMs ?? 4000));
-		return () => clearTimeout(t);
-	}, [notifs, notificationsOpen]);
+	// Legacy notification logic removed; unified notifications come from NotificationsProvider
 
 	// Global event to open Cloud Settings from Header quick action
 	useEffect(() => {
@@ -207,30 +164,32 @@ export default function HomePage() {
 
 	return (
 		<div className="p-6 space-y-6">
-			<Dashboard onToggleNotifications={() => setNotificationsOpen(v => !v)} notifBadge={unseenCount} notificationsOpen={notificationsOpen} loggedIn={!!user} />
+			<Dashboard onToggleNotifications={() => setNotificationsOpen(v => !v)} notifBadge={unseenCount} notificationsOpen={notificationsOpen} />
 
 			{/* Centered CTA under title is now shown inside Dashboard; no extra CTA block here */}
-			{/* Lightweight toast for latest notification when center is closed */}
-			{!notificationsOpen && notifs[0] && (
-				<div className="fixed bottom-4 right-4 z-50 max-w-sm">
-					<FadingNotification notif={{ id: notifs[0].id, type: notifs[0].type, message: notifs[0].message }} />
-				</div>
-			)}
-			{/* Notification center area within the PortfoliYOU section */}
+			{/* Notification center area on Home for managing/dismissing persistent notifications */}
 			{notificationsOpen && (
 				<div className="surface p-3 border border-[color:var(--accent)] rounded-md">
-					<div className="text-xs font-semibold uppercase tracking-wide">Notifications</div>
-					<div className="mt-2">
-						{(() => {
-							if (!activeNotifId) return null;
-							const active = notifs.find(n => n.id === activeNotifId);
-							return active ? (
-								<FadingNotification key={activeNotifId} notif={{ id: active.id, type: active.type, message: active.message }} />
-							) : null;
-						})()}
-						{!activeNotifId && notifs.length === 0 && (
+					<div className="flex items-center justify-between">
+						<div className="text-xs font-semibold uppercase tracking-wide">Notifications</div>
+						<div className="flex items-center gap-2">
+							<button className="btn btn-outline btn-xs" onClick={clearAll}>Clear all</button>
+						</div>
+					</div>
+					<div className="mt-2 space-y-2">
+						{notifications.length === 0 ? (
 							<div className="text-xs text-[color:var(--fg-muted)]">No notifications.</div>
-						)}
+						) : notifications.map(n => (
+							<div key={n.id} className="flex items-start gap-3 bg-[color:var(--muted)]/40 border border-[color:var(--border)] rounded-md p-2">
+								<SeverityDot type={n.type as NotificationType} />
+								<div className="min-w-0 flex-1">
+									{n.title ? <div className="text-xs font-semibold mb-0.5">{n.title}</div> : null}
+									<div className="text-xs whitespace-pre-wrap break-words">{n.message}</div>
+									<div className="mt-1 text-[10px] text-[color:var(--fg-muted)]">{new Date(n.createdAt).toLocaleString()}</div>
+								</div>
+								<button className="btn btn-ghost btn-xs" onClick={() => dismiss(n.id)} title="Dismiss"><X size={12}/></button>
+							</div>
+						))}
 					</div>
 				</div>
 			)}
@@ -239,7 +198,7 @@ export default function HomePage() {
 			{/* Portfolios section */}
 			<section>
 				<div id="py-list" ref={listRef} className={`surface p-5 border border-[color:var(--border)] rounded-md ${pulseList ? 'highlight-pulse' : ''}`}>
-					<h3 className="font-semibold mb-3 text-center uppercase tracking-wide">YOUR PORTFOLIOS</h3>
+					<h3 className="font-semibold mb-3 text-center uppercase tracking-wide">PORTFOLIO DASHBOARD</h3>
 					{/* Inline create/import sub-section */}
 					<div id="py-quickstart" ref={quickstartRef} className={`${pulseQuickstart ? 'highlight-pulse' : ''} bg-[color:var(--bg)] border border-[color:var(--border)] rounded-md p-3 mb-4 max-w-xl mx-auto`}>
 						{qsMode === 'create' ? (
@@ -397,9 +356,10 @@ export default function HomePage() {
 			{/* Account panel – show only when signed in */}
 			{user && (
 				<section>
+					
 								<div id="py-account" ref={accountRef} className={`surface p-5 ${pulseAccount ? 'highlight-pulse' : ''}`}>
 									<div className="flex items-center justify-between mb-3">
-										<h3 className="font-semibold text-center flex-1 uppercase tracking-wide">Account</h3>
+										<h3 className="font-semibold text-center flex-1 uppercase tracking-wide">ACCOUNT DASHBOARD</h3>
 										<button className="btn btn-ghost btn-xs" title="Account settings" onClick={() => setAccountOpen(true)}>
 											<SettingsIcon size={14} />
 										</button>
@@ -662,7 +622,7 @@ function AccountSettingsModal({
 			tabIndex={-1}
 		>
 			<div className="surface p-5 w-full max-w-md" onClick={(e) => e.stopPropagation()}>
-				<h4 className="text-base font-semibold mb-2">Account settings</h4>
+				<h4 className="text-base font-semibold mb-2">ACCOUNT SETTINGS</h4>
 				<div className="bg-[color:var(--muted)]/40 border border-[color:var(--border)] rounded-md p-3">
 					<div className="grid grid-cols-2 gap-2">
 						<button className="btn btn-outline btn-sm" title="Manage account" onClick={() => openUrl('https://portfoliyou.snxethan.dev/account')}>
@@ -671,7 +631,7 @@ function AccountSettingsModal({
 						<button className="btn btn-ghost btn-sm" title="Privacy & Security" onClick={() => openUrl('https://portfoliyou.snxethan.dev/privacy')}>
 							<Shield size={14} className="mr-1"/> Privacy & Security
 						</button>
-						<button className="btn btn-ghost btn-sm" title="Account FAQs" onClick={() => openUrl('https://portfoliyou.snxethan.dev/faq')}>
+						<button className="btn btn-ghost btn-sm" title="Account FAQs" onClick={() => openUrl('https://portfoliyou.snxethan.dev/about')}>
 							<HelpCircle size={14} className="mr-1"/> Account FAQs
 						</button>
 						<button className="btn px-2 py-1 text-white bg-red-600 hover:bg-red-700 border-red-700 btn-sm" title="Delete account" onClick={() => openUrl('https://portfoliyou.snxethan.dev/account/delete')}>
@@ -687,18 +647,16 @@ function AccountSettingsModal({
 	);
 }
 
-function SeverityDot({ type }: { type: 'info' | 'success' | 'warn' | 'error' }) {
-	const cls = type === 'success' ? 'bg-green-500' : type === 'warn' ? 'bg-yellow-500' : type === 'error' ? 'bg-red-500' : 'bg-[color:var(--primary)]';
+function SeverityDot({ type }: { type: NotificationType }) {
+	const norm = (type === 'warn' ? 'warning' : type);
+	const cls = norm === 'success' ? 'bg-green-500'
+		: norm === 'warning' ? 'bg-yellow-500'
+		: norm === 'error' || norm === 'critical' ? 'bg-red-500'
+		: norm === 'update' ? 'bg-sky-500'
+		: 'bg-[color:var(--primary)]';
 	return <span className={`w-2 h-2 mt-1 rounded-full ${cls}`} />;
 }
 
-function FadingNotification({ notif }: { notif: { id: string; type: 'info' | 'success' | 'warn' | 'error'; message: string } }) {
-	return (
-		<div className="py-fade-in text-sm flex items-center gap-2 p-3 bg-[color:var(--muted)] border border-[color:var(--border)] rounded-md">
-			<SeverityDot type={notif.type} />
-			<span className="truncate">{notif.message}</span>
-		</div>
-	);
-}
+// Removed older one-off toast component; now handled by global Notifications stack
 
 // CloudOnlySettingsModal merged into CloudSettingsModal

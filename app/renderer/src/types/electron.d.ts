@@ -9,6 +9,8 @@ declare global {
       showItemInFolder: (options: { filePath: string }) => Promise<{ ok: boolean; error?: string }>;
       renameFile: (options: { fromPath: string; toPath: string }) => Promise<{ ok: boolean; error?: string }>;
       fetchText: (options: { url: string; headers?: Record<string, string> }) => Promise<{ ok: boolean; text?: string; error?: string }>;
+      flashFrame: (options?: { durationMs?: number; urgent?: boolean }) => Promise<{ ok: boolean; error?: string }>;
+      stopFlashFrame: () => Promise<{ ok: boolean; error?: string }>;
     };
   }
 }

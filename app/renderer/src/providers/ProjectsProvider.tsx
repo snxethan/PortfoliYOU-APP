@@ -107,6 +107,25 @@ function writeStore(list: LocalProject[]) { localStorage.setItem("py.projects", 
 function readSelected(): string | null { try { return JSON.parse(localStorage.getItem("py.selectedProjectId") || "null"); } catch { return null; } }
 function writeSelected(id: string | null) { localStorage.setItem("py.selectedProjectId", JSON.stringify(id)); }
 
+// Local revision history helpers (per-project; capped to 5 entries)
+type RevisionEntry = { savedAt: string; data: LocalProject };
+function revisionsKey(projectId: string) { return `py.revisions.${projectId}`; }
+function readRevisions(projectId: string): RevisionEntry[] {
+	try { return JSON.parse(localStorage.getItem(revisionsKey(projectId)) || "[]"); } catch { return []; }
+}
+function pushRevisionSnapshot(proj: LocalProject) {
+	try {
+		const key = revisionsKey(proj.id);
+		const existing: RevisionEntry[] = readRevisions(proj.id);
+		// Avoid duplicate snapshots with same updatedAt
+		const last = existing[0];
+		if (last && last.data.updatedAt === proj.updatedAt) return;
+		const snapshot: RevisionEntry = { savedAt: new Date().toISOString(), data: { ...proj, _filePath: undefined, _synced: undefined } as LocalProject };
+		const next = [snapshot, ...existing].slice(0, 5);
+		localStorage.setItem(key, JSON.stringify(next));
+	} catch { /* ignore */ }
+}
+
 
 export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 	const [projects, setProjects] = useState<LocalProject[]>([]);
@@ -537,6 +556,43 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 						if (ds.exists()) {
 							const v = ds.data() as Record<string, unknown>;
 							if (typeof v?.storagePath === 'string') path = v.storagePath as string;
+							// Last-write-wins conflict handling: if cloud is newer than local, load cloud into local and abort upload
+							let serverUpdatedAtStr = '';
+							const u = (v as Record<string, unknown>)['updatedAt'] as unknown;
+							if (u && typeof (u as { toDate?: () => Date }).toDate === 'function') serverUpdatedAtStr = (u as { toDate: () => Date }).toDate().toISOString();
+							else if (typeof u === 'string') serverUpdatedAtStr = u as string;
+							if (serverUpdatedAtStr && proj.updatedAt && serverUpdatedAtStr.localeCompare(proj.updatedAt) > 0) {
+								// Cloud wins — fetch cloud payload and replace local; preserve _filePath and linkage
+								try {
+									let imported: LocalProject;
+									try {
+										const bytes = await getBytes(storageRef(storage, path));
+										const text = new TextDecoder('utf-8').decode(bytes);
+										imported = migrateProjectSchema(JSON.parse(text));
+									} catch {
+										const url = await getDownloadURL(storageRef(storage, path));
+										let text: string;
+										if (window.api?.fetchText) {
+											const res = await window.api.fetchText({ url });
+											if (!res || !res.ok) throw new Error('Download failed');
+											text = res.text as string;
+										} else {
+											const resp = await fetch(url);
+											text = await resp.text();
+										}
+										imported = migrateProjectSchema(JSON.parse(text));
+									}
+									// Preserve file path and cloud link; push local revision before overwriting
+									pushRevisionSnapshot(proj);
+									const keepPath = projects[idx]._filePath;
+									const merged: LocalProject = { ...(imported as LocalProject), _filePath: keepPath, _cloudId: cloudId!, _synced: true } as LocalProject;
+									const next = [...projects]; next[idx] = merged; setProjects(next); writeStore(next);
+									window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'info', message: 'Loaded newer cloud version (last-write-wins).' } }));
+									return;
+								} catch {
+									// If conflict resolution fails to download, fall through to upload local copy as best-effort
+								}
+							}
 						}
 					} catch { /* ignore lookup failure; use fallback */ }
 				const sref = storageRef(storage, path);
@@ -588,7 +644,9 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 					return;
 				}
 				// Update local flags
+				// Update local flags and revision history
 				proj = { ...proj, _synced: true, _cloudId: cloudId, updatedAt: now() } as LocalProject;
+				pushRevisionSnapshot(proj);
 				const next = [...projects]; next[idx] = proj; setProjects(next); writeStore(next);
 
                 // Kick off a size refresh to update user counters on the backend (best-effort)
@@ -814,6 +872,7 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 				if (proj._filePath && window.api.writeFile) {
 					setSaving(true);
 					try {
+						pushRevisionSnapshot(proj);
 						await window.api.writeFile({ filePath: proj._filePath, data: buildExportPayload(proj) });
 						setLastSavedAt(now());
 					} catch {
@@ -880,6 +939,7 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 				const prevUpdatedAt = prev[p.id];
 				if (p.updatedAt && p.updatedAt !== prevUpdatedAt) {
 					const data = buildExportPayload(p);
+					pushRevisionSnapshot(p);
 					tasks.push(window.api!.writeFile({ filePath: p._filePath, data }));
 				}
 				// update snapshot
@@ -890,6 +950,30 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 			}
 		}, 400);
 		return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
+	}, [projects]);
+
+	// Periodic autosave every 30s to ensure disk persistence and revision snapshots
+	const periodicSavedRef = useRef<Record<string, string>>({});
+	useEffect(() => {
+		if (!window.api?.writeFile) return; // only in Electron
+		const timer = setInterval(async () => {
+			const prev = periodicSavedRef.current;
+			const tasks: Array<Promise<unknown>> = [];
+			for (const p of projects) {
+				if (!p._filePath) continue;
+				const prevUpdatedAt = prev[p.id];
+				if (p.updatedAt && p.updatedAt !== prevUpdatedAt) {
+					pushRevisionSnapshot(p);
+					const data = buildExportPayload(p);
+					tasks.push(window.api!.writeFile({ filePath: p._filePath, data }));
+					prev[p.id] = p.updatedAt;
+				}
+			}
+			if (tasks.length) {
+				try { setSaving(true); await Promise.all(tasks); setLastSavedAt(now()); } catch { /* ignore */ } finally { setSaving(false); }
+			}
+		}, 30_000);
+		return () => clearInterval(timer);
 	}, [projects]);
 
 	// Migration utility
