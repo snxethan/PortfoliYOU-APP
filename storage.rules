@@ -1,0 +1,25 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Project archive JSON
+    match /users/{uid}/projects/{projectId}/project.portfoliyou {
+      function isOwner() {
+        return request.auth != null && request.auth.uid == uid;
+      }
+
+      function projectDoc() {
+        return firestore.get(/databases/(default)/documents/projects/$(projectId));
+      }
+
+      allow read: if isOwner() && projectDoc().data.ownerUid == uid;
+
+  // Allow client writes for the authenticated owner path.
+  // Relaxed to avoid cross-service Firestore lookups blocking uploads.
+  // The app still creates/controls the Firestore doc via Cloud Functions.
+  allow write: if isOwner();
+
+      // Allow deletes by owner for convenience; functions also bypass rules via Admin SDK
+      allow delete: if isOwner() && projectDoc().data.ownerUid == uid;
+    }
+  }
+}

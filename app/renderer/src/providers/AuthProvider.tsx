@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useState } from "react";
 import { onAuthStateChanged, type User } from "firebase/auth";
+
 import { auth } from "../lib/firebase";
 
 interface AuthContextType {
@@ -19,7 +20,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // Centralized onAuthStateChanged - single source of truth for auth state
     const unsub = onAuthStateChanged(auth, (newUser) => {
       if (newUser) {
-        console.log('🔄 Auth State Change - User Signed In:', {
+        console.log('Auth State Change - User Signed In:', {
           email: newUser.email,
           uid: newUser.uid,
           provider: newUser.providerData[0]?.providerId || 'unknown',
@@ -29,7 +30,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         // analytics.setUserId(newUser.uid);
         // analytics.setUserProperties({ provider: newUser.providerData[0]?.providerId });
       } else {
-        console.log('🔄 Auth State Change - User Signed Out');
+        console.log('Auth State Change - User Signed Out');
         // TODO: Analytics - Clear user context
         // analytics.setUserId(null);
       }
