@@ -1,6 +1,6 @@
 import { Cloud, CheckCircle } from "lucide-react";
 
-import { useAuth } from "../providers/AuthProvider";
+import { useAuth } from "../../providers/AuthProvider";
 
 export function AuthCta() {
   const { user } = useAuth();

@@ -1,4 +1,4 @@
-import { useAuth } from "../providers/AuthProvider";
+import { useAuth } from "../../providers/AuthProvider";
 
 export default function AccountBadge() {
   const { user } = useAuth();

@@ -14,8 +14,8 @@
     "@vitejs/plugin-react": "^5.0.4",
     "concurrently": "^9.2.1",
     "cross-env": "^10.1.0",
-  "electron": "^38.2.2",
-  "electron-builder": "^26.0.12",
+    "electron": "^38.2.2",
+    "electron-builder": "^26.0.12",
     "eslint": "^9.37.0",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-import": "^2.32.0",
@@ -27,10 +27,13 @@
     "wait-on": "^9.0.1"
   },
   "dependencies": {
+    "@dnd-kit/core": "^6.3.1",
+    "@dnd-kit/sortable": "^10.0.0",
+    "@dnd-kit/utilities": "^3.2.2",
     "@tailwindcss/cli": "^4.1.14",
     "@tailwindcss/postcss": "^4.1.14",
     "autoprefixer": "^10.4.21",
-  "electron-updater": "^6.6.2",
+    "electron-updater": "^6.6.2",
     "firebase": "^12.4.0",
     "lint": "^1.1.2",
     "lucide-react": "^0.546.0",
@@ -48,6 +51,7 @@
     "dist": "tsc -p tsconfig.electron.json && npm run build:renderer && electron-builder -w -m",
     "lint": "eslint \"app/**/*.{ts,tsx,js,jsx}\"",
     "lint:fix": "eslint \"app/**/*.{ts,tsx,js,jsx}\" --fix",
+    "fix": "npm run lint:fix && npm run format",
     "format": "prettier --write .",
     "format:check": "prettier --check ."
   },
