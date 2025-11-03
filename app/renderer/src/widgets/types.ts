@@ -1,4 +1,5 @@
 import { ReactNode } from 'react';
+import type { z } from 'zod';
 
 // A concrete instance placed on the canvas
 export interface WidgetInstance<P = unknown> {
@@ -17,7 +18,8 @@ export interface WidgetDefinition<P = unknown> {
     h: number;
   };
   render: (props: P) => ReactNode;  // pure render function
-  schema?: PropSchema;   // optional prop schema for validation tools
+  schema?: PropSchema;   // legacy optional prop schema for validation tools
+  zodSchema?: z.ZodObject<z.ZodRawShape>; // preferred: zod schema for properties UI/validation
 }
 
 export interface WidgetsRegistryAPI {
@@ -35,6 +37,7 @@ export type WidgetMeta = {
   type: string;
   label: string;
   grid?: { w: number; h: number };
+  category?: string; // optional grouping for palette UI
 };
 
 export type WidgetLoader = () => Promise<WidgetDefinition<unknown> | { default: WidgetDefinition<unknown> }>;

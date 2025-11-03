@@ -1,18 +1,18 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, CheckCircle2, Info, X, XCircle, AlertOctagon, ArrowUpCircle } from "lucide-react";
 
-import { useNotifications } from "../providers/NotificationsProvider";
+import { useNotifications } from "../../providers/NotificationsProvider";
 
 function typeIcon(type: string) {
   switch (type) {
-    case 'success': return <CheckCircle2 size={16} className="text-emerald-400"/>;
+    case 'success': return <CheckCircle2 size={16} className="text-emerald-400" />;
     case 'warn':
     case 'warning':
-      return <AlertTriangle size={16} className="text-yellow-400"/>;
-    case 'error': return <XCircle size={16} className="text-red-400"/>;
-    case 'critical': return <AlertOctagon size={16} className="text-red-500"/>;
-    case 'update': return <ArrowUpCircle size={16} className="text-sky-400"/>;
-    default: return <Info size={16} className="text-sky-400"/>;
+      return <AlertTriangle size={16} className="text-yellow-400" />;
+    case 'error': return <XCircle size={16} className="text-red-400" />;
+    case 'critical': return <AlertOctagon size={16} className="text-red-500" />;
+    case 'update': return <ArrowUpCircle size={16} className="text-sky-400" />;
+    default: return <Info size={16} className="text-sky-400" />;
   }
 }
 
@@ -71,7 +71,7 @@ export function NotificationStack() {
           return <>{children}</>;
         };
         return (
-          <div key={n.id} className={`surface py-fade-in border ${typeClasses(n.type)} pointer-events-auto shadow-lg`}> 
+          <div key={n.id} className={`surface py-fade-in border ${typeClasses(n.type)} pointer-events-auto shadow-lg`}>
             <div className="p-3 flex items-start gap-3">
               <div className="mt-0.5">{typeIcon(n.type)}</div>
               <div className="min-w-0 flex-1">

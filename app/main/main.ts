@@ -4,6 +4,7 @@
 
 
 import path from "node:path";
+import fsSync from "node:fs";
 import https from "node:https";
 import http from "node:http";
 import fs from "node:fs/promises";
@@ -17,14 +18,29 @@ let flashTimer: NodeJS.Timeout | null = null;
 
 // creates a BrowserWindow and loads index.html in the window
 // https://www.electronjs.org/docs/latest/api/browser-window
+function resolveIconPath(): string | undefined {
+  // Prefer PNG; fallback to SVG. In dev, read from Vite public; in prod, from dist output.
+  const candidates = ["icon.png", "icon.svg"];
+  for (const name of candidates) {
+    const devPath = path.join(process.cwd(), "app", "renderer", "public", name);
+    if (fsSync.existsSync(devPath)) return devPath;
+    const prodPath = path.join(__dirname, "../../dist", name);
+    if (fsSync.existsSync(prodPath)) return prodPath;
+  }
+  return undefined;
+}
+
 function create() {
 
+  const iconPath = resolveIconPath();
   win = new BrowserWindow({
     width: 1200, // sets the width of the window to 1200 pixels
     height: 800, // sets the height of the window to 800 pixels
+    title: "Portfoli-YOU",
+    icon: iconPath,
     webPreferences: {
-        // preload script runs before other scripts in the renderer process
-  // https://www.electronjs.org/docs/latest/api/browser-window#new-browserwindowoptions
+      // preload script runs before other scripts in the renderer process
+      // https://www.electronjs.org/docs/latest/api/browser-window#new-browserwindowoptions
       preload: path.join(__dirname, "../preload/index.js"),
       contextIsolation: true, // 
       nodeIntegration: false,
@@ -32,6 +48,9 @@ function create() {
   });
   if (isDev) win!.loadURL(process.env.VITE_DEV_SERVER_URL!);
   else win!.loadFile(path.join(__dirname, "../renderer/index.html"));
+
+  // Ensure Windows Taskbar grouping and notifications show proper identity
+  try { app.setAppUserModelId("dev.snxethan.portfoliyou"); } catch { /* ignore */ }
 
   // Handle new window requests (popups)
   win.webContents.setWindowOpenHandler(({ url }) => {
@@ -50,13 +69,13 @@ function create() {
         },
       };
     }
-    
+
     // Open other external links in system browser
     if (url.startsWith("http")) {
       shell.openExternal(url);
       return { action: "deny" };
     }
-    
+
     return { action: "allow" };
   });
 
@@ -64,10 +83,10 @@ function create() {
   win.webContents.on("will-navigate", (event, url) => {
     const isLocalDev = !!process.env.VITE_DEV_SERVER_URL && url.startsWith(process.env.VITE_DEV_SERVER_URL);
     const isAppFile = url.startsWith("file://");
-    
+
     // Allow local dev and app file navigations
     if (isLocalDev || isAppFile) return;
-    
+
     // Prevent navigation to external URLs in main window (open in system browser instead)
     if (url.startsWith("http")) {
       event.preventDefault();

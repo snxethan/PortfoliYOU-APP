@@ -1,4 +1,5 @@
 import React from 'react';
+import { z } from 'zod';
 
 import type { WidgetDefinition } from '../types';
 
@@ -14,6 +15,9 @@ const def: WidgetDefinition<{ email?: string }> = {
             <button type="button" className="btn btn-primary btn-sm">Send</button>
         </form>
     ),
+    zodSchema: z.object({
+        email: z.string().email('Please enter a valid email').or(z.literal('')).optional(),
+    }),
 };
 
 export default def;

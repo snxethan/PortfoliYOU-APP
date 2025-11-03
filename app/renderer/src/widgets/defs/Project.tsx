@@ -1,4 +1,5 @@
 import React from 'react';
+import { z } from 'zod';
 
 import type { WidgetDefinition } from '../types';
 
@@ -13,6 +14,10 @@ const def: WidgetDefinition<{ title: string; description?: string }> = {
             {props.description && <div className="text-xs text-[color:var(--fg-muted)]">{props.description}</div>}
         </div>
     ),
+    zodSchema: z.object({
+        title: z.string().min(1, 'Title is required'),
+        description: z.string().optional(),
+    }),
 };
 
 export default def;

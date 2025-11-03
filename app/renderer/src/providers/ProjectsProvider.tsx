@@ -61,13 +61,14 @@ export type Project = {
 export type LocalProject = Project & {
 	_filePath?: string; // not exported; only for local persistence
 	_synced?: boolean;  // placeholder for cloud sync indicator
-    _cloudId?: string; // firestore document id for cloud copy
+	_cloudId?: string; // firestore document id for cloud copy
 };
 
 type ProjectsCtx = {
 	projects: LocalProject[];
 	hasAny: boolean;
 	cloudMaxProjects: number;
+	cloudMaxStorageMB: number;
 	cloudBytesUsed: number;
 	cloudProjectsCount: number;
 	addProject: (name?: string) => Project;
@@ -83,10 +84,10 @@ type ProjectsCtx = {
 	syncProject: (projectId: string) => Promise<void>;
 	unsyncProject: (projectId: string) => Promise<void>;
 	saveProject: (projectId: string, opts?: { saveAs?: boolean }) => Promise<void>;
-    deleteCloudProject: (projectId: string) => Promise<void>;
+	deleteCloudProject: (projectId: string) => Promise<void>;
 	listCloudProjects: () => Promise<Array<{ id: string; name: string; updatedAt: string; storagePath: string }>>;
 	importProjectFromCloud: (cloudId: string) => Promise<LocalProject | null>;
-    importProjectFromCloudLocalOnly: (cloudId: string) => Promise<LocalProject | null>;
+	importProjectFromCloudLocalOnly: (cloudId: string) => Promise<LocalProject | null>;
 	getCloudObjectInfo: (projectId: string) => Promise<{ storagePath: string; sizeBytes: number; updatedAt: string } | null>;
 	getCloudObjectInfoByCloudId: (cloudId: string) => Promise<{ storagePath: string; sizeBytes: number; updatedAt: string } | null>;
 	renameCloudProject: (cloudId: string, newName: string) => Promise<boolean>;
@@ -94,8 +95,21 @@ type ProjectsCtx = {
 	saving: boolean;
 	lastSavedAt: string | null;
 	setProjectFilePath: (projectId: string, newPath: string) => void;
-    clearSelection: () => void;
+	clearSelection: () => void;
 	reconcileCloudLinks: (knownCloudIds: string[]) => void;
+	// Pages
+	createPage: (projectId: string, title?: string) => string | null;
+	renamePage: (projectId: string, pageId: string, newTitle: string) => void;
+	deletePage: (projectId: string, pageId: string) => void;
+	// Page widgets
+	getPageItems: (projectId: string, pageId: string) => Array<{
+		id: string; x: number; y: number; w: number; h: number; z: number;
+		title?: string; type?: string; props?: unknown; pinned?: boolean; locked?: boolean;
+	}>;
+	setPageItems: (projectId: string, pageId: string, items: Array<{
+		id: string; x: number; y: number; w: number; h: number; z: number;
+		title?: string; type?: string; props?: unknown; pinned?: boolean; locked?: boolean;
+	}>) => void;
 };
 
 const Ctx = createContext<ProjectsCtx | null>(null);
@@ -136,44 +150,72 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 	const [cloudMaxProjects, setCloudMaxProjects] = useState<number>(1);
 	const [cloudBytesUsed, setCloudBytesUsed] = useState<number>(0);
 	const [cloudProjectsCount, setCloudProjectsCount] = useState<number>(0);
+	const [cloudMaxStorageMB, setCloudMaxStorageMB] = useState<number>(1024);
+
+	// One-time bump: increase existing projects' page limit to 10 if lower
+	const bumpedRef = useRef(false);
+	useEffect(() => {
+		if (bumpedRef.current) return;
+		if (!projects || projects.length === 0) return;
+		let changed = false;
+		const next = projects.map(p => {
+			const current = (p.limits && typeof p.limits.maxPages === 'number') ? p.limits.maxPages : 0;
+			if (current < 10) {
+				const limits = { maxPages: 10, maxAssetsMB: (p.limits && typeof p.limits.maxAssetsMB === 'number') ? p.limits.maxAssetsMB : 500 };
+				changed = true;
+				return { ...p, limits, updatedAt: now() } as LocalProject;
+			}
+			return p;
+		});
+		if (changed) { setProjects(next); writeStore(next); }
+		bumpedRef.current = true;
+	}, [projects]);
 
 	// Load cloud limit when user is available (best-effort)
 	useEffect(() => {
 		const unsub = onAuthStateChanged(auth, async (user) => {
-				if (!user) {
-					// On sign-out, reset cloud limits/counters and strip cloud linkage from local projects
-					setCloudMaxProjects(1);
-					setCloudBytesUsed(0);
-					setCloudProjectsCount(0);
-					setProjects(prev => {
-						const next = prev.map(p => {
-							const q = { ...p } as LocalProject;
-							if (q._cloudId) delete q._cloudId;
-							if (q._synced) q._synced = false;
-							return q;
-						});
-						writeStore(next);
-						return next;
+			if (!user) {
+				// On sign-out, reset cloud limits/counters and strip cloud linkage from local projects
+				setCloudMaxProjects(1);
+				setCloudMaxStorageMB(1024);
+				setCloudBytesUsed(0);
+				setCloudProjectsCount(0);
+				setProjects(prev => {
+					const next = prev.map(p => {
+						const q = { ...p } as LocalProject;
+						if (q._cloudId) delete q._cloudId;
+						if (q._synced) q._synced = false;
+						return q;
 					});
-					return;
-				}
+					writeStore(next);
+					return next;
+				});
+				return;
+			}
 			try {
 				const uref = doc(db, 'users', user.uid);
 				const snap = await getDoc(uref);
 				const data = snap.exists() ? (snap.data() as Record<string, unknown>) : undefined;
 				const plan = data && typeof data['plan'] === 'object' && data['plan'] !== null ? (data['plan'] as Record<string, unknown>) : undefined;
 				const settings = data && typeof data['settings'] === 'object' && data['settings'] !== null ? (data['settings'] as Record<string, unknown>) : undefined;
-                const counters = data && typeof data['counters'] === 'object' && data['counters'] !== null ? (data['counters'] as Record<string, unknown>) : undefined;
+				const counters = data && typeof data['counters'] === 'object' && data['counters'] !== null ? (data['counters'] as Record<string, unknown>) : undefined;
 				const limitVal = (typeof plan?.['maxCloudProjects'] === 'number' ? (plan!['maxCloudProjects'] as number) : undefined)
 					?? (typeof settings?.['maxCloudProjects'] === 'number' ? (settings!['maxCloudProjects'] as number) : undefined)
 					?? 1;
 				const n = typeof limitVal === 'number' && limitVal > 0 ? limitVal : 1;
 				setCloudMaxProjects(n);
-                const used = typeof counters?.['cloudBytesUsed'] === 'number' ? (counters!['cloudBytesUsed'] as number) : 0;
-                const cnt = typeof counters?.['cloudProjects'] === 'number' ? (counters!['cloudProjects'] as number) : 0;
-                setCloudBytesUsed(used);
-                setCloudProjectsCount(cnt);
-			} catch { setCloudMaxProjects(1); }
+
+				// Read max storage (in MB) from user settings/plan; default to 1024MB if missing
+				const storageMBVal = (typeof plan?.['maxStorageMB'] === 'number' ? (plan!['maxStorageMB'] as number) : undefined)
+					?? (typeof settings?.['maxStorageMB'] === 'number' ? (settings!['maxStorageMB'] as number) : undefined)
+					?? 1024;
+				const storageMB = typeof storageMBVal === 'number' && storageMBVal > 0 ? storageMBVal : 1024;
+				setCloudMaxStorageMB(storageMB);
+				const used = typeof counters?.['cloudBytesUsed'] === 'number' ? (counters!['cloudBytesUsed'] as number) : 0;
+				const cnt = typeof counters?.['cloudProjects'] === 'number' ? (counters!['cloudProjects'] as number) : 0;
+				setCloudBytesUsed(used);
+				setCloudProjectsCount(cnt);
+			} catch { setCloudMaxProjects(1); setCloudMaxStorageMB(1024); }
 		});
 		return () => unsub();
 	}, []);
@@ -221,41 +263,108 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 
 
 
-			return {
+		return {
 			projects,
 			hasAny: projects.length > 0,
 			cloudMaxProjects,
-				cloudBytesUsed,
-				cloudProjectsCount,
-				saving,
-				lastSavedAt,
+			cloudMaxStorageMB,
+			cloudBytesUsed,
+			cloudProjectsCount,
+			saving,
+			lastSavedAt,
 			setProjectFilePath: (projectId: string, newPath: string) => {
 				const idx = projects.findIndex(p => p.id === projectId); if (idx < 0) return;
 				const updated = { ...projects[idx], _filePath: newPath } as LocalProject;
 				const next = [...projects]; next[idx] = updated; setProjects(next); writeStore(next);
 			},
-		addProject: (name = "Untitled Portfolio") => {
-			const id = crypto.randomUUID();
+			createPage: (projectId: string, title?: string) => {
+				const idx = projects.findIndex(p => p.id === projectId); if (idx < 0) return null;
+				const proj = projects[idx];
+				const isCloud = !!proj._cloudId;
+				const current = proj.pageOrder?.length ?? 0;
+				if (isCloud && current >= 10) {
+					window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'warn', message: 'Cloud projects can have up to 10 pages. Delete a page to add another.' } }));
+					return null;
+				}
+				const pid = `page_${crypto.randomUUID()}`;
+				const order = current;
+				const page: Page = {
+					pageId: pid,
+					title: (title && title.trim()) || `Page ${order + 1}`,
+					order,
+					widgets: [],
+					breakpoints: { desktop: true, tablet: true, mobile: true },
+					schemaVersion: 1,
+					createdAt: now(),
+					updatedAt: now(),
+				};
+				const nextProj: LocalProject = {
+					...proj,
+					pageOrder: [...proj.pageOrder, pid],
+					pages: { ...proj.pages, [pid]: page },
+					updatedAt: now(),
+				} as LocalProject;
+				const next = [...projects]; next[idx] = nextProj; setProjects(next); writeStore(next);
+				if (!isCloud) {
+					window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'info', message: 'Adding more pages increases your project file size.' } }));
+				}
+				return pid;
+			},
+			renamePage: (projectId: string, pageId: string, newTitle: string) => {
+				const idx = projects.findIndex(p => p.id === projectId); if (idx < 0) return;
+				const proj = projects[idx];
+				const page = proj.pages[pageId]; if (!page) return;
+				const updatedPage: Page = { ...page, title: (newTitle || '').trim() || page.title, updatedAt: now() };
+				const nextProj: LocalProject = { ...proj, pages: { ...proj.pages, [pageId]: updatedPage }, updatedAt: now() } as LocalProject;
+				const next = [...projects]; next[idx] = nextProj; setProjects(next); writeStore(next);
+			},
+			deletePage: (projectId: string, pageId: string) => {
+				const idx = projects.findIndex(p => p.id === projectId); if (idx < 0) return;
+				const proj = projects[idx];
+				if ((proj.pageOrder?.length ?? 0) <= 1) {
+					window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'warn', message: 'A portfolio needs at least one page.' } }));
+					return;
+				}
+				if (!proj.pages[pageId]) return;
+				const nextOrder = proj.pageOrder.filter(id => id !== pageId);
+				const nextPages = { ...proj.pages } as Record<string, Page>;
+				// Remove page and clean up references
+				delete nextPages[pageId];
+				// Re-number order field for consistency
+				const renumbered = nextOrder.map((id, i) => ({ ...nextPages[id], order: i, updatedAt: now() }));
+				for (const p of renumbered) { nextPages[p.pageId] = p; }
+				// Remove orphan widgets that are no longer referenced by any page
+				const stillReferenced = new Set<string>();
+				for (const pid of nextOrder) { for (const wid of (nextPages[pid].widgets || [])) stillReferenced.add(wid); }
+				const nextWidgets: Record<string, Widget> = {};
+				for (const [wid, w] of Object.entries(proj.widgets)) {
+					if (stillReferenced.has(wid)) nextWidgets[wid] = w;
+				}
+				const nextProj: LocalProject = { ...proj, pageOrder: nextOrder, pages: nextPages, widgets: nextWidgets, updatedAt: now() } as LocalProject;
+				const next = [...projects]; next[idx] = nextProj; setProjects(next); writeStore(next);
+			},
+			addProject: (name = "Untitled Portfolio") => {
+				const id = crypto.randomUUID();
 				const p: LocalProject = {
-				id,
-				name,
-				description: "",
-				activeThemeId: defaultTheme.themeId,
-				pageOrder: [defaultPage.pageId],
-				limits: { maxPages: 2, maxAssetsMB: 500 },
-				status: { deployed: false, lastDeployAt: null, deployType: null },
-				schemaVersion: 1,
-				createdAt: now(),
-				updatedAt: now(),
-				themes: { [defaultTheme.themeId]: defaultTheme },
-				pages: { [defaultPage.pageId]: defaultPage },
-				widgets: {},
-			};
-			const next = [p, ...projects];
-			setProjects(next); writeStore(next);
-			localStorage.setItem("py.hasAnyProject", "1");
-			return p;
-		},
+					id,
+					name,
+					description: "",
+					activeThemeId: defaultTheme.themeId,
+					pageOrder: [defaultPage.pageId],
+					limits: { maxPages: 10, maxAssetsMB: 500 },
+					status: { deployed: false, lastDeployAt: null, deployType: null },
+					schemaVersion: 1,
+					createdAt: now(),
+					updatedAt: now(),
+					themes: { [defaultTheme.themeId]: defaultTheme },
+					pages: { [defaultPage.pageId]: defaultPage },
+					widgets: {},
+				};
+				const next = [p, ...projects];
+				setProjects(next); writeStore(next);
+				localStorage.setItem("py.hasAnyProject", "1");
+				return p;
+			},
 			createProjectWithSave: async (name: string) => {
 				const base = (name || "Untitled Portfolio").trim();
 				// Construct project object
@@ -266,7 +375,7 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 					description: "",
 					activeThemeId: defaultTheme.themeId,
 					pageOrder: [defaultPage.pageId],
-					limits: { maxPages: 2, maxAssetsMB: 500 },
+					limits: { maxPages: 10, maxAssetsMB: 500 },
 					status: { deployed: false, lastDeployAt: null, deployType: null },
 					schemaVersion: 1,
 					createdAt: now(),
@@ -297,110 +406,209 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 					return p;
 				}
 			},
-		importProject: async (file) => {
-			// Read file, validate, migrate if needed
+			importProject: async (file) => {
+				// Read file, validate, migrate if needed
 				let imported: LocalProject | null = null;
 				let importedFilePath: string | undefined;
-			if (file) {
-				const text = await file.text();
-				try {
-						const data = JSON.parse(text);
-					// Validate schemaVersion and migrate if needed
-					imported = migrateProjectSchema(data);
-				} catch {
-					// fallback: invalid file
-					imported = null;
-				}
-			} else if (window.api?.openFileDialog) {
-				const res = await window.api.openFileDialog({ filters: [{ name: "PortfoliYOU", extensions: ["portfoliyou", "json"] }] });
-				if (!res.canceled && res.data) {
+				if (file) {
+					const text = await file.text();
 					try {
-						const data = JSON.parse(res.data);
+						const data = JSON.parse(text);
+						// Validate schemaVersion and migrate if needed
 						imported = migrateProjectSchema(data);
-							if (res.filePath) { imported._filePath = res.filePath; importedFilePath = res.filePath; }
 					} catch {
+						// fallback: invalid file
 						imported = null;
 					}
+				} else if (window.api?.openFileDialog) {
+					const res = await window.api.openFileDialog({ filters: [{ name: "PortfoliYOU", extensions: ["portfoliyou", "json"] }] });
+					if (!res.canceled && res.data) {
+						try {
+							const data = JSON.parse(res.data);
+							imported = migrateProjectSchema(data);
+							if (res.filePath) { imported._filePath = res.filePath; importedFilePath = res.filePath; }
+						} catch {
+							imported = null;
+						}
+					}
 				}
-			}
 
-			// If we got a valid import, deduplicate by file path and by id
-			if (imported) {
-				// Prefer dedupe by path when available
-				if (importedFilePath) {
-					const existingByPath = projects.find(p => p._filePath === importedFilePath);
-					if (existingByPath) {
-						return existingByPath;
+				// If we got a valid import, deduplicate by file path and by id
+				if (imported) {
+					// Prefer dedupe by path when available
+					if (importedFilePath) {
+						const existingByPath = projects.find(p => p._filePath === importedFilePath);
+						if (existingByPath) {
+							return existingByPath;
+						}
+					}
+					// Dedupe by project id
+					const existingByIdIdx = projects.findIndex(p => p.id === imported!.id);
+					if (existingByIdIdx >= 0) {
+						const existing = projects[existingByIdIdx];
+						// If the existing one has no file path but import had one, attach it
+						if (!existing._filePath && importedFilePath) {
+							const updated = { ...existing, _filePath: importedFilePath } as LocalProject;
+							const next = [...projects]; next[existingByIdIdx] = updated; setProjects(next); writeStore(next);
+							return updated;
+						}
+						return existing;
 					}
 				}
-				// Dedupe by project id
-				const existingByIdIdx = projects.findIndex(p => p.id === imported!.id);
-				if (existingByIdIdx >= 0) {
-					const existing = projects[existingByIdIdx];
-					// If the existing one has no file path but import had one, attach it
-					if (!existing._filePath && importedFilePath) {
-						const updated = { ...existing, _filePath: importedFilePath } as LocalProject;
-						const next = [...projects]; next[existingByIdIdx] = updated; setProjects(next); writeStore(next);
-						return updated;
-					}
-					return existing;
+				if (!imported) {
+					// User canceled or file invalid; do nothing
+					return null as unknown as Project;
 				}
-			}
-			if (!imported) {
-				// User canceled or file invalid; do nothing
-				return null as unknown as Project;
-			}
-			const next = [imported, ...projects];
-			setProjects(next); writeStore(next);
-			localStorage.setItem("py.hasAnyProject", "1");
-			return imported;
-		},
+				const next = [imported, ...projects];
+				setProjects(next); writeStore(next);
+				localStorage.setItem("py.hasAnyProject", "1");
+				return imported;
+			},
 			selectProject: (projectId: string) => { setSelectedProjectId(projectId); writeSelected(projectId); },
 			selectedProjectId,
 			selectedProject: projects.find(p => p.id === selectedProjectId) || null,
-		clearAll: () => {
-			setProjects([]);
-			localStorage.removeItem("py.projects");
-			localStorage.removeItem("py.hasAnyProject");
+			clearAll: () => {
+				setProjects([]);
+				localStorage.removeItem("py.projects");
+				localStorage.removeItem("py.hasAnyProject");
 				setSelectedProjectId(null); writeSelected(null);
-		},
-		clearSelection: () => { setSelectedProjectId(null); writeSelected(null); },
-		reconcileCloudLinks: (knownCloudIds: string[]) => {
-			const setIds = new Set(knownCloudIds);
-			let changed = false;
-			const next = projects.map(p => {
-				if (p._cloudId && !setIds.has(p._cloudId)) {
-					changed = true;
-					const q = { ...p, _cloudId: undefined, _synced: false } as LocalProject;
-					return q;
+			},
+			clearSelection: () => { setSelectedProjectId(null); writeSelected(null); },
+			reconcileCloudLinks: (knownCloudIds: string[]) => {
+				const setIds = new Set(knownCloudIds);
+				let changed = false;
+				const next = projects.map(p => {
+					if (p._cloudId && !setIds.has(p._cloudId)) {
+						changed = true;
+						const q = { ...p, _cloudId: undefined, _synced: false } as LocalProject;
+						return q;
+					}
+					return p;
+				});
+				if (changed) { setProjects(next); writeStore(next); }
+			},
+			getPageItems: (projectId: string, pageId: string) => {
+				const proj = projects.find(p => p.id === projectId); if (!proj) return [];
+				const page = proj.pages[pageId]; if (!page) return [];
+				const ids = page.widgets || [];
+				const out: Array<{ id: string; x: number; y: number; w: number; h: number; z: number; title?: string; type?: string; props?: unknown; pinned?: boolean; locked?: boolean; }> = [];
+				for (const wid of ids) {
+					const w = proj.widgets[wid]; if (!w) continue;
+					type LayoutLike = Partial<{ x: number | string; y: number | string; w: number | string; h: number | string; z: number | string; title: string; pinned: boolean; locked: boolean }>;
+					const layout = (w.layout ?? {}) as LayoutLike;
+					out.push({
+						id: w.widgetId,
+						x: Number(layout.x ?? 0),
+						y: Number(layout.y ?? 0),
+						w: Number(layout.w ?? 1),
+						h: Number(layout.h ?? 1),
+						z: Number(layout.z ?? 0),
+						title: layout.title || undefined,
+						type: w.type || undefined,
+						props: w.props,
+						pinned: Boolean(layout.pinned),
+						locked: Boolean(layout.locked),
+					});
 				}
-				return p;
-			});
-			if (changed) { setProjects(next); writeStore(next); }
-		},
-		exportProject: async (projectId: string) => {
+				// Ensure stable z ordering
+				out.sort((a, b) => a.z - b.z);
+				return out;
+			},
+			setPageItems: (projectId: string, pageId: string, items) => {
+				const idx = projects.findIndex(p => p.id === projectId); if (idx < 0) return;
+				const proj = projects[idx];
+				const page = proj.pages[pageId]; if (!page) return;
+				const nowStr = now();
+				// Update or create widgets for this page
+				const nextWidgets: Record<string, Widget> = { ...proj.widgets };
+				for (let i = 0; i < items.length; i++) {
+					const it = items[i];
+					const existing = nextWidgets[it.id];
+					const createdAt = existing?.createdAt || nowStr;
+					nextWidgets[it.id] = {
+						widgetId: it.id,
+						type: it.type || existing?.type || 'custom',
+						slot: existing?.slot || 'default',
+						order: i,
+						props: it.props ?? existing?.props ?? {},
+						layout: {
+							x: it.x, y: it.y, w: it.w, h: it.h, z: it.z,
+							pinned: !!it.pinned, locked: !!it.locked, title: it.title ?? ((existing?.layout as { title?: string } | undefined)?.title) ?? undefined,
+						},
+						schemaVersion: 1,
+						createdAt,
+						updatedAt: nowStr,
+					} as Widget;
+				}
+				// Page widgets list in the order provided
+				const updatedPage: Page = { ...page, widgets: items.map(it => it.id), order: page.order, updatedAt: nowStr };
+				// Remove orphan widgets not referenced by any page
+				const referenced = new Set<string>();
+				// include current page changes
+				for (const id of updatedPage.widgets) referenced.add(id);
+				// include other pages
+				for (const pid of proj.pageOrder) {
+					if (pid === pageId) continue;
+					const pg = proj.pages[pid];
+					for (const id of (pg.widgets || [])) referenced.add(id);
+				}
+				const compactWidgets: Record<string, Widget> = {};
+				for (const [wid, w] of Object.entries(nextWidgets)) {
+					if (referenced.has(wid)) compactWidgets[wid] = w;
+				}
+				const nextProj: LocalProject = {
+					...proj,
+					pages: { ...proj.pages, [pageId]: updatedPage },
+					widgets: compactWidgets,
+					updatedAt: nowStr,
+				} as LocalProject;
+				const next = [...projects]; next[idx] = nextProj; setProjects(next); writeStore(next);
+			},
+			exportProject: async (projectId: string) => {
 				const proj = projects.find(p => p.id === projectId);
-			if (!proj) return;
-			// Export format: wrap with metadata for validation
+				if (!proj) return;
+				// Export format: wrap with metadata for validation
 				const json = buildExportPayload(proj);
-			if (window.api?.saveFile) {
-				await window.api.saveFile({ defaultPath: `${proj.name || "project"}.portfoliyou`, data: json });
-			} else {
-				// Browser fallback: trigger download
-				const blob = new Blob([json], { type: "application/json" });
-				const url = URL.createObjectURL(blob);
-				const a = document.createElement("a");
-				a.href = url; a.download = `${proj.name || "project"}.portfoliyou`;
-				document.body.appendChild(a); a.click(); a.remove();
-				URL.revokeObjectURL(url);
-			}
-		},
-				syncProject: async (projectId: string) => {
+				if (window.api?.saveFile) {
+					await window.api.saveFile({ defaultPath: `${proj.name || "project"}.portfoliyou`, data: json });
+				} else {
+					// Browser fallback: trigger download
+					const blob = new Blob([json], { type: "application/json" });
+					const url = URL.createObjectURL(blob);
+					const a = document.createElement("a");
+					a.href = url; a.download = `${proj.name || "project"}.portfoliyou`;
+					document.body.appendChild(a); a.click(); a.remove();
+					URL.revokeObjectURL(url);
+				}
+			},
+			syncProject: async (projectId: string) => {
 				const user = auth.currentUser; if (!user) { window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'error', message: 'Sign in to sync to cloud.' } })); return; }
 				const idx = projects.findIndex(p => p.id === projectId); if (idx < 0) return;
 				// Use backend-enforced limit via callable; do not create directly client-side
 				let proj = projects[idx];
-				const data = buildExportPayload(proj);
+				// Prepare cloud payload; enforce 10-page cap for cloud storage by truncating beyond first 10
+				const prepareCloudPayload = (p: LocalProject) => {
+					const over = (p.pageOrder?.length || 0) > 10;
+					const keep = over ? p.pageOrder.slice(0, 10) : (p.pageOrder || []);
+					const nextPages: Record<string, Page> = {};
+					const referenced = new Set<string>();
+					for (let i = 0; i < keep.length; i++) {
+						const id = keep[i];
+						const pg = p.pages[id];
+						if (pg) {
+							nextPages[id] = { ...pg, order: i };
+							for (const wid of (pg.widgets || [])) referenced.add(wid);
+						}
+					}
+					// Filter widgets to only those referenced by kept pages
+					const nextWidgets: Record<string, Widget> = {};
+					for (const wid of referenced) {
+						if (p.widgets[wid]) nextWidgets[wid] = p.widgets[wid];
+					}
+					const trimmed: LocalProject = { ...p, pageOrder: keep, pages: nextPages, widgets: nextWidgets, updatedAt: now() } as LocalProject;
+					return buildExportPayload(trimmed);
+				};
+				const data = prepareCloudPayload(proj);
 				// Determine cloud doc in top-level 'projects'
 				let cloudId = proj._cloudId;
 
@@ -423,13 +631,13 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 						const invalid = !v || v.ownerUid !== user.uid || v.serverCreated !== true;
 						if (invalid) {
 							// Try to delete old cloud copy via callable (ignore errors if not owner)
-								try {
-									const del = httpsCallable<{ projectId: string }, { ok: boolean }>(getFunctions(undefined, 'us-central1'), 'deleteProject');
-									await del({ projectId: cloudId });
-								} catch { /* keep local unlink only */ }
+							try {
+								const del = httpsCallable<{ projectId: string }, { ok: boolean }>(getFunctions(undefined, 'us-central1'), 'deleteProject');
+								await del({ projectId: cloudId });
+							} catch { /* keep local unlink only */ }
 							cloudId = undefined;
 						}
-						} catch {
+					} catch {
 						// If we cannot verify, fall back to creating a new one
 						cloudId = undefined;
 					}
@@ -474,73 +682,73 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 				// Wait briefly for the server-created doc to be visible, then verify before uploading
 				let verified = false; let attempts = 0;
 				while (!verified && attempts < 10) {
-                    const ds = await getDoc(doc(db, 'projects', cloudId!));
+					const ds = await getDoc(doc(db, 'projects', cloudId!));
 					if (ds.exists()) {
-							const v = ds.data() as { ownerUid?: string; serverCreated?: boolean };
-							if (v && v.ownerUid === user.uid && v.serverCreated === true) { verified = true; break; }
-                    }
+						const v = ds.data() as { ownerUid?: string; serverCreated?: boolean };
+						if (v && v.ownerUid === user.uid && v.serverCreated === true) { verified = true; break; }
+					}
 					await new Promise(r => setTimeout(r, 300));
 					attempts++;
-								// If re-linking to an existing cloud doc, allow user to choose sync direction
-								{
-									const alreadyLinked = !!projects[idx]._cloudId;
-									if (!alreadyLinked) {
+					// If re-linking to an existing cloud doc, allow user to choose sync direction
+					{
+						const alreadyLinked = !!projects[idx]._cloudId;
+						if (!alreadyLinked) {
+							try {
+								const dref = doc(db, 'projects', cloudId!);
+								const ds = await getDoc(dref);
+								if (ds.exists()) {
+									// Ask direction: OK = overwrite cloud with local; Cancel = overwrite local with cloud
+									const overwriteCloud = window.confirm('Re-link cloud project found. Overwrite cloud with local copy? Click Cancel to load cloud into local instead.');
+									if (!overwriteCloud) {
+										// Download cloud payload and replace local (preserve _filePath)
 										try {
-											const dref = doc(db, 'projects', cloudId!);
-											const ds = await getDoc(dref);
-											if (ds.exists()) {
-												// Ask direction: OK = overwrite cloud with local; Cancel = overwrite local with cloud
-												const overwriteCloud = window.confirm('Re-link cloud project found. Overwrite cloud with local copy? Click Cancel to load cloud into local instead.');
-												if (!overwriteCloud) {
-													// Download cloud payload and replace local (preserve _filePath)
-													try {
-														const meta = ds.data() as Record<string, unknown>;
-														const path: string = typeof meta.storagePath === 'string' ? (meta.storagePath as string) : `users/${user.uid}/projects/${cloudId}/project.portfoliyou`;
-														let imported: LocalProject;
-														try {
-															const bytes = await getBytes(storageRef(storage, path));
-															const text = new TextDecoder('utf-8').decode(bytes);
-															imported = migrateProjectSchema(JSON.parse(text));
-														} catch {
-															try {
-																const url = await getDownloadURL(storageRef(storage, path));
-																let text: string;
-																if (window.api?.fetchText) {
-																	const res = await window.api.fetchText({ url });
-																	if (!res || !res.ok) throw new Error('Download failed');
-																	text = res.text as string;
-																} else {
-																	const resp = await fetch(url);
-																	text = await resp.text();
-																}
-																imported = migrateProjectSchema(JSON.parse(text));
-															} catch {
-																// If download also fails (likely CORS), fall through to upload path
-																throw new Error('download-failed');
-															}
-														}
-														const keepPath = projects[idx]._filePath;
-														const merged: LocalProject = { ...(imported as LocalProject), _filePath: keepPath, _cloudId: cloudId!, _synced: true } as LocalProject;
-														const next = [...projects]; next[idx] = merged; setProjects(next); writeStore(next);
-														window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'success', message: 'Loaded cloud copy into local project.' } }));
-														return;
-													} catch { /* fall through to upload */ }
+											const meta = ds.data() as Record<string, unknown>;
+											const path: string = typeof meta.storagePath === 'string' ? (meta.storagePath as string) : `users/${user.uid}/projects/${cloudId}/project.portfoliyou`;
+											let imported: LocalProject;
+											try {
+												const bytes = await getBytes(storageRef(storage, path));
+												const text = new TextDecoder('utf-8').decode(bytes);
+												imported = migrateProjectSchema(JSON.parse(text));
+											} catch {
+												try {
+													const url = await getDownloadURL(storageRef(storage, path));
+													let text: string;
+													if (window.api?.fetchText) {
+														const res = await window.api.fetchText({ url });
+														if (!res || !res.ok) throw new Error('Download failed');
+														text = res.text as string;
+													} else {
+														const resp = await fetch(url);
+														text = await resp.text();
+													}
+													imported = migrateProjectSchema(JSON.parse(text));
+												} catch {
+													// If download also fails (likely CORS), fall through to upload path
+													throw new Error('download-failed');
 												}
 											}
-										} catch { /* ignore */ }
+											const keepPath = projects[idx]._filePath;
+											const merged: LocalProject = { ...(imported as LocalProject), _filePath: keepPath, _cloudId: cloudId!, _synced: true } as LocalProject;
+											const next = [...projects]; next[idx] = merged; setProjects(next); writeStore(next);
+											window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'success', message: 'Loaded cloud copy into local project.' } }));
+											return;
+										} catch { /* fall through to upload */ }
 									}
 								}
+							} catch { /* ignore */ }
+						}
+					}
 
-								// Link the verified cloudId locally immediately so subsequent attempts reuse it
-                }
+					// Link the verified cloudId locally immediately so subsequent attempts reuse it
+				}
 
 				if (!verified) {
-                    // Roll back newly-created cloud doc so it doesn't consume quota
-						// Note: do not automatically delete here; keeping the doc lets us reuse
-						// the same cloudId on the next attempt without hitting the quota ceiling.
-                    window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'error', message: 'Cloud project not ready. Please try again.' } }));
-                    return;
-                }
+					// Roll back newly-created cloud doc so it doesn't consume quota
+					// Note: do not automatically delete here; keeping the doc lets us reuse
+					// the same cloudId on the next attempt without hitting the quota ceiling.
+					window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'error', message: 'Cloud project not ready. Please try again.' } }));
+					return;
+				}
 
 				// Link the verified cloudId locally immediately so subsequent attempts reuse it
 				// even if the upload fails (avoids running into the per-plan create limit).
@@ -550,51 +758,51 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 				}
 
 				// Determine storage path from server doc when available; fall back to convention
-					let path = `users/${user.uid}/projects/${cloudId}/project.portfoliyou`;
-					try {
-						const ds = await getDoc(doc(db, 'projects', cloudId));
-						if (ds.exists()) {
-							const v = ds.data() as Record<string, unknown>;
-							if (typeof v?.storagePath === 'string') path = v.storagePath as string;
-							// Last-write-wins conflict handling: if cloud is newer than local, load cloud into local and abort upload
-							let serverUpdatedAtStr = '';
-							const u = (v as Record<string, unknown>)['updatedAt'] as unknown;
-							if (u && typeof (u as { toDate?: () => Date }).toDate === 'function') serverUpdatedAtStr = (u as { toDate: () => Date }).toDate().toISOString();
-							else if (typeof u === 'string') serverUpdatedAtStr = u as string;
-							if (serverUpdatedAtStr && proj.updatedAt && serverUpdatedAtStr.localeCompare(proj.updatedAt) > 0) {
-								// Cloud wins — fetch cloud payload and replace local; preserve _filePath and linkage
+				let path = `users/${user.uid}/projects/${cloudId}/project.portfoliyou`;
+				try {
+					const ds = await getDoc(doc(db, 'projects', cloudId));
+					if (ds.exists()) {
+						const v = ds.data() as Record<string, unknown>;
+						if (typeof v?.storagePath === 'string') path = v.storagePath as string;
+						// Last-write-wins conflict handling: if cloud is newer than local, load cloud into local and abort upload
+						let serverUpdatedAtStr = '';
+						const u = (v as Record<string, unknown>)['updatedAt'] as unknown;
+						if (u && typeof (u as { toDate?: () => Date }).toDate === 'function') serverUpdatedAtStr = (u as { toDate: () => Date }).toDate().toISOString();
+						else if (typeof u === 'string') serverUpdatedAtStr = u as string;
+						if (serverUpdatedAtStr && proj.updatedAt && serverUpdatedAtStr.localeCompare(proj.updatedAt) > 0) {
+							// Cloud wins — fetch cloud payload and replace local; preserve _filePath and linkage
+							try {
+								let imported: LocalProject;
 								try {
-									let imported: LocalProject;
-									try {
-										const bytes = await getBytes(storageRef(storage, path));
-										const text = new TextDecoder('utf-8').decode(bytes);
-										imported = migrateProjectSchema(JSON.parse(text));
-									} catch {
-										const url = await getDownloadURL(storageRef(storage, path));
-										let text: string;
-										if (window.api?.fetchText) {
-											const res = await window.api.fetchText({ url });
-											if (!res || !res.ok) throw new Error('Download failed');
-											text = res.text as string;
-										} else {
-											const resp = await fetch(url);
-											text = await resp.text();
-										}
-										imported = migrateProjectSchema(JSON.parse(text));
-									}
-									// Preserve file path and cloud link; push local revision before overwriting
-									pushRevisionSnapshot(proj);
-									const keepPath = projects[idx]._filePath;
-									const merged: LocalProject = { ...(imported as LocalProject), _filePath: keepPath, _cloudId: cloudId!, _synced: true } as LocalProject;
-									const next = [...projects]; next[idx] = merged; setProjects(next); writeStore(next);
-									window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'info', message: 'Loaded newer cloud version (last-write-wins).' } }));
-									return;
+									const bytes = await getBytes(storageRef(storage, path));
+									const text = new TextDecoder('utf-8').decode(bytes);
+									imported = migrateProjectSchema(JSON.parse(text));
 								} catch {
-									// If conflict resolution fails to download, fall through to upload local copy as best-effort
+									const url = await getDownloadURL(storageRef(storage, path));
+									let text: string;
+									if (window.api?.fetchText) {
+										const res = await window.api.fetchText({ url });
+										if (!res || !res.ok) throw new Error('Download failed');
+										text = res.text as string;
+									} else {
+										const resp = await fetch(url);
+										text = await resp.text();
+									}
+									imported = migrateProjectSchema(JSON.parse(text));
 								}
+								// Preserve file path and cloud link; push local revision before overwriting
+								pushRevisionSnapshot(proj);
+								const keepPath = projects[idx]._filePath;
+								const merged: LocalProject = { ...(imported as LocalProject), _filePath: keepPath, _cloudId: cloudId!, _synced: true } as LocalProject;
+								const next = [...projects]; next[idx] = merged; setProjects(next); writeStore(next);
+								window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'info', message: 'Loaded newer cloud version (last-write-wins).' } }));
+								return;
+							} catch {
+								// If conflict resolution fails to download, fall through to upload local copy as best-effort
 							}
 						}
-					} catch { /* ignore lookup failure; use fallback */ }
+					}
+				} catch { /* ignore lookup failure; use fallback */ }
 				const sref = storageRef(storage, path);
 				try {
 					// Surface immediate feedback so it doesn't feel like "nothing happens"
@@ -649,7 +857,7 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 				pushRevisionSnapshot(proj);
 				const next = [...projects]; next[idx] = proj; setProjects(next); writeStore(next);
 
-                // Kick off a size refresh to update user counters on the backend (best-effort)
+				// Kick off a size refresh to update user counters on the backend (best-effort)
 				try {
 					const fn = httpsCallable<{ projectId: string }, { ok: boolean; sizeBytes: number }>(getFunctions(undefined, 'us-central1'), 'updateProjectSize');
 					await fn({ projectId: cloudId });
@@ -922,7 +1130,7 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 					await window.api.deleteFile({ filePath: p._filePath });
 				}
 			},
-	};
+		};
 	}, [projects, selectedProjectId, saving, lastSavedAt, cloudMaxProjects, cloudBytesUsed, cloudProjectsCount]);
 
 	// Auto-save to file for projects that have a _filePath
@@ -999,7 +1207,7 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 			obj['schemaVersion'] = 1;
 		}
 		if (!Array.isArray(obj['pageOrder'])) obj['pageOrder'] = [];
-		if (typeof obj['limits'] !== 'object' || obj['limits'] === null) obj['limits'] = { maxPages: 2, maxAssetsMB: 500 };
+		if (typeof obj['limits'] !== 'object' || obj['limits'] === null) obj['limits'] = { maxPages: 10, maxAssetsMB: 500 };
 		if (typeof obj['status'] !== 'object' || obj['status'] === null) obj['status'] = { deployed: false, lastDeployAt: null, deployType: null };
 		if (typeof obj['themes'] !== 'object' || obj['themes'] === null) obj['themes'] = {};
 		if (typeof obj['pages'] !== 'object' || obj['pages'] === null) obj['pages'] = {};
@@ -1013,5 +1221,5 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 
 
 export function useProjects() {
-const v = useContext(Ctx); if (!v) throw new Error("useProjects outside provider"); return v;
+	const v = useContext(Ctx); if (!v) throw new Error("useProjects outside provider"); return v;
 }

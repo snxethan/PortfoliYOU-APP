@@ -1,30 +1,68 @@
-import { useRef, useState } from "react";
-import { Save, Undo, Redo } from "lucide-react";
+import { useEffect, useState, lazy, Suspense } from "react";
+import { useNavigate } from "react-router-dom";
+import { ChevronsLeft, ChevronsRight } from "lucide-react";
 import { DndContext, PointerSensor, useSensor, useSensors, DragEndEvent, DragStartEvent, rectIntersection, DragOverlay } from "@dnd-kit/core";
 
 import { useProjects } from "../providers/ProjectsProvider";
-import GridCanvas, { GridItem } from "../components/portfolio/editor/GridCanvas";
-import ModifyWidgetModal from "../components/portfolio/editor/ModifyWidgetModal";
-import WidgetsPalette from "../components/portfolio/editor/WidgetsPalette";
+import type { GridItem } from "../components/editor/canvas/GridCanvas";
+const ModifyWidgetModal = lazy(() => import("../components/editor/widgets/ModifyWidgetModal"));
+const WidgetsPalette = lazy(() => import("../components/editor/widgets/WidgetsPalette"));
+import EditorTopBar from "../components/editor/EditorTopBar";
+import PageControls from "../components/editor/PageControls";
+import ViewportSurface from "../components/editor/ViewportSurface";
+import DragOverlayPreview from "../components/editor/DragOverlayPreview";
 
 const COLS = 12;
 const DEFAULT_ROW_H = 32; // px height per row (content area)
 
 export default function EditorPage() {
-  const { selectedProject } = useProjects();
+  const { selectedProject, createPage, deletePage, renamePage, getPageItems, setPageItems } = useProjects();
+  const navigate = useNavigate();
+
+  // Track current page within the selected project
+  const [currentPageId, setCurrentPageId] = useState<string | null>(null);
+  useEffect(() => {
+    if (!selectedProject) { setCurrentPageId(null); return; }
+    try {
+      const stored = localStorage.getItem(`py_current_page_${selectedProject.id}`);
+      const first = selectedProject.pageOrder?.[0] || null;
+      setCurrentPageId(stored || first || null);
+    } catch {
+      const first = selectedProject.pageOrder?.[0] || null;
+      setCurrentPageId(first || null);
+    }
+  }, [selectedProject?.id]);
+
+  // If project is cloud-linked, ensure the selected page is within the first 10
+  useEffect(() => {
+    if (!selectedProject || !currentPageId) return;
+    const isCloud = !!(selectedProject as unknown as { _cloudId?: string })._cloudId;
+    if (!isCloud) return;
+    const idx = (selectedProject.pageOrder || []).indexOf(currentPageId);
+    if (idx >= 10) {
+      const fallback = selectedProject.pageOrder?.[0] || null;
+      setCurrentPageId(fallback);
+      try { if (fallback) localStorage.setItem(`py_current_page_${selectedProject.id}`, fallback); } catch { /* ignore */ }
+      window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'warn', message: 'Cloud projects support up to 10 pages. Showing first page.' } }));
+    }
+  }, [selectedProject?._cloudId, selectedProject?.pageOrder, currentPageId]);
 
   // Gap between cells (both x and y), in pixels
   const [gap, setGap] = useState<number>(12);
 
   // Demo items to drag around the canvas
-  const [items, setItems] = useState<GridItem[]>(() => [
-    { id: "a", x: 0, y: 0, w: 4, h: 4, title: "Text Block", z: 0, type: 'text', props: {}, pinned: false, locked: false },
-    { id: "b", x: 4, y: 0, w: 4, h: 4, title: "Image", z: 1, type: 'image', props: {}, pinned: false, locked: false },
-  ]);
+  const [items, setItems] = useState<GridItem[]>([]);
+
+  // Load items from provider whenever project/page changes
+  useEffect(() => {
+    if (!selectedProject || !currentPageId) { setItems([]); return; }
+    const loaded = getPageItems(selectedProject.id, currentPageId) as GridItem[];
+    setItems(loaded);
+  }, [selectedProject?.id, currentPageId]);
 
   // Simple undo/redo stacks (keep last 50 operations)
   type ItemsUpdater = (prev: GridItem[]) => GridItem[];
-  type HistoryEntry = { label: string; undo: ItemsUpdater; redo: ItemsUpdater };
+  type HistoryEntry = { label: string; undo: ItemsUpdater; redo: ItemsUpdater; onUndo?: () => void; onRedo?: () => void };
   const MAX_HISTORY = 50;
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [redoStack, setRedoStack] = useState<HistoryEntry[]>([]);
@@ -38,6 +76,19 @@ export default function EditorPage() {
         return nh.length > MAX_HISTORY ? nh.slice(nh.length - MAX_HISTORY) : nh;
       });
       setRedoStack([]);
+      if (selectedProject && currentPageId) {
+        // Persist into provider/project
+        try {
+          const mapped = next.map(it => ({
+            id: it.id,
+            x: it.x, y: it.y, w: it.w, h: it.h,
+            z: typeof it.z === 'number' ? it.z : 0,
+            title: it.title, type: it.type, props: it.props,
+            pinned: it.pinned, locked: it.locked,
+          }));
+          setPageItems(selectedProject.id, currentPageId, mapped);
+        } catch { /* ignore */ }
+      }
       return next;
     });
   }
@@ -49,6 +100,8 @@ export default function EditorPage() {
       const undone = entry.undo(prev);
       setHistory(h => h.slice(0, -1));
       setRedoStack(r => [...r, entry]);
+      // Run side-effect for page-level actions (create/delete/rename)
+      entry.onUndo?.();
       return undone;
     });
   }
@@ -60,6 +113,7 @@ export default function EditorPage() {
       const redone = entry.redo(prev);
       setRedoStack(r => r.slice(0, -1));
       setHistory(h => [...h, entry]);
+      entry.onRedo?.();
       return redone;
     });
   }
@@ -67,10 +121,155 @@ export default function EditorPage() {
   const canUndo = history.length > 0;
   const canRedo = redoStack.length > 0;
 
-  const scrollRef = useRef<HTMLDivElement | null>(null);
   const [pageWidth, setPageWidth] = useState<number>(() => {
     try { return Number(localStorage.getItem('py_editor_page_w')) || 1100; } catch { return 1100; }
   });
+  const [activeView, setActiveView] = useState<'desktop' | 'mobile'>(() => {
+    try { return (localStorage.getItem('py_editor_view') as 'desktop' | 'mobile') || 'desktop'; } catch { return 'desktop'; }
+  });
+  function applyPageWidth(w: number) {
+    const clamped = Math.min(1600, Math.max(320, Math.round(w)));
+    setPageWidth(clamped);
+    try { localStorage.setItem('py_editor_page_w', String(clamped)); } catch { /* ignore */ }
+  }
+  function setDesktopView() {
+    setActiveView('desktop');
+    try { localStorage.setItem('py_editor_view', 'desktop'); } catch { /* ignore */ }
+    applyPageWidth(1200);
+  }
+  function setMobileView() {
+    setActiveView('mobile');
+    try { localStorage.setItem('py_editor_view', 'mobile'); } catch { /* ignore */ }
+    applyPageWidth(390);
+  }
+  // Collapsible widgets palette
+  const [paletteCollapsed, setPaletteCollapsed] = useState<boolean>(() => {
+    try { return localStorage.getItem('py_palette_collapsed') === '1'; } catch { return false; }
+  });
+  function togglePalette() {
+    setPaletteCollapsed(prev => {
+      const next = !prev;
+      try { localStorage.setItem('py_palette_collapsed', next ? '1' : '0'); } catch { /* ignore */ }
+      return next;
+    });
+  }
+  // Grid overlay toggle
+  const [showGrid, setShowGrid] = useState<boolean>(() => {
+    try { return localStorage.getItem('py_show_grid') === '1'; } catch { return false; }
+  });
+  function toggleGrid() {
+    setShowGrid(prev => {
+      const next = !prev;
+      try { localStorage.setItem('py_show_grid', next ? '1' : '0'); } catch { /* ignore */ }
+      return next;
+    });
+  }
+
+  // Preview mode toggle
+  const [previewMode, setPreviewMode] = useState<boolean>(() => {
+    try { return localStorage.getItem('py_preview_mode') === '1'; } catch { return false; }
+  });
+  function togglePreviewMode() {
+    setPreviewMode(prev => {
+      const next = !prev;
+      try { localStorage.setItem('py_preview_mode', next ? '1' : '0'); } catch { /* ignore */ }
+      return next;
+    });
+  }
+
+  // Page viewport height (applies to canvas and preview)
+  const [pageHeight, setPageHeight] = useState<number>(() => {
+    try { return Number(localStorage.getItem('py_editor_page_h')) || 900; } catch { return 900; }
+  });
+
+  // Selection + keyboard shortcuts
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [clipboard, setClipboard] = useState<GridItem | null>(null);
+  function withSelected(mut: (it: GridItem) => GridItem | GridItem[] | null, label: string) {
+    if (!selectedId) return;
+    const src = items.find(i => i.id === selectedId);
+    if (!src) return;
+    const result = mut(src);
+    if (!result) return;
+    if (Array.isArray(result)) {
+      commitUpdate(label, () => result);
+    } else {
+      commitUpdate(label, (prev) => prev.map(i => i.id === selectedId ? result : i));
+    }
+  }
+  function onKeyDown(e: React.KeyboardEvent<HTMLDivElement>) {
+    // Do not interfere with typing in inputs/textareas
+    const t = e.target as HTMLElement;
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.getAttribute('contenteditable') === 'true')) return;
+    // Movement
+    if (selectedId && (e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+      e.preventDefault();
+      const dx = e.key === 'ArrowLeft' ? -1 : e.key === 'ArrowRight' ? 1 : 0;
+      const dy = e.key === 'ArrowUp' ? -1 : e.key === 'ArrowDown' ? 1 : 0;
+      withSelected((it) => {
+        if (it.pinned || it.locked) return null;
+        const nx = Math.max(0, Math.min(it.x + dx, COLS - it.w));
+        const ny = Math.max(0, it.y + dy);
+        if (nx === it.x && ny === it.y) return null;
+        return { ...it, x: nx, y: ny };
+      }, 'Nudge widget');
+      return;
+    }
+    // Delete
+    if (selectedId && (e.key === 'Delete' || e.key === 'Backspace')) {
+      e.preventDefault();
+      commitUpdate('Delete item', (prev) => prev.filter(i => i.id !== selectedId));
+      setSelectedId(null);
+      return;
+    }
+    // Copy/Cut/Paste/Duplicate
+    const meta = e.ctrlKey || e.metaKey;
+    if (meta && e.key.toLowerCase() === 'c' && selectedId) {
+      e.preventDefault();
+      const src = items.find(i => i.id === selectedId) || null;
+      setClipboard(src ? { ...src } : null);
+      return;
+    }
+    if (meta && e.key.toLowerCase() === 'x' && selectedId) {
+      e.preventDefault();
+      const src = items.find(i => i.id === selectedId) || null;
+      setClipboard(src ? { ...src } : null);
+      commitUpdate('Cut item', (prev) => prev.filter(i => i.id !== selectedId));
+      setSelectedId(null);
+      return;
+    }
+    if (meta && e.key.toLowerCase() === 'v') {
+      e.preventDefault();
+      if (!clipboard) return;
+      const nid = typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : Math.random().toString(36).slice(2, 9);
+      const nx = Math.min(COLS - clipboard.w, (clipboard.x ?? 0) + 1);
+      const ny = (clipboard.y ?? 0) + 1;
+      const dup: GridItem = { ...clipboard, id: nid, x: nx, y: ny, title: (clipboard.title || 'Widget') + ' copy' };
+      commitUpdate('Paste item', (prev) => {
+        const norm = normalizeZ(prev);
+        const maxZ = norm.length;
+        return [...norm, { ...dup, z: maxZ }];
+      });
+      setSelectedId(nid);
+      return;
+    }
+    if (meta && e.key.toLowerCase() === 'd' && selectedId) {
+      e.preventDefault();
+      const src = items.find(i => i.id === selectedId);
+      if (!src) return;
+      const nid = typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : Math.random().toString(36).slice(2, 9);
+      const nx = Math.min(COLS - src.w, src.x + 1);
+      const ny = src.y + 1;
+      const dup: GridItem = { ...src, id: nid, x: nx, y: ny, title: src.title + ' copy' };
+      commitUpdate('Duplicate item', (prev) => {
+        const norm = normalizeZ(prev);
+        const maxZ = norm.length;
+        return [...norm, { ...dup, z: maxZ }];
+      });
+      setSelectedId(nid);
+      return;
+    }
+  }
 
   // Active drag preview for palette items
   type PaletteDrag = { src?: string; label?: string; w?: number; h?: number } | undefined;
@@ -79,22 +278,18 @@ export default function EditorPage() {
   // Modify panel
   const [editingId, setEditingId] = useState<string | null>(null);
   const editingItem = items.find(i => i.id === editingId) || null;
-  const [editTitle, setEditTitle] = useState<string>("");
-  const [editPropsText, setEditPropsText] = useState<string>("{}");
   function openModify(id: string) {
     const it = items.find(x => x.id === id);
     if (!it) return;
     setEditingId(id);
-    setEditTitle(it.title);
-    try { setEditPropsText(JSON.stringify(it.props ?? {}, null, 2)); } catch { setEditPropsText("{}"); }
   }
   function closeModify() {
     setEditingId(null);
   }
 
-  // Helper to get max z and normalize layering to 0..n-1
+  // Helper to normalize layering to 0..n-1 in ascending z order
   function normalizeZ(list: GridItem[]): GridItem[] {
-    const withZ = list.map((it, i) => ({ ...it, z: typeof it.z === 'number' ? it.z : i }));
+    const withZ = list.map(it => ({ ...it, z: typeof it.z === 'number' ? it.z : 0 }));
     const sorted = [...withZ].sort((a, b) => (a.z! - b.z!));
     return sorted.map((it, idx) => ({ ...it, z: idx }));
   }
@@ -151,26 +346,7 @@ export default function EditorPage() {
   }
 
 
-  function beginResize(e: React.PointerEvent<HTMLDivElement>) {
-    e.preventDefault();
-    const startX = e.clientX;
-    const startW = pageWidth;
-    const el = e.currentTarget;
-    el.setPointerCapture(e.pointerId);
-    const onMove = (evt: PointerEvent) => {
-      const dx = evt.clientX - startX;
-      const next = Math.min(1600, Math.max(720, Math.round(startW + dx)));
-      setPageWidth(next);
-      try { localStorage.setItem('py_editor_page_w', String(next)); } catch { /* ignore */ }
-    };
-    const onUp = () => {
-      el.releasePointerCapture(e.pointerId);
-      window.removeEventListener('pointermove', onMove, true);
-      window.removeEventListener('pointerup', onUp, true);
-    };
-    window.addEventListener('pointermove', onMove, true);
-    window.addEventListener('pointerup', onUp, true);
-  }
+
 
   return (
     <div className="p-6 space-y-6">
@@ -182,46 +358,142 @@ export default function EditorPage() {
 
       <section className="surface p-0 overflow-hidden">
         {/* Top bar */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-[color:var(--border)] bg-[color:var(--muted)]/40">
-          <div className="flex items-center gap-2 text-sm">
-            <span className="text-[color:var(--fg-muted)]">Editor</span>
-            {selectedProject && <span className="text-[color:var(--fg-muted)]">·</span>}
-            {selectedProject && <span className="font-medium">{selectedProject.name}</span>}
-          </div>
+        <EditorTopBar
+          selectedProjectName={selectedProject?.name}
+          onTitleClick={() => { navigate('/'); setTimeout(() => { window.dispatchEvent(new CustomEvent('py:highlight-request')); }, 50); }}
+          previewMode={previewMode}
+          togglePreviewMode={togglePreviewMode}
+          gap={gap}
+          setGap={setGap}
+          showGrid={showGrid}
+          toggleGrid={toggleGrid}
+          activeView={activeView}
+          setDesktopView={setDesktopView}
+          setMobileView={setMobileView}
+          pageWidth={pageWidth}
+          pageHeight={pageHeight}
+          canUndo={canUndo}
+          canRedo={canRedo}
+          undo={undo}
+          redo={redo}
+        />
 
-          <div className="flex items-center gap-3">
-            {/* Gap control */}
-            <label className="hidden sm:flex items-center gap-2 text-xs text-[color:var(--fg-muted)]">
-              <span>Gap</span>
-              <input
-                type="number"
-                className="input w-16"
-                min={0}
-                max={48}
-                step={1}
-                value={gap}
-                onChange={(e) => setGap(Number(e.target.value) || 0)}
-                title="Grid gap (px)"
-              />
-              <span className="text-[10px]">px</span>
-            </label>
-
-            {/* Inactive placeholders for now */}
-            <button className="btn btn-ghost flex items-center gap-2 text-sm disabled:opacity-60" title="Save (Ctrl/Cmd+S)" disabled>
-              <Save size={16} />
-              Save
-            </button>
-            <div className="w-px h-6 bg-[color:var(--border)] mx-1" />
-            <button className="btn btn-ghost flex items-center gap-2 text-sm disabled:opacity-60" title="Undo" onClick={undo} disabled={!canUndo}>
-              <Undo size={16} />
-              Undo
-            </button>
-            <button className="btn btn-ghost flex items-center gap-2 text-sm disabled:opacity-60" title="Redo" onClick={redo} disabled={!canRedo}>
-              <Redo size={16} />
-              Redo
-            </button>
-          </div>
-        </div>
+        {/* Page management section */}
+        {selectedProject && (
+          <PageControls
+            isCloud={!!(selectedProject as unknown as { _cloudId?: string })._cloudId}
+            pageOrder={selectedProject.pageOrder || []}
+            pages={selectedProject.pages}
+            currentPageId={currentPageId}
+            onSelectPage={(id) => {
+              setCurrentPageId(id);
+              if (selectedProject && id) {
+                try { localStorage.setItem(`py_current_page_${selectedProject.id}`, id); } catch { /* ignore */ }
+                setItems(getPageItems(selectedProject.id, id) as GridItem[]);
+              } else {
+                setItems([]);
+              }
+            }}
+            onCreatePage={() => {
+              if (!selectedProject) return;
+              const prevId = currentPageId;
+              const id = createPage(selectedProject.id) || null;
+              if (id) {
+                setCurrentPageId(id);
+                try { localStorage.setItem(`py_current_page_${selectedProject.id}`, id); } catch { /* ignore */ }
+                setItems([]);
+                setHistory(h => {
+                  const entry: HistoryEntry = {
+                    label: 'Create page',
+                    undo: (items) => items,
+                    redo: (items) => items,
+                    onUndo: () => {
+                      deletePage(selectedProject.id, id);
+                      const backId = prevId || (selectedProject.pageOrder?.[0] || null);
+                      if (backId) {
+                        setCurrentPageId(backId);
+                        const loaded = getPageItems(selectedProject.id, backId) as GridItem[];
+                        setItems(loaded);
+                      }
+                    },
+                    onRedo: () => {
+                      const newId = createPage(selectedProject.id);
+                      if (newId) {
+                        setCurrentPageId(newId);
+                        setItems([]);
+                      }
+                    }
+                  };
+                  return [...h, entry];
+                });
+                setRedoStack([]);
+              }
+            }}
+            onRenameCurrentPage={() => {
+              if (!selectedProject || !currentPageId) return;
+              const oldTitle = selectedProject.pages[currentPageId]?.title || 'Untitled';
+              const nextTitle = window.prompt('New page name', oldTitle);
+              if (!nextTitle || nextTitle.trim() === oldTitle) return;
+              const trimmed = nextTitle.trim();
+              setHistory(h => {
+                const entry: HistoryEntry = {
+                  label: 'Rename page',
+                  undo: (items) => items,
+                  redo: (items) => items,
+                  onUndo: () => { renamePage(selectedProject.id, currentPageId, oldTitle); },
+                  onRedo: () => { renamePage(selectedProject.id, currentPageId, trimmed); },
+                } as HistoryEntry;
+                return [...h, entry];
+              });
+              setRedoStack([]);
+              renamePage(selectedProject.id, currentPageId, trimmed);
+            }}
+            onDeleteCurrentPage={() => {
+              if (!selectedProject || !currentPageId) return;
+              const total = selectedProject.pageOrder?.length ?? 0;
+              if (total <= 1) return;
+              const title = selectedProject.pages[currentPageId]?.title || 'Untitled';
+              const ok = window.confirm(`Delete page "${title}"? This cannot be undone.`);
+              if (!ok) return;
+              const snapItems = getPageItems(selectedProject.id, currentPageId) as GridItem[];
+              const removedId = currentPageId;
+              const remaining = (selectedProject.pageOrder || []).filter(id => id !== currentPageId);
+              const nextId = remaining[0] || null;
+              deletePage(selectedProject.id, removedId);
+              setCurrentPageId(nextId);
+              if (nextId) setItems(getPageItems(selectedProject.id, nextId) as GridItem[]); else setItems([]);
+              setHistory(h => {
+                let restoredId: string | null = null;
+                const entry: HistoryEntry = {
+                  label: 'Delete page',
+                  undo: (items) => items,
+                  redo: (items) => items,
+                  onUndo: () => {
+                    const nid = createPage(selectedProject.id);
+                    if (nid) {
+                      restoredId = nid;
+                      renamePage(selectedProject.id, nid, title);
+                      setPageItems(selectedProject.id, nid, snapItems.map(it => ({ id: it.id, x: it.x, y: it.y, w: it.w, h: it.h, z: it.z ?? 0, title: it.title, type: it.type, props: it.props, pinned: it.pinned, locked: it.locked })));
+                      setCurrentPageId(nid);
+                      setItems(getPageItems(selectedProject.id, nid) as GridItem[]);
+                    }
+                  },
+                  onRedo: () => {
+                    const target = restoredId || removedId;
+                    if (target) {
+                      deletePage(selectedProject.id, target);
+                      const fallback = (selectedProject.pageOrder?.[0]) || null;
+                      setCurrentPageId(fallback);
+                      if (fallback) setItems(getPageItems(selectedProject.id, fallback) as GridItem[]);
+                    }
+                  },
+                };
+                return [...h, entry];
+              });
+              setRedoStack([]);
+            }}
+          />
+        )}
 
         {/* Workspace */}
         <DndContext
@@ -246,18 +518,24 @@ export default function EditorPage() {
               const relX = centerX - overRect.left;
               const relY = centerY - overRect.top;
 
-              // Compute grid coordinates using the same math as GridCanvas
-              const colW = Math.floor((overRect.width - gap * (COLS - 1)) / COLS);
-              const unitX = colW + gap;
-              const unitY = DEFAULT_ROW_H + gap;
+              // Compute grid coordinates using same math, then quantize to micro-step based on gap
+              const colW = Math.floor(overRect.width / COLS);
+              const baseX = colW + gap;
+              const baseY = DEFAULT_ROW_H + gap;
+              const factor = Math.max(0, gap) / 12;
+              const stepX = Math.max(1, Math.round(baseX * factor));
+              const stepY = Math.max(1, Math.round(baseY * factor));
               const w = data.w ?? 4;
               const h = data.h ?? 4;
-              let x = Math.floor(relX / unitX);
-              let y = Math.floor(relY / unitY);
+              const qx = Math.round(relX / stepX) * (stepX / baseX);
+              const qy = Math.round(relY / stepY) * (stepY / baseY);
+              let x = Math.floor(qx);
+              let y = Math.floor(qy);
               x = Math.max(0, Math.min(x, COLS - w));
               y = Math.max(0, y);
               const id = typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : Math.random().toString(36).slice(2, 9);
-              const newItem: GridItem = { id, x, y, w, h, title: data.label ?? 'Widget', z: 0, type: (active.data.current as any)?.type, props: {}, pinned: false, locked: false };
+              const ad = active.data.current as unknown as { type?: string };
+              const newItem: GridItem = { id, x, y, w, h, title: data.label ?? 'Widget', z: 0, type: ad?.type, props: {}, pinned: false, locked: false };
               commitUpdate(`Add ${newItem.title}`, (prev) => {
                 const norm = normalizeZ(prev);
                 const maxZ = norm.length; // new item will be top
@@ -271,104 +549,107 @@ export default function EditorPage() {
         >
           {/* Visible drag preview while dragging from the palette */}
           <DragOverlay dropAnimation={null}>
-            {activeDrag?.src === 'palette' ? (
-              <div
-                className="pointer-events-none rounded px-2 py-1 text-xs bg-[color:var(--muted)]/80 border border-[color:var(--border)] shadow-lg text-[color:var(--fg)]"
-              >
-                {activeDrag.label ?? 'Widget'}
-                {typeof activeDrag.w === 'number' && typeof activeDrag.h === 'number' ? (
-                  <span className="ml-2 text-[color:var(--fg-muted)]">· {activeDrag.w}x{activeDrag.h}</span>
-                ) : null}
-              </div>
-            ) : null}
+            <DragOverlayPreview activeDrag={activeDrag} />
           </DragOverlay>
-          <div className="grid grid-cols-[1fr_16rem] gap-0 min-h-[28rem]">
-            {/* Canvas inside a page-like viewport */}
-            <div className="p-4 min-w-0 overflow-x-auto">
-              <div
-                ref={scrollRef}
-                className={"mx-auto min-h-[28rem] border border-[color:var(--border)] bg-white dark:bg-black/10 shadow-sm rounded-md overflow-auto relative"}
-                style={{ width: pageWidth }}
-              >
-                <div className="p-4">
-                  <GridCanvas
-                    cols={COLS}
-                    gap={gap}
-                    rowH={DEFAULT_ROW_H}
-                    items={items}
-                    onChange={setItems}
-                    scrollEl={scrollRef.current}
-                    onDelete={(id) => commitUpdate("Delete item", (prev) => {
-                      const tgt = prev.find(i => i.id === id);
-                      if (!tgt) return prev;
-                      return prev.filter((it) => it.id !== id);
-                    })}
-                    onDuplicate={(id) => commitUpdate("Duplicate item", (prev) => {
-                      const src = prev.find((it) => it.id === id);
-                      if (!src) return prev;
-                      const nid = typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : Math.random().toString(36).slice(2, 9);
-                      const nx = Math.min(COLS - src.w, src.x + 1);
-                      const ny = src.y + 1;
-                      const norm = normalizeZ(prev);
-                      const maxZ = norm.length; // place duplicate on top
-                      return [...norm, { ...src, id: nid, x: nx, y: ny, title: src.title + " copy", z: maxZ }];
-                    })}
-                    onItemMoveStart={() => {/* no-op, but available if needed */ }}
-                    onItemMoveEnd={(prevItem, nextItem) => {
-                      if (prevItem.x === nextItem.x && prevItem.y === nextItem.y) return;
-                      // Create a single history entry to set this item's position back and forth
-                      const label = `Move ${nextItem.title}`;
-                      setHistory(h => {
-                        const entry: HistoryEntry = {
-                          label,
-                          undo: (items) => items.map(it => it.id === nextItem.id ? { ...it, x: prevItem.x, y: prevItem.y } : it),
-                          redo: (items) => items.map(it => it.id === nextItem.id ? { ...it, x: nextItem.x, y: nextItem.y } : it),
-                        };
-                        const nh = [...h, entry];
-                        return nh.length > MAX_HISTORY ? nh.slice(nh.length - MAX_HISTORY) : nh;
-                      });
-                      setRedoStack([]);
-                    }}
-                    onBringToFront={bringToFront}
-                    onSendToBack={sendToBack}
-                    onBringForward={bringForward}
-                    onSendBackward={sendBackward}
-                    onTogglePin={togglePin}
-                    onOpenModify={openModify}
-                  />
-                </div>
-                {/* Resize handle */}
-                <div
-                  className="absolute right-0 bottom-0 h-6 w-3 cursor-ew-resize flex items-center justify-center text-[color:var(--fg-muted)]"
-                  title="Resize page width"
-                  onPointerDown={beginResize}
-                >
-                  <div className="w-1 h-4 bg-[color:var(--border)] rounded" />
-                </div>
-              </div>
-            </div>
+          <div className="grid gap-0 min-h-[28rem]" style={{ gridTemplateColumns: paletteCollapsed ? '1fr 1.5rem' : '1fr 16rem' }} onKeyDown={onKeyDown} tabIndex={0}>
+            {/* Canvas or Preview inside a page-like viewport */}
+            <ViewportSurface
+              pageWidth={pageWidth}
+              pageHeight={pageHeight}
+              setPageWidth={setPageWidth}
+              setPageHeight={setPageHeight}
+              previewMode={previewMode}
+              cols={COLS}
+              rowH={DEFAULT_ROW_H}
+              gap={gap}
+              items={items}
+              onItemsChange={(next) => commitUpdate('Edit layout', () => next)}
+              showGrid={showGrid}
+              selectedId={selectedId}
+              onSelect={setSelectedId}
+              onDelete={(id) => commitUpdate("Delete item", (prev) => {
+                const tgt = prev.find(i => i.id === id);
+                if (!tgt) return prev;
+                return prev.filter((it) => it.id !== id);
+              })}
+              onDuplicate={(id) => commitUpdate("Duplicate item", (prev) => {
+                const src = prev.find((it) => it.id === id);
+                if (!src) return prev;
+                const nid = typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : Math.random().toString(36).slice(2, 9);
+                const nx = Math.min(COLS - src.w, src.x + 1);
+                const ny = src.y + 1;
+                const norm = normalizeZ(prev);
+                const maxZ = norm.length; // place duplicate on top
+                return [...norm, { ...src, id: nid, x: nx, y: ny, title: src.title + " copy", z: maxZ }];
+              })}
+              onMoveStart={() => { /* no-op */ }}
+              onMoveEnd={(prevItem, nextItem) => {
+                if (prevItem.x === nextItem.x && prevItem.y === nextItem.y) return;
+                const label = `Move ${nextItem.title}`;
+                setHistory(h => {
+                  const entry: HistoryEntry = {
+                    label,
+                    undo: (items) => items.map(it => it.id === nextItem.id ? { ...it, x: prevItem.x, y: prevItem.y } : it),
+                    redo: (items) => items.map(it => it.id === nextItem.id ? { ...it, x: nextItem.x, y: nextItem.y } : it),
+                  };
+                  const nh = [...h, entry];
+                  return nh.length > MAX_HISTORY ? nh.slice(nh.length - MAX_HISTORY) : nh;
+                });
+                setRedoStack([]);
+              }}
+              onBringToFront={bringToFront}
+              onSendToBack={sendToBack}
+              onBringForward={bringForward}
+              onSendBackward={sendBackward}
+              onTogglePin={togglePin}
+              onOpenModify={openModify}
+            />
 
-            {/* Widget Sidebar (moved to the right) */}
-            <aside className="border-l border-[color:var(--border)] p-3 bg-[color:var(--bg)]">
-              <WidgetsPalette />
+            {/* Widget Sidebar (collapsible) */}
+            <aside className={`border-l border-[color:var(--border)] bg-[color:var(--bg)] relative ${previewMode ? 'opacity-50 pointer-events-none' : ''}`}>
+              {paletteCollapsed ? (
+                <div className="h-full flex items-center justify-center">
+                  <button className="btn btn-ghost btn-xs rotate-180" title="Expand palette" onClick={togglePalette}>
+                    <ChevronsLeft size={14} />
+                  </button>
+                </div>
+              ) : (
+                <div className="h-full flex flex-col">
+                  <div className="flex items-center justify-between p-2 border-b border-[color:var(--border)] bg-[color:var(--muted)]/40">
+                    <div className="text-xs text-[color:var(--fg-muted)]">Widgets</div>
+                    <button className="btn btn-ghost btn-xs" title="Collapse palette" onClick={togglePalette}>
+                      <ChevronsRight size={14} />
+                    </button>
+                  </div>
+                  <div className="p-3 overflow-auto grow">
+                    <Suspense fallback={<div className="text-xs text-[color:var(--fg-muted)] p-2">Loading widgets…</div>}>
+                      <WidgetsPalette />
+                    </Suspense>
+                  </div>
+                </div>
+              )}
             </aside>
           </div>
         </DndContext>
       </section>
 
+      {/* Preview now replaces canvas above when toggled */}
+
       {editingItem && (
-        <ModifyWidgetModal
-          item={editingItem}
-          onClose={closeModify}
-          onRename={(v) => commitUpdate("Rename widget", (prev) => prev.map(it => it.id === editingItem.id ? { ...it, title: v } : it))}
-          onBringToFront={() => bringToFront(editingItem.id)}
-          onSendToBack={() => sendToBack(editingItem.id)}
-          onBringForward={() => bringForward(editingItem.id)}
-          onSendBackward={() => sendBackward(editingItem.id)}
-          onTogglePin={() => togglePin(editingItem.id)}
-          onToggleLock={() => toggleLock(editingItem.id)}
-          onApplyProps={(parsed) => commitUpdate("Update widget settings", (prev) => prev.map(it => it.id === editingItem.id ? { ...it, props: parsed } : it))}
-        />
+        <Suspense fallback={null}>
+          <ModifyWidgetModal
+            item={editingItem!}
+            onClose={closeModify}
+            onRename={(v) => commitUpdate("Rename widget", (prev) => prev.map(it => it.id === editingItem!.id ? { ...it, title: v } : it))}
+            onBringToFront={() => bringToFront(editingItem!.id)}
+            onSendToBack={() => sendToBack(editingItem!.id)}
+            onBringForward={() => bringForward(editingItem!.id)}
+            onSendBackward={() => sendBackward(editingItem!.id)}
+            onTogglePin={() => togglePin(editingItem!.id)}
+            onToggleLock={() => toggleLock(editingItem!.id)}
+            onApplyProps={(parsed) => commitUpdate("Update widget settings", (prev) => prev.map(it => it.id === editingItem!.id ? { ...it, props: parsed } : it))}
+          />
+        </Suspense>
       )}
     </div>
   );

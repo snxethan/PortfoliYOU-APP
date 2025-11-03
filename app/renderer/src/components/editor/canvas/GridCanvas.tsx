@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useDroppable } from "@dnd-kit/core";
 
-import DraggableItem, { GridItem, GridMetrics } from "./DraggableItem";
+import DraggableItem, { GridItem, GridMetrics } from "../DraggableItem";
 
 export function useElementSize<T extends HTMLElement>() {
   const ref = useRef<T | null>(null);
@@ -21,7 +21,7 @@ export function useElementSize<T extends HTMLElement>() {
   return { ref, size } as const;
 }
 
-export default function GridCanvas({ cols, gap, rowH, items, onChange, scrollEl, onDelete, onDuplicate, onItemMoveStart, onItemMoveEnd, onBringToFront, onSendToBack, onBringForward, onSendBackward, onTogglePin, onOpenModify }: {
+export default function GridCanvas({ cols, gap, rowH, items, onChange, scrollEl, onDelete, onDuplicate, onItemMoveStart, onItemMoveEnd, onBringToFront, onSendToBack, onBringForward, onSendBackward, onTogglePin, onOpenModify, showGrid, selectedId, onSelect }: {
   cols: number;
   gap: number;
   rowH: number;
@@ -38,6 +38,9 @@ export default function GridCanvas({ cols, gap, rowH, items, onChange, scrollEl,
   onSendBackward?: (id: string) => void;
   onTogglePin?: (id: string) => void;
   onOpenModify?: (id: string) => void;
+  showGrid?: boolean;
+  selectedId?: string | null;
+  onSelect?: (id: string | null) => void;
 }) {
   const { ref, size } = useElementSize<HTMLDivElement>();
   const { setNodeRef, isOver } = useDroppable({ id: 'grid-canvas' });
@@ -45,9 +48,9 @@ export default function GridCanvas({ cols, gap, rowH, items, onChange, scrollEl,
 
   const colW = useMemo(() => {
     if (cols <= 0) return 0;
-    const inner = Math.max(0, width - gap * (cols - 1));
-    return Math.floor(inner / cols);
-  }, [width, cols, gap]);
+    // Decouple column width from gap so gap affects spacing between items and step size more clearly
+    return Math.floor(width / cols);
+  }, [width, cols]);
 
   const metrics: GridMetrics = useMemo(() => ({ colW, rowH, gap, cols }), [colW, rowH, gap, cols]);
 
@@ -61,17 +64,21 @@ export default function GridCanvas({ cols, gap, rowH, items, onChange, scrollEl,
     return rows * rowH + (rows - 1) * gap;
   }, [contentRows, rowH, gap]);
 
+  // Optional grid background for alignment (based on gap and rowH)
   const bg = useMemo(() => {
+    if (!showGrid) return undefined as string | undefined;
     const cw = Math.max(1, colW);
     const gh = Math.max(0, gap);
-    const unitX = cw + gh;
-    const unitY = rowH + gh;
-    // light grey grid lines to look like a page design tool; subtle in dark as well
+    // Snap units scale with gap for micro adjustments
+    // Allow the grid to scale continuously even for very small gaps by removing the 0.5 clamp
+    const factor = Math.max(0, gap) / 12;
+    const unitX = Math.max(1, Math.round((cw + gh) * factor));
+    const unitY = Math.max(1, Math.round((rowH + gh) * factor));
     const line = 'rgba(0,0,0,0.08)';
-    const vLine = `repeating-linear-gradient(to right, transparent 0, transparent ${cw}px, ${line} ${cw}px, ${line} ${unitX}px)`;
-    const hLine = `repeating-linear-gradient(to bottom, transparent 0, transparent ${rowH}px, ${line} ${rowH}px, ${line} ${unitY}px)`;
+    const vLine = `repeating-linear-gradient(to right, transparent 0, transparent ${unitX - 1}px, ${line} ${unitX - 1}px, ${line} ${unitX}px)`;
+    const hLine = `repeating-linear-gradient(to bottom, transparent 0, transparent ${unitY - 1}px, ${line} ${unitY - 1}px, ${line} ${unitY}px)`;
     return `${vLine}, ${hLine}`;
-  }, [colW, rowH, gap]);
+  }, [showGrid, colW, rowH, gap]);
 
   const assignRef = (el: HTMLDivElement | null) => {
     // Merge local ref used for size with droppable ref for DnD-kit
@@ -89,7 +96,15 @@ export default function GridCanvas({ cols, gap, rowH, items, onChange, scrollEl,
     .map(x => x.it), [items]);
 
   return (
-    <div ref={assignRef} className="relative rounded border border-[color:var(--border)] bg-[color:var(--bg)]" style={{ minHeight: 384, height: canvasHeight, backgroundImage: bg }}>
+    <div
+      ref={assignRef}
+      className="relative bg-white rounded-md border-2 border-black shadow-sm"
+      style={{ minHeight: 384, height: canvasHeight, backgroundImage: bg }}
+      onMouseDown={(e) => {
+        // clicking on empty space clears selection
+        if (e.target === e.currentTarget) onSelect?.(null);
+      }}
+    >
       {sorted.map((it) => (
         <DraggableItem
           key={it.id}
@@ -107,11 +122,13 @@ export default function GridCanvas({ cols, gap, rowH, items, onChange, scrollEl,
           onSendBackward={onSendBackward}
           onTogglePin={onTogglePin}
           onOpenModify={onOpenModify}
+          selected={selectedId === it.id}
+          onSelect={(id) => onSelect?.(id)}
         />
       ))}
       {/* Subtle overlay when ready to drop from palette */}
       {isOver && (
-        <div className="pointer-events-none absolute inset-0 rounded ring-2 ring-[color:var(--accent)]/40" />
+        <div className="pointer-events-none absolute inset-0 rounded-md ring-2 ring-[color:var(--accent)]/50" />
       )}
     </div>
   );

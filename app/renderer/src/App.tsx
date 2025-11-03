@@ -2,16 +2,19 @@
 import { Suspense, lazy, useEffect } from "react";
 
 import Sidebar from "./components/Sidebar";
-import PortfolioIsland from "./components/PortfolioIsland";
+import PortfolioIsland from "./components/portfolio-island/PortfolioIsland";
 const HomePage = lazy(() => import("./pages/Home"));
 const EditorPage = lazy(() => import("./pages/Editor"));
 const DeployPage = lazy(() => import("./pages/Deploy"));
 import ProtectedRoute from "./components/auth/ProtectedRoute";
 import { ProjectsProvider, useProjects } from "./providers/ProjectsProvider";
 import { NotificationsProvider } from "./providers/NotificationsProvider";
-import NotificationsUI from "./components/Notifications";
+import { CloudSettingsProvider } from "./providers/CloudSettingsProvider";
+import NotificationsUI from "./components/notifications/Notifications";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { useAuth } from "./providers/AuthProvider";
+// Ensure widgets are registered globally so previews render on any route
+import "./widgets/loader";
 
 
 export default function App() {
@@ -34,43 +37,45 @@ export default function App() {
       <BrowserRouter>
         <NotificationsProvider>
           <ProjectsProvider>
-            <SaveHotkeys />
-            <NotificationsUI />
-            <div className="min-h-screen grid grid-cols-[var(--sidebar-w,15rem)_1fr]">
-              <Sidebar />
-              <div className="min-h-screen flex flex-col">
-                <PortfolioIsland />
-                <main className="flex-1">
-                  <Suspense fallback={
-                    <div className="flex items-center justify-center py-16">
-                      <div className="w-10 h-10 border-4 border-[color:var(--border)] border-t-[color:var(--primary)] rounded-full animate-spin" />
-                    </div>
-                  }>
-                    <Routes>
-                      <Route path="/" element={<HomePage />} />
-                      {/* Backward-compat: redirect old Modify route to Editor */}
-                      <Route path="/modify" element={<LegacyModifyRedirect />} />
-                      <Route
-                        path="/editor"
-                        element={
-                          <ProtectedRoute>
-                            <EditorPage />
-                          </ProtectedRoute>
-                        }
-                      />
-                      <Route
-                        path="/deploy"
-                        element={
-                          <ProtectedRoute>
-                            <DeployPage />
-                          </ProtectedRoute>
-                        }
-                      />
-                    </Routes>
-                  </Suspense>
-                </main>
+            <CloudSettingsProvider>
+              <SaveHotkeys />
+              <NotificationsUI />
+              <div className="min-h-screen grid grid-cols-[var(--sidebar-w,15rem)_1fr]">
+                <Sidebar />
+                <div className="min-h-screen flex flex-col">
+                  <PortfolioIsland />
+                  <main className="flex-1">
+                    <Suspense fallback={
+                      <div className="flex items-center justify-center py-16">
+                        <div className="w-10 h-10 border-4 border-[color:var(--border)] border-t-[color:var(--primary)] rounded-full animate-spin" />
+                      </div>
+                    }>
+                      <Routes>
+                        <Route path="/" element={<HomePage />} />
+                        {/* Backward-compat: redirect old Modify route to Editor */}
+                        <Route path="/modify" element={<LegacyModifyRedirect />} />
+                        <Route
+                          path="/editor"
+                          element={
+                            <ProtectedRoute>
+                              <EditorPage />
+                            </ProtectedRoute>
+                          }
+                        />
+                        <Route
+                          path="/deploy"
+                          element={
+                            <ProtectedRoute>
+                              <DeployPage />
+                            </ProtectedRoute>
+                          }
+                        />
+                      </Routes>
+                    </Suspense>
+                  </main>
+                </div>
               </div>
-            </div>
+            </CloudSettingsProvider>
           </ProjectsProvider>
         </NotificationsProvider>
       </BrowserRouter>
