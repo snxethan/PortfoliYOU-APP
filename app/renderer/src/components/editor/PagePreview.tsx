@@ -4,12 +4,14 @@ import WidgetRenderer from '../../widgets/Renderer';
 
 import type { GridItem } from './canvas/GridCanvas';
 
-function PagePreviewInner({ width, cols, gap, rowH, items }: {
+function PagePreviewInner({ width, cols, gap, rowH, items, currentPageId, onNavigatePage }: {
     width: number;
     cols: number;
     gap: number;
     rowH: number;
     items: GridItem[];
+    currentPageId?: string;
+    onNavigatePage?: (pageId: string) => void;
 }) {
     const colW = useMemo(() => {
         if (cols <= 0) return 0;
@@ -41,6 +43,19 @@ function PagePreviewInner({ width, cols, gap, rowH, items }: {
     return (
         <div
             style={{ width, height, position: 'relative' as const }}
+            onClick={(e) => {
+                if (!onNavigatePage) return;
+                const t = e.target as HTMLElement | null;
+                if (!t) return;
+                const a = t.closest('a[href]') as HTMLAnchorElement | null;
+                if (!a) return;
+                const raw = a.getAttribute('href') || '';
+                if (raw.startsWith('#/page/')) {
+                    e.preventDefault();
+                    const pid = raw.slice('#/page/'.length);
+                    if (pid) onNavigatePage(pid);
+                }
+            }}
         >
             {sorted.map((item) => {
                 const unitX = colW + gap;
@@ -55,7 +70,7 @@ function PagePreviewInner({ width, cols, gap, rowH, items }: {
                         style={{ position: 'absolute', left, top, width: wpx, height: hpx, zIndex: typeof item.z === 'number' ? 100 + item.z : undefined, overflow: 'hidden' }}
                     >
                         {item.type ? (
-                            <WidgetRenderer instance={{ id: item.id, type: item.type, props: item.props ?? {} }} />
+                            <WidgetRenderer instance={{ id: item.id, type: item.type, props: item.props ?? {} }} interactive={false} currentPageId={currentPageId} />
                         ) : (
                             <div style={{ fontSize: 10, color: 'var(--fg-muted)', border: '1px dashed var(--border)', borderRadius: 4, height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>Unknown widget</div>
                         )}

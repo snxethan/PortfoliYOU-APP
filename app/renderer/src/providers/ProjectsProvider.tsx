@@ -1,5 +1,6 @@
 import '../types/electron.d.ts';
 import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { useNotifications } from './NotificationsProvider';
 import { onAuthStateChanged } from "firebase/auth";
 import { collection, doc, getDoc, getDocs, setDoc, serverTimestamp, query, where, orderBy } from "firebase/firestore";
 import { getFunctions, httpsCallable } from "firebase/functions";
@@ -30,6 +31,7 @@ export type Page = {
 	title: string;
 	order: number;
 	widgets: string[];
+	starter?: boolean;
 	breakpoints: { desktop: boolean; tablet: boolean; mobile: boolean };
 	schemaVersion: number;
 	createdAt: string;
@@ -104,11 +106,14 @@ type ProjectsCtx = {
 	lastSavedAt: string | null;
 	setProjectFilePath: (projectId: string, newPath: string) => void;
 	clearSelection: () => void;
+	autosaveEnabled: boolean;
+	setAutosaveEnabled: (v: boolean) => void;
 	reconcileCloudLinks: (knownCloudIds: string[]) => void;
 	// Pages
 	createPage: (projectId: string, title?: string) => string | null;
 	renamePage: (projectId: string, pageId: string, newTitle: string) => void;
 	deletePage: (projectId: string, pageId: string) => void;
+	setPageStarter: (projectId: string, pageId: string, starter: boolean) => void;
 	// Page widgets
 	getPageItems: (projectId: string, pageId: string) => Array<{
 		id: string; x: number; y: number; w: number; h: number; z: number;
@@ -151,6 +156,10 @@ function pushRevisionSnapshot(proj: LocalProject) {
 
 export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 	const [projects, setProjects] = useState<LocalProject[]>([]);
+	const { add: notify } = useNotifications();
+	const [autosaveEnabled, setAutosaveEnabled] = useState<boolean>(() => {
+		try { return localStorage.getItem('py_autosave_enabled') !== '0'; } catch { return true; }
+	});
 	const [selectedProjectId, setSelectedProjectId] = useState<string | null>(readSelected());
 	useEffect(() => { setProjects(readStore()); }, []);
 	const [saving, setSaving] = useState(false);
@@ -397,6 +406,30 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 				const updated = { ...projects[idx], _filePath: newPath } as LocalProject;
 				const next = [...projects]; next[idx] = updated; setProjects(next); writeStore(next);
 			},
+			setPageStarter: (projectId: string, pageId: string, starter: boolean) => {
+				const idx = projects.findIndex(p => p.id === projectId); if (idx < 0) return;
+				const proj = projects[idx];
+				if (!proj.pages[pageId]) return;
+				const nextPages = { ...proj.pages } as Record<string, Page>;
+				let changed = false;
+				if (starter) {
+					// set only selected page as starter, unset others
+					for (const k of Object.keys(nextPages)) {
+						const was = Boolean(nextPages[k]?.starter);
+						const nowVal = (k === pageId);
+						if (was !== nowVal) { changed = true; }
+						nextPages[k] = { ...nextPages[k], starter: nowVal } as Page;
+					}
+				} else {
+					// unset only the selected page
+					const was = Boolean(nextPages[pageId]?.starter);
+					if (was) { nextPages[pageId] = { ...nextPages[pageId], starter: false } as Page; changed = true; }
+				}
+				if (changed) {
+					const nextProj: LocalProject = { ...proj, pages: nextPages, updatedAt: now() } as LocalProject;
+					const next = [...projects]; next[idx] = nextProj; setProjects(next); writeStore(next);
+				}
+			},
 			createPage: (projectId: string, title?: string) => {
 				const idx = projects.findIndex(p => p.id === projectId); if (idx < 0) return null;
 				const proj = projects[idx];
@@ -411,6 +444,7 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 				const page: Page = {
 					pageId: pid,
 					title: (title && title.trim()) || `Page ${order + 1}`,
+					starter: false,
 					order,
 					widgets: [],
 					breakpoints: { desktop: true, tablet: true, mobile: true },
@@ -426,8 +460,9 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 				} as LocalProject;
 				const next = [...projects]; next[idx] = nextProj; setProjects(next); writeStore(next);
 				if (!isCloud) {
-					window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'info', message: 'Adding more pages increases your project file size.' } }));
+					notify({ type: 'info', message: 'Adding more pages increases your project file size.', title: nextProj.name, persistent: false });
 				}
+				notify({ type: 'success', message: `Page "${(title || 'Untitled')}" created`, title: nextProj.name, persistent: false });
 				return pid;
 			},
 			renamePage: (projectId: string, pageId: string, newTitle: string) => {
@@ -437,18 +472,20 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 				const updatedPage: Page = { ...page, title: (newTitle || '').trim() || page.title, updatedAt: now() };
 				const nextProj: LocalProject = { ...proj, pages: { ...proj.pages, [pageId]: updatedPage }, updatedAt: now() } as LocalProject;
 				const next = [...projects]; next[idx] = nextProj; setProjects(next); writeStore(next);
+				notify({ type: 'success', message: `Page renamed to "${updatedPage.title}"`, title: nextProj.name, persistent: false });
 			},
 			deletePage: (projectId: string, pageId: string) => {
 				const idx = projects.findIndex(p => p.id === projectId); if (idx < 0) return;
 				const proj = projects[idx];
 				if ((proj.pageOrder?.length ?? 0) <= 1) {
-					window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'warn', message: 'A portfolio needs at least one page.' } }));
+					notify({ type: 'warn', message: 'A portfolio needs at least one page.', title: proj.name, persistent: false });
 					return;
 				}
 				if (!proj.pages[pageId]) return;
 				const nextOrder = proj.pageOrder.filter(id => id !== pageId);
 				const nextPages = { ...proj.pages } as Record<string, Page>;
 				// Remove page and clean up references
+				const wasStarter = Boolean(nextPages[pageId]?.starter);
 				delete nextPages[pageId];
 				// Re-number order field for consistency
 				const renumbered = nextOrder.map((id, i) => ({ ...nextPages[id], order: i, updatedAt: now() }));
@@ -461,6 +498,14 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 					if (stillReferenced.has(wid)) nextWidgets[wid] = w;
 				}
 				const nextProj: LocalProject = { ...proj, pageOrder: nextOrder, pages: nextPages, widgets: nextWidgets, updatedAt: now() } as LocalProject;
+				// If the deleted page was the starter, pick a fallback (first remaining) to be the starter
+				if (wasStarter) {
+					if (nextOrder.length > 0) {
+						const first = nextOrder[0];
+						for (const k of Object.keys(nextPages)) { nextPages[k] = { ...nextPages[k], starter: (k === first) } as Page; }
+						(nextProj.pages as Record<string, Page>) = nextPages;
+					}
+				}
 				const next = [...projects]; next[idx] = nextProj; setProjects(next); writeStore(next);
 			},
 			addProject: (name = "Untitled Portfolio") => {
@@ -477,7 +522,7 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 					createdAt: now(),
 					updatedAt: now(),
 					themes: { [defaultTheme.themeId]: defaultTheme },
-					pages: { [defaultPage.pageId]: defaultPage },
+					pages: { [defaultPage.pageId]: { ...defaultPage, starter: true } },
 					widgets: {},
 				};
 				const next = [p, ...projects];
@@ -628,6 +673,8 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 				});
 				if (changed) { setProjects(next); writeStore(next); }
 			},
+			autosaveEnabled,
+			setAutosaveEnabled: (v: boolean) => { try { localStorage.setItem('py_autosave_enabled', v ? '1' : '0'); } catch { } setAutosaveEnabled(v); try { notify({ type: 'info', message: v ? 'Autosave enabled' : 'Autosave disabled', persistent: false }); } catch { /* ignore */ } },
 			getPageItems: (projectId: string, pageId: string) => {
 				const proj = projects.find(p => p.id === projectId); if (!proj) return [];
 				const page = proj.pages[pageId]; if (!page) return [];
@@ -1223,6 +1270,8 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 						if (res.canceled || !res.filePath) return; // user canceled: no spinner to reset
 						proj = { ...proj, _filePath: res.filePath };
 						const next = [...projects]; next[idx] = proj; setProjects(next); writeStore(next);
+						// Notify user that Save As completed (file chosen & written)
+						try { notify({ type: 'success', message: 'Saved to disk', title: proj.name, persistent: false }); } catch { /* ignore */ }
 					} catch {
 						// ignore and fall through; write step below is gated by _filePath
 					}
@@ -1235,7 +1284,9 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 						if (window.api.writeFileBytes) await window.api.writeFileBytes({ filePath: proj._filePath, dataBase64: base64 });
 						else await window.api.writeFile({ filePath: proj._filePath, data: base64, encoding: 'base64' });
 						setLastSavedAt(now());
+						try { notify({ type: 'success', message: 'Saved to disk', title: proj.name, persistent: false }); } catch { /* ignore */ }
 					} catch {
+						try { notify({ type: 'error', message: 'Failed to save file', title: proj.name, persistent: false }); } catch { /* ignore */ }
 						// swallow to avoid UI disruption; notification system can be added later
 					} finally {
 						setSaving(false);
@@ -1277,19 +1328,21 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 				const p = projects.find(x => x.id === projectId);
 				const next = projects.filter(x => x.id !== projectId);
 				setProjects(next); writeStore(next);
+				notify({ type: 'success', message: `Project "${p?.name || projectId}" deleted`, title: p?.name, persistent: false });
 				if (selectedProjectId === projectId) { setSelectedProjectId(null); writeSelected(null); }
 				if (opts?.deleteFile && p?._filePath && window.api?.deleteFile) {
 					await window.api.deleteFile({ filePath: p._filePath });
 				}
 			},
 		};
-	}, [projects, selectedProjectId, saving, lastSavedAt, cloudMaxProjects, cloudBytesUsed, cloudProjectsCount]);
+	}, [projects, selectedProjectId, saving, lastSavedAt, cloudMaxProjects, cloudBytesUsed, cloudProjectsCount, autosaveEnabled, notify]);
 
 	// Auto-save to file for projects that have a _filePath
 	const prevTimesRef = useRef<Record<string, string>>({});
 	const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 	useEffect(() => {
 		if (!window.api?.writeFile) return; // only in Electron
+		if (!autosaveEnabled) return; // respect user toggle
 		if (debounceRef.current) clearTimeout(debounceRef.current);
 		debounceRef.current = setTimeout(async () => {
 			const prev = prevTimesRef.current;
@@ -1307,7 +1360,7 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 				prev[p.id] = p.updatedAt;
 			}
 			if (tasks.length) {
-				try { setSaving(true); await Promise.all(tasks); setLastSavedAt(now()); } catch { /* swallow to avoid UI disruption */ } finally { setSaving(false); }
+				try { setSaving(true); await Promise.all(tasks); setLastSavedAt(now()); try { notify({ type: 'success', message: 'Saved to disk', title: tasks.length > 1 ? `${tasks.length} projects` : undefined, persistent: false }); } catch { /* ignore */ } } catch { /* swallow to avoid UI disruption */ } finally { setSaving(false); }
 			}
 		}, 400);
 		return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
@@ -1317,6 +1370,7 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 	const periodicSavedRef = useRef<Record<string, string>>({});
 	useEffect(() => {
 		if (!window.api?.writeFile) return; // only in Electron
+		if (!autosaveEnabled) return; // respect user toggle
 		const timer = setInterval(async () => {
 			const prev = periodicSavedRef.current;
 			const tasks: Array<Promise<unknown>> = [];
@@ -1332,7 +1386,7 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 				}
 			}
 			if (tasks.length) {
-				try { setSaving(true); await Promise.all(tasks); setLastSavedAt(now()); } catch { /* ignore */ } finally { setSaving(false); }
+				try { setSaving(true); await Promise.all(tasks); setLastSavedAt(now()); try { notify({ type: 'success', message: 'Saved to disk', title: tasks.length > 1 ? `${tasks.length} projects` : undefined, persistent: false }); } catch { /* ignore */ } } catch { /* ignore */ } finally { setSaving(false); }
 			}
 		}, 30_000);
 		return () => clearInterval(timer);

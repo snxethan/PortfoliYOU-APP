@@ -76,7 +76,7 @@ export default function Sidebar() {
         <>
           {!collapsed && (
             <>
-              <NavLink to="/editor" className={({ isActive }) => `${base} ${isActive ? 'nav-active' : ''}`}>
+              <NavLink to="/editor" className={({ isActive }) => `${base} ${isActive ? 'nav-active' : ''}`} data-testid="nav-editor">
                 <Wrench size={16} /> Editor
               </NavLink>
               <NavLink to="/deploy" className={({ isActive }) => `${base} ${isActive ? 'nav-active' : ''}`}>

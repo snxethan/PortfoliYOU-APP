@@ -42,3 +42,7 @@ See `widgets/templates/` for example `TextWidget` and `ImageWidget` templates in
 - `templates/ImageWidget.tsx`
 
 These are examples and not automatically registered; copy and adapt when creating new widgets.
+
+## Developer Guide
+
+For a full step-by-step guide on adding a new widget to the registry and best practices (naming, schema, categories), see `docs/widgets-dev.md` at the repo root.

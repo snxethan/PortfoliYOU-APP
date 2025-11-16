@@ -161,9 +161,17 @@ export default function DraggableItem({ item, metrics, onMove, scrollEl, onDelet
 
   const outlineClass = selected ? 'ring-2 ring-black border-black' : 'hover:ring-2 hover:ring-black';
   return (
-    <div className="absolute select-none group" style={{ left: pxLeft, top: pxTop, width: pxW, height: pxH, zIndex: dragging ? 5000 : (typeof item.z === 'number' ? 100 + item.z : undefined) }}>
+    <div className="absolute select-none group" style={{ left: pxLeft, top: pxTop, width: pxW, height: pxH, zIndex: dragging ? 5000 : (typeof item.z === 'number' ? 100 + item.z : undefined) }} data-widget-id={item.id} data-testid="widget-item">
       <div
         className={`h-full rounded-md border-2 bg-transparent ${outlineClass}`}
+        role="button"
+        aria-label={`Widget: ${item.title || item.type || 'item'}`}
+        tabIndex={0}
+        onFocus={() => onSelect?.(item.id)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpenModify?.(item.id); }
+          // Arrow key nudging handled at editor container; allow bubbling
+        }}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
@@ -175,6 +183,7 @@ export default function DraggableItem({ item, metrics, onMove, scrollEl, onDelet
             <button
               className="cursor-pointer p-1 rounded bg-white text-black border-2 border-black hover:bg-neutral-100 shadow-sm"
               title="Widget settings"
+              data-testid="widget-settings-btn"
               onClick={(e) => { e.stopPropagation(); onOpenModify(item.id); }}
             >
               <SettingsIcon size={14} />
@@ -241,7 +250,15 @@ export default function DraggableItem({ item, metrics, onMove, scrollEl, onDelet
           }}
         >
           {item.type ? (
-            <WidgetRenderer instance={{ id: item.id, type: item.type, props: item.props ?? {} }} />
+            <WidgetRenderer
+              instance={{ id: item.id, type: item.type, props: item.props ?? {} }}
+              editing
+              interactive={false}
+              onChangeProps={(partial) => {
+                const nextProps = { ...((item.props as Record<string, unknown>) ?? {}), ...partial };
+                onMove({ ...item, props: nextProps });
+              }}
+            />
           ) : (
             <div className="text-[10px] text-[color:var(--fg-muted)] border border-dashed border-[color:var(--border)] rounded h-full flex items-center justify-center">
               Unknown widget

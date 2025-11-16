@@ -16,6 +16,12 @@ WidgetsRegistry.register(
 );
 
 WidgetsRegistry.register(
-  { type: 'contact', label: 'Email Contact', grid: { w: 6, h: 6 }, category: 'Contact' },
+  { type: 'contact', label: 'Email Contact', grid: { w: 6, h: 4 }, category: 'Contact' },
   () => import('./defs/Contact').then(m => m.default as import('./types').WidgetDefinition<unknown>)
+);
+
+// Navigation
+WidgetsRegistry.register(
+  { type: 'nav-link', label: 'Nav Link', grid: { w: 3, h: 2 }, category: 'Navigation' },
+  () => import('./defs/NavLink').then(m => m.default as import('./types').WidgetDefinition<unknown>)
 );

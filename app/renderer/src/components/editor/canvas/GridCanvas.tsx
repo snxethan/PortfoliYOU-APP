@@ -99,9 +99,10 @@ export default function GridCanvas({ cols, gap, rowH, items, onChange, scrollEl,
   return (
     <div
       ref={assignRef}
-      className="relative bg-white rounded-md border-2 border-black shadow-sm"
+      className="relative bg-transparent"
       role="region"
       aria-label="Canvas editor"
+      data-testid="grid-canvas"
       style={{ minHeight: 384, height: canvasHeight, backgroundImage: bg }}
       onMouseDown={(e) => {
         // clicking on empty space clears selection

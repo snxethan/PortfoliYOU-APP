@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import React, { createContext, useContext, useMemo, useState } from 'react';
 
 import type { PropSchema, WidgetDefinition } from './types';
 
@@ -85,4 +85,21 @@ export function useWidgetConfig<P>(def: WidgetDefinition<P>, incoming?: Partial<
     }
 
     return { config, set, patch, reset, errors } as const;
+}
+
+// Lightweight context so widgets can know if they're in-editor and push prop updates
+export type WidgetAPI = {
+    id: string;
+    editing: boolean;        // true when canvas edit mode is active
+    interactive: boolean;    // false when widgets should be non-interactive (edit/preview)
+    updateProps: (partial: Record<string, unknown>) => void;
+    // Optional: current page id when rendering inside preview/export so widgets
+    // can expose a11y affordances like aria-current
+    currentPageId?: string;
+};
+
+export const WidgetContext = createContext<WidgetAPI>({ id: '', editing: false, interactive: true, updateProps: () => { /* noop */ }, currentPageId: undefined });
+
+export function useWidget() {
+    return useContext(WidgetContext);
 }

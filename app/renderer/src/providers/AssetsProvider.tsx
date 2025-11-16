@@ -1,6 +1,9 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { useNotifications } from './NotificationsProvider';
+import { useProjects } from './ProjectsProvider';
 import { auth, storage } from '../lib/firebase';
 import { ref as storageRef, getDownloadURL, uploadBytes } from 'firebase/storage';
+import { onAuthStateChanged } from 'firebase/auth';
 import { AssetMeta, computeHash, getImageSize, idbAllMeta, idbDelete, idbGet, idbPut, stores } from '../lib/assetsStore';
 
 export type AssetsCtx = {
@@ -10,6 +13,8 @@ export type AssetsCtx = {
     remove: (hash: string) => Promise<void>;
     syncToCloud: (hash: string) => Promise<AssetMeta | null>;
     get: (hash: string) => Promise<AssetMeta | null>;
+    syncAllToCloud: () => Promise<AssetMeta[]>;
+    ensure: (hash: string) => Promise<AssetMeta | null>; // ensure blob present locally (download if needed)
 };
 
 const Ctx = createContext<AssetsCtx | null>(null);
@@ -18,6 +23,16 @@ const Ctx = createContext<AssetsCtx | null>(null);
 export function AssetsProvider({ children }: { children: React.ReactNode }) {
     const [list, setList] = useState<AssetMeta[]>([]);
     const urlsRef = useRef<Record<string, string>>({});
+    const { add: notify } = useNotifications();
+    const { selectedProject } = useProjects();
+    const LARGE_IMAGE_THRESHOLD = 2 * 1024 * 1024; // 2MB
+    function formatBytes(bytes: number) {
+        if (bytes < 1024) return bytes + ' B';
+        const kb = bytes / 1024;
+        if (kb < 1024) return `${kb.toFixed(1)} KB`;
+        const mb = kb / 1024;
+        return `${mb.toFixed(2)} MB`;
+    }
 
     const refresh = useCallback(async () => {
         const items = await idbAllMeta();
@@ -44,6 +59,12 @@ export function AssetsProvider({ children }: { children: React.ReactNode }) {
                 height: dim.height,
                 createdAt: new Date().toISOString(),
             };
+            // Notify if image is large
+            try {
+                if (file.size > LARGE_IMAGE_THRESHOLD) {
+                    notify({ type: 'warning', message: `Large image detected: ${file.name} (${formatBytes(file.size)})`, title: selectedProject?.name, persistent: false });
+                }
+            } catch { /* ignore notification failures */ }
             await idbPut(stores.STORE_BLOBS, hash, file);
             await idbPut(stores.STORE_META, hash, meta);
             results.push(meta);
@@ -81,7 +102,7 @@ export function AssetsProvider({ children }: { children: React.ReactNode }) {
                 await uploadBytes(storageRef(storage, path), blob, { contentType: meta.type });
                 url = await getDownloadURL(storageRef(storage, path));
             }
-            const next: AssetMeta = { ...meta, cloudPath: path, cloudUrl: url || undefined };
+            const next: AssetMeta = { ...meta, cloudPath: path, cloudUrl: url || undefined, syncedAt: new Date().toISOString() };
             await idbPut(stores.STORE_META, hash, next);
             await refresh();
             return next;
@@ -90,11 +111,49 @@ export function AssetsProvider({ children }: { children: React.ReactNode }) {
         }
     }, [refresh]);
 
+    const syncAllToCloud = useCallback(async () => {
+        const user = auth.currentUser; if (!user) return [];
+        const metas = await idbAllMeta();
+        const toSync = metas.filter(m => !m.cloudUrl || !m.syncedAt);
+        const results: AssetMeta[] = [];
+        for (const m of toSync) {
+            const synced = await syncToCloud(m.hash);
+            if (synced) results.push(synced);
+        }
+        return results;
+    }, [syncToCloud]);
+
+    const ensure = useCallback(async (hash: string) => {
+        const meta = await idbGet<AssetMeta>(stores.STORE_META, hash); if (!meta) return null;
+        const existingBlob = await idbGet<Blob>(stores.STORE_BLOBS, hash);
+        if (existingBlob) return meta;
+        // Attempt remote fetch if we have a cloud URL
+        if (meta.cloudUrl) {
+            try {
+                const resp = await fetch(meta.cloudUrl);
+                if (resp.ok) {
+                    const blob = await resp.blob();
+                    await idbPut(stores.STORE_BLOBS, hash, blob);
+                    return meta;
+                }
+            } catch { /* noop */ }
+        }
+        return meta; // return meta even if blob missing
+    }, []);
+
+    // Auto bulk sync on sign-in
+    useEffect(() => {
+        const unsub = onAuthStateChanged(auth, (user) => {
+            if (user) { void syncAllToCloud(); }
+        });
+        return () => unsub();
+    }, [syncAllToCloud]);
+
     const get = useCallback(async (hash: string) => {
         return (await idbGet<AssetMeta>(stores.STORE_META, hash)) || null;
     }, []);
 
-    const api = useMemo<AssetsCtx>(() => ({ list, addFiles, getUrl, remove, syncToCloud, get }), [list, addFiles, getUrl, remove, syncToCloud, get]);
+    const api = useMemo<AssetsCtx>(() => ({ list, addFiles, getUrl, remove, syncToCloud, get, syncAllToCloud, ensure }), [list, addFiles, getUrl, remove, syncToCloud, get, syncAllToCloud, ensure]);
     return <Ctx.Provider value={api}>{children}</Ctx.Provider>;
 }
 

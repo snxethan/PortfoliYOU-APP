@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { AlertTriangle, CheckCircle2, Info, X, XCircle, AlertOctagon, ArrowUpCircle } from "lucide-react";
 
 import { useNotifications } from "../../providers/NotificationsProvider";
@@ -58,7 +59,7 @@ export function NotificationStack() {
   const visible = useMemo(() => notifications.filter(n => !hidden[n.id]), [notifications, hidden]);
   if (!visible.length) return null;
   return (
-    <div className="fixed bottom-2 right-2 z-50 flex flex-col gap-2 max-w-sm pointer-events-none">
+    <div className="fixed bottom-2 right-2 z-[40000] flex flex-col gap-2 max-w-sm pointer-events-none">
       {visible.map(n => {
         const Wrapper: React.FC<{ children: React.ReactNode }> = ({ children }) => {
           if (n.href) {
@@ -103,6 +104,27 @@ export function NotificationStack() {
   );
 }
 
+function usePortalContainer(id = 'py-toast-root') {
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  if (typeof document !== 'undefined' && !rootRef.current) {
+    let el = document.getElementById(id) as HTMLDivElement | null;
+    if (!el) {
+      el = document.createElement('div');
+      el.id = id;
+      document.body.appendChild(el);
+    }
+    el.style.position = 'fixed';
+    el.style.inset = '0';
+    el.style.zIndex = '40000';
+    el.style.pointerEvents = 'none';
+    rootRef.current = el;
+  }
+  // keep stable ref
+  return rootRef;
+}
+
 export default function NotificationsUI() {
-  return <NotificationStack />;
+  const rootRef = usePortalContainer();
+  if (!rootRef.current) return null;
+  return createPortal(<NotificationStack />, rootRef.current);
 }

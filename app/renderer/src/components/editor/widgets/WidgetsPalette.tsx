@@ -1,5 +1,5 @@
 import { useDraggable } from '@dnd-kit/core';
-import { Boxes, Search, ChevronDown, ChevronRight, Image as ImageIcon, Mail, Type as TypeIcon } from 'lucide-react';
+import { Boxes, Search, ChevronDown, ChevronRight, Image as ImageIcon, Mail, Type as TypeIcon, Link2 } from 'lucide-react';
 import React, { memo, useEffect, useMemo, useState } from 'react';
 
 import { WidgetsRegistry } from '../../../widgets/registry';
@@ -19,6 +19,7 @@ function DraggablePaletteTile({ type, label, w, h }: { type: string; label: stri
       role="button"
       aria-label={`Add ${label} widget`}
       tabIndex={0}
+      data-testid={`palette-tile-${type}`}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
@@ -48,6 +49,13 @@ function DraggablePaletteTile({ type, label, w, h }: { type: string; label: stri
             <div className="h-6 bg-[color:var(--muted)]/50 rounded mb-1" />
             <div className="h-2 bg-[color:var(--muted)]/50 rounded w-3/4 mb-0.5" />
             <div className="h-2 bg-[color:var(--muted)]/40 rounded w-1/2" />
+          </div>
+        ) : type === 'nav-link' ? (
+          <div className="w-full h-full bg-white rounded-md border border-[color:var(--border)] flex items-center justify-center">
+            <div className="flex items-center gap-1">
+              <Link2 size={14} className="text-[color:var(--accent)]" />
+              <span className="text-[11px] font-semibold text-[color:var(--accent)] underline">Link</span>
+            </div>
           </div>
         ) : (
           <div className="w-full h-full bg-white rounded-md border border-[color:var(--border)] flex items-center justify-center">

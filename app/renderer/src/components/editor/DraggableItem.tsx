@@ -180,7 +180,7 @@ export default function DraggableItem({ item, metrics, onMove, scrollEl, onDelet
         onPointerUp={onPointerUp}
         onFocus={() => onSelect?.(item.id)}
         onKeyDown={(e) => {
-          if (e.key === 'Enter') { e.preventDefault(); onOpenModify?.(item.id); }
+          if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpenModify?.(item.id); }
           // Arrow key nudging is handled at the editor container level; allow bubbling
         }}
         onDoubleClick={() => onOpenModify?.(item.id)}

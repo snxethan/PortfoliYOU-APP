@@ -1,11 +1,11 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { z } from 'zod';
 
 import type { WidgetDefinition } from '../types';
 import { useAssets } from '../../providers/AssetsProvider';
 
-function ResolveAssetImg({ src, alt, fit, scale }: { src: string; alt?: string; fit?: React.CSSProperties['objectFit']; scale?: number }) {
-    const { getUrl } = useAssets();
+function ResolveAssetImg({ src, alt, fit, scale }: { src: string; alt: string; fit?: React.CSSProperties['objectFit']; scale?: number }) {
+    const { getUrl, get } = useAssets();
     const [resolved, setResolved] = useState<string | null>(null);
     useEffect(() => {
         let alive = true;
@@ -28,11 +28,37 @@ function ResolveAssetImg({ src, alt, fit, scale }: { src: string; alt?: string; 
         void go();
         return () => { alive = false; };
     }, [src, getUrl]);
+
+    // Warn on large images (asset://) using stored metadata
+    useEffect(() => {
+        let alive = true;
+        async function check() {
+            try {
+                if (!src || !src.startsWith('asset://')) return;
+                const hash = src.slice('asset://'.length);
+                const meta = await get(hash);
+                if (!alive || !meta) return;
+                const sizeMB = (meta.size || 0) / (1024 * 1024);
+                const w = meta.width || 0;
+                const h = meta.height || 0;
+                const isLarge = sizeMB > 2 || w >= 3840 || h >= 2160; // ~4K or >2MB
+                if (isLarge) {
+                    const msg = `Large image detected (${sizeMB.toFixed(2)} MB, ${w}×${h}). Consider compressing or resizing for performance.`;
+                    window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'warn', message: msg } }));
+                }
+            } catch { /* ignore */ }
+        }
+        void check();
+        return () => { alive = false; };
+    }, [src, get]);
+
     if (!resolved) return null;
     return (
         <img
             src={resolved}
-            alt={alt || ''}
+            alt={alt}
+            loading="lazy"
+            decoding="async"
             style={{ width: '100%', height: '100%', display: 'block', objectFit: fit || 'contain', objectPosition: 'center center', transform: scale && scale !== 1 ? `scale(${scale})` : undefined, transformOrigin: 'center center' }}
         />
     );
@@ -40,10 +66,10 @@ function ResolveAssetImg({ src, alt, fit, scale }: { src: string; alt?: string; 
 
 type Shape = 'rectangle' | 'rounded' | 'circle';
 
-const def: WidgetDefinition<{ src: string; alt?: string; fit?: React.CSSProperties['objectFit']; radius?: number; scale?: number; shape?: Shape; borderWidth?: number; borderColor?: string; borderStyle?: 'solid' | 'dashed' | 'dotted' }> = {
+const def: WidgetDefinition<{ src: string; alt: string; fit?: React.CSSProperties['objectFit']; radius?: number; scale?: number; shape?: Shape; borderWidth?: number; borderColor?: string; borderStyle?: 'solid' | 'dashed' | 'dotted' }> = {
     type: 'image',
     label: 'Image',
-    defaultProps: { src: '', alt: '', fit: 'contain', radius: 8, scale: 1, shape: 'rectangle', borderWidth: 0, borderColor: '#000000', borderStyle: 'solid' },
+    defaultProps: { src: '', alt: 'Image', fit: 'contain', radius: 8, scale: 1, shape: 'rectangle', borderWidth: 0, borderColor: '#000000', borderStyle: 'solid' },
     grid: { w: 2, h: 2 },
     render: (props) => {
         const hasSrc = !!props.src;
@@ -68,7 +94,7 @@ const def: WidgetDefinition<{ src: string; alt?: string; fit?: React.CSSProperti
             if (v.startsWith('asset://') || v.startsWith('assets/')) return true;
             try { const u = new URL(v); return u.protocol === 'http:' || u.protocol === 'https:' || u.protocol === 'data:'; } catch { return false; }
         }, { message: 'Enter a valid URL or choose an image.' }).transform((v) => v),
-        alt: z.string().optional(),
+        alt: z.string().min(1, 'Alt text is required'),
         fit: z.enum(['contain', 'cover', 'fill', 'none', 'scale-down']).optional(),
         radius: z.number().min(0).optional(),
         scale: z.number().min(0.1).max(4).optional(),

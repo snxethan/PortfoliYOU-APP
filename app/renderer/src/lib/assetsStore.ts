@@ -11,6 +11,7 @@ export type AssetMeta = {
     createdAt: string; // ISO
     cloudPath?: string;
     cloudUrl?: string;
+    syncedAt?: string; // ISO timestamp when successfully uploaded to cloud
 };
 
 const DB_NAME = 'py_assets_v1';

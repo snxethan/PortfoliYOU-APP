@@ -56,11 +56,11 @@ export default function ProjectsList({
                         >
                             <div className="min-w-0">
                                 {editingId === p.id ? (
-                                    <div className="flex items-center gap-2">
-                                        <input className="input w-64" value={editDraft} onChange={e => setEditDraft(e.target.value)} onClick={(e) => e.stopPropagation()} />
-                                        <button className="btn btn-primary btn-xs" onClick={async (e) => { e.stopPropagation(); const v = editDraft.trim(); if (v) await onRename(p.id, v); setEditingId(null); }}><CheckCircle2 size={14} /></button>
-                                        <button className="btn btn-outline btn-xs" onClick={(e) => { e.stopPropagation(); setEditingId(null); }}>Cancel</button>
-                                    </div>
+                                    <form className="flex items-center gap-2" onSubmit={async (e) => { e.preventDefault(); const v = editDraft.trim(); if (v) await onRename(p.id, v); setEditingId(null); }}>
+                                        <input className="input w-64" value={editDraft} onChange={e => setEditDraft(e.target.value)} onClick={(e) => e.stopPropagation()} onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); setEditingId(null); } }} />
+                                        <button type="submit" className="btn btn-primary btn-xs"><CheckCircle2 size={14} /></button>
+                                        <button type="button" className="btn btn-outline btn-xs" onClick={(e) => { e.stopPropagation(); setEditingId(null); }}>Cancel</button>
+                                    </form>
                                 ) : (
                                     <>
                                         <div className="text-sm font-medium truncate flex items-center gap-1" title={p.name}>

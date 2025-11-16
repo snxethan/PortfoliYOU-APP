@@ -4,9 +4,11 @@ import { ChevronsLeft, ChevronsRight, ChevronDown, ChevronRight } from "lucide-r
 import { DndContext, PointerSensor, useSensor, useSensors, DragEndEvent, DragStartEvent, rectIntersection, DragOverlay } from "@dnd-kit/core";
 
 import { useProjects } from "../providers/ProjectsProvider";
+import { useNotifications } from '../providers/NotificationsProvider';
 import type { GridItem } from "../components/editor/canvas/GridCanvas";
 const ModifyWidgetModal = lazy(() => import("../components/editor/widgets/ModifyWidgetModal"));
 const WidgetsPalette = lazy(() => import("../components/editor/widgets/WidgetsPalette"));
+import PageSettingsModal from "../components/modals/PageSettingsModal";
 import EditorTopBar from "../components/editor/EditorTopBar";
 import PageControls from "../components/editor/PageControls";
 import ViewportSurface from "../components/editor/ViewportSurface";
@@ -19,7 +21,8 @@ const COLS = 12;
 const DEFAULT_ROW_H = 32; // px height per row (content area)
 
 export default function EditorPage() {
-  const { selectedProject, createPage, deletePage, renamePage, getPageItems, setPageItems } = useProjects();
+  const { selectedProject, createPage, deletePage, renamePage, getPageItems, setPageItems, setPageStarter } = useProjects();
+  const { add: notify } = useNotifications();
   const navigate = useNavigate();
 
   // Track current page within the selected project
@@ -49,6 +52,11 @@ export default function EditorPage() {
       window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'warn', message: 'Cloud projects support up to 10 pages. Showing first page.' } }));
     }
   }, [selectedProject?._cloudId, selectedProject?.pageOrder, currentPageId]);
+
+  // Page settings modal state
+  const [renameModalOpen, setRenameModalOpen] = useState<boolean>(false);
+  const [renameOldTitle, setRenameOldTitle] = useState<string>("");
+  const [renameInitialStarter, setRenameInitialStarter] = useState<boolean>(false);
 
   // Gap between cells (both x and y), in pixels
   const [gap, setGap] = useState<number>(12);
@@ -105,6 +113,8 @@ export default function EditorPage() {
       setRedoStack(r => [...r, entry]);
       // Run side-effect for page-level actions (create/delete/rename)
       entry.onUndo?.();
+      // notify user of successful undo
+      try { notify({ type: 'info', message: `Undid: ${entry.label}`, title: selectedProject?.name, persistent: false }); } catch { }
       return undone;
     });
   }
@@ -117,6 +127,7 @@ export default function EditorPage() {
       setRedoStack(r => r.slice(0, -1));
       setHistory(h => [...h, entry]);
       entry.onRedo?.();
+      try { notify({ type: 'info', message: `Redid: ${entry.label}`, title: selectedProject?.name, persistent: false }); } catch { }
       return redone;
     });
   }
@@ -483,10 +494,18 @@ export default function EditorPage() {
             }}
             onRenameCurrentPage={() => {
               if (!selectedProject || !currentPageId) return;
+              try { notify({ type: 'info', message: 'Rename handler invoked', title: selectedProject?.name, persistent: false }); } catch { /* ignore */ }
               const oldTitle = selectedProject.pages[currentPageId]?.title || 'Untitled';
-              const nextTitle = window.prompt('New page name', oldTitle);
-              if (!nextTitle || nextTitle.trim() === oldTitle) return;
-              const trimmed = nextTitle.trim();
+              setRenameOldTitle(oldTitle);
+              setRenameInitialStarter(Boolean(selectedProject.pages[currentPageId]?.starter));
+              setRenameModalOpen(true);
+            }}
+            onRenameInline={(newName: string) => {
+              if (!selectedProject || !currentPageId) return;
+              const oldTitle = selectedProject.pages[currentPageId]?.title || 'Untitled';
+              const trimmed = (newName || '').trim();
+              if (!trimmed || trimmed === oldTitle) return;
+              // history entry
               setHistory(h => {
                 const entry: HistoryEntry = {
                   label: 'Rename page',
@@ -499,6 +518,15 @@ export default function EditorPage() {
               });
               setRedoStack([]);
               renamePage(selectedProject.id, currentPageId, trimmed);
+              try { localStorage.setItem(`py_current_page_${selectedProject.id}`, currentPageId); } catch { }
+              try { setItems(getPageItems(selectedProject.id, currentPageId) as GridItem[]); } catch { }
+            }}
+            onOpenSettings={() => {
+              if (!selectedProject || !currentPageId) return;
+              const oldTitle = selectedProject.pages[currentPageId]?.title || 'Untitled';
+              setRenameOldTitle(oldTitle);
+              setRenameInitialStarter(Boolean(selectedProject.pages[currentPageId]?.starter));
+              setRenameModalOpen(true);
             }}
             onDeleteCurrentPage={() => {
               if (!selectedProject || !currentPageId) return;
@@ -655,6 +683,12 @@ export default function EditorPage() {
                 // Only handle for Image widgets: set src to asset://hash
                 commitUpdate('Set image from asset', (prev) => prev.map(it => it.id === id && it.type === 'image' ? { ...it, props: { ...(it.props as Record<string, unknown>), src: `asset://${hash}` } } : it));
               }}
+              onNavigatePage={(pid) => {
+                if (!selectedProject) return;
+                setCurrentPageId(pid);
+                try { localStorage.setItem(`py_current_page_${selectedProject.id}`, pid); } catch { /* ignore */ }
+              }}
+              currentPageId={currentPageId || undefined}
             />
 
             {/* Widget Sidebar (collapsible) */}
@@ -726,15 +760,75 @@ export default function EditorPage() {
       {/* Standalone popup window preview (renders current page) */}
       <PreviewPopup open={popupOpen} onClose={closeWebpage} title="PortfoliYOU – Preview" width={pageWidth} height={pageHeight}>
         <div style={{ width: pageWidth }}>
-          <PagePreview width={pageWidth} cols={COLS} gap={gap} rowH={DEFAULT_ROW_H} items={items} />
+          <PagePreview width={pageWidth} cols={COLS} gap={gap} rowH={DEFAULT_ROW_H} items={items} currentPageId={currentPageId || undefined} onNavigatePage={(pid) => {
+            if (!selectedProject) return;
+            setCurrentPageId(pid);
+            try { localStorage.setItem(`py_current_page_${selectedProject.id}`, pid); } catch { /* ignore */ }
+          }} />
         </div>
       </PreviewPopup>
+
+      {renameModalOpen && selectedProject && currentPageId && (
+        <PageSettingsModal
+          title="Page settings"
+          initialName={renameOldTitle}
+          initialStarter={renameInitialStarter}
+          onCancel={() => setRenameModalOpen(false)}
+          onSave={({ name, starter }) => {
+            const trimmed = (name || '').trim();
+            if (!trimmed) { setRenameModalOpen(false); return; }
+            const oldTitle = renameOldTitle || 'Untitled';
+            // Add history entry
+            setHistory(h => {
+              const entry: HistoryEntry = {
+                label: 'Rename page',
+                undo: (items) => items,
+                redo: (items) => items,
+                onUndo: () => { renamePage(selectedProject.id, currentPageId, oldTitle); },
+                onRedo: () => { renamePage(selectedProject.id, currentPageId, trimmed); },
+              } as HistoryEntry;
+              return [...h, entry];
+            });
+            setRedoStack([]);
+            renamePage(selectedProject.id, currentPageId, trimmed);
+            // Update starter setting
+            try { setPageStarter(selectedProject.id, currentPageId, Boolean(starter)); } catch { /* ignore */ }
+            try {
+              try { localStorage.setItem(`py_current_page_${selectedProject.id}`, currentPageId); } catch { /* ignore */ }
+              setCurrentPageId(currentPageId);
+              setItems(getPageItems(selectedProject.id, currentPageId) as GridItem[]);
+            } catch { /* ignore */ }
+            setRenameModalOpen(false);
+          }}
+          onDelete={() => {
+            // close modal then delete page
+            setRenameModalOpen(false);
+            if (!selectedProject || !currentPageId) return;
+            const total = selectedProject.pageOrder?.length ?? 0;
+            if (total <= 1) {
+              notify({ type: 'warn', message: 'A portfolio needs at least one page.', title: selectedProject.name, persistent: false });
+              return;
+            }
+            deletePage(selectedProject.id, currentPageId);
+            // pick next page
+            const remaining = (selectedProject.pageOrder || []).filter(id => id !== currentPageId);
+            const nextId = remaining[0] || null;
+            setCurrentPageId(nextId);
+            if (nextId) setItems(getPageItems(selectedProject.id, nextId) as GridItem[]); else setItems([]);
+          }}
+        />
+      )}
 
       {editingItem && (
         <Suspense fallback={null}>
           <ModifyWidgetModal
             item={editingItem!}
             onClose={closeModify}
+            onDelete={() => {
+              // Delete the currently editing widget and close modal
+              commitUpdate("Delete widget", (prev) => prev.filter(it => it.id === editingItem!.id ? false : true));
+              closeModify();
+            }}
             onRename={(v) => commitUpdate("Rename widget", (prev) => prev.map(it => it.id === editingItem!.id ? { ...it, title: v } : it))}
             onBringToFront={() => bringToFront(editingItem!.id)}
             onSendToBack={() => sendToBack(editingItem!.id)}

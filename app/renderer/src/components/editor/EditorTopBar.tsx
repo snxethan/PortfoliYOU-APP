@@ -115,11 +115,11 @@ export default function EditorTopBar(props: EditorTopBarProps) {
 
                 {/* Undo/Redo group - highlighted box */}
                 <div className="flex items-center gap-2 px-2 py-1 rounded border border-[color:var(--border)] bg-transparent">
-                    <button className="btn btn-ghost flex items-center gap-2 text-sm disabled:opacity-60" title="Undo (Ctrl+Z)" onClick={undo} disabled={!canUndo}>
+                    <button className="btn btn-ghost flex items-center gap-2 text-sm disabled:opacity-60" title="Undo (Ctrl+Z)" onClick={undo} disabled={!canUndo} data-testid="undo-btn">
                         <Undo size={16} />
                         Undo
                     </button>
-                    <button className="btn btn-ghost flex items-center gap-2 text-sm disabled:opacity-60" title="Redo (Ctrl+Y)" onClick={redo} disabled={!canRedo}>
+                    <button className="btn btn-ghost flex items-center gap-2 text-sm disabled:opacity-60" title="Redo (Ctrl+Y)" onClick={redo} disabled={!canRedo} data-testid="redo-btn">
                         <Redo size={16} />
                         Redo
                     </button>

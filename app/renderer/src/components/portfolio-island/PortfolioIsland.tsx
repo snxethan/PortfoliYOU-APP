@@ -5,7 +5,7 @@ import { Cloud, UploadCloud, Wrench, X, Save, FolderUp, FolderOpen, Edit3, Pin, 
 import { useProjects } from "../../providers/ProjectsProvider";
 
 export default function PortfolioIsland() {
-  const { selectedProject, selectedProjectId, saving, lastSavedAt, saveProject, clearSelection, renameProject } = useProjects();
+  const { selectedProject, selectedProjectId, saving, lastSavedAt, saveProject, clearSelection, renameProject, autosaveEnabled, setAutosaveEnabled } = useProjects();
   const navigate = useNavigate();
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState("");
@@ -24,28 +24,24 @@ export default function PortfolioIsland() {
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-2 min-w-0">
             {editingTitle ? (
-              <div className="flex items-center gap-2">
+              <form className="flex items-center gap-2" onSubmit={async (e) => { e.preventDefault(); if (!selectedProjectId) return; const v = titleDraft.trim(); if (v) { await renameProject(selectedProjectId, v); setEditingTitle(false); } }}>
                 <input
                   autoFocus
                   value={titleDraft}
                   onChange={(e) => setTitleDraft(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Escape') setEditingTitle(false); }}
                   className="input w-64"
                   placeholder="Portfolio name"
                 />
                 <button
+                  type="submit"
                   className="btn btn-primary btn-xs"
                   disabled={!selectedProjectId || !titleDraft.trim()}
-                  onClick={async () => {
-                    if (!selectedProjectId) return;
-                    const v = titleDraft.trim();
-                    await renameProject(selectedProjectId, v);
-                    setEditingTitle(false);
-                  }}
                 >
                   Save
                 </button>
-                <button className="btn btn-outline btn-xs" onClick={() => setEditingTitle(false)}>Cancel</button>
-              </div>
+                <button type="button" className="btn btn-outline btn-xs" onClick={() => setEditingTitle(false)}>Cancel</button>
+              </form>
             ) : (
               <button
                 type="button"
@@ -112,6 +108,23 @@ export default function PortfolioIsland() {
               >
                 {pinned ? <Pin size={16} /> : <PinOff size={16} />}
                 <span className="ml-1 hidden sm:inline">{pinned ? 'Pinned' : 'Pin'}</span>
+              </button>
+              <button
+                className={`btn btn-ghost ${autosaveEnabled ? 'active' : ''}`}
+                title={autosaveEnabled ? 'Autosave enabled' : 'Autosave disabled'}
+                aria-pressed={!!autosaveEnabled}
+                aria-label={autosaveEnabled ? 'Autosave enabled' : 'Autosave disabled'}
+                onClick={() => setAutosaveEnabled(!autosaveEnabled)}
+              >
+                <span className="relative inline-flex items-center">
+                  <Save size={16} />
+                  {!autosaveEnabled && (
+                    <span className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                      <span className="w-4/5 h-[2px] bg-current rotate-45 origin-center"></span>
+                    </span>
+                  )}
+                </span>
+                <span className="ml-1 hidden sm:inline">Autosave</span>
               </button>
               <button
                 className="btn btn-ghost"

@@ -37,6 +37,8 @@ export type ViewportSurfaceProps = {
     onTogglePin?: (id: string) => void;
     onOpenModify?: (id: string) => void;
     onDropAsset?: (id: string, hash: string) => void;
+    onNavigatePage?: (pageId: string) => void; // used in preview mode
+    currentPageId?: string; // for a11y (aria-current) in preview
 };
 
 export default function ViewportSurface(props: ViewportSurfaceProps) {
@@ -66,6 +68,8 @@ export default function ViewportSurface(props: ViewportSurfaceProps) {
         onTogglePin,
         onOpenModify,
         onDropAsset,
+        onNavigatePage,
+        currentPageId,
     } = props;
 
     const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -95,7 +99,7 @@ export default function ViewportSurface(props: ViewportSurfaceProps) {
             >
                 {previewMode ? (
                     <PreviewIframe width={pageWidth} height={effectivePageHeight}>
-                        <PagePreview width={pageWidth} cols={cols} gap={gap} rowH={rowH} items={items} />
+                        <PagePreview width={pageWidth} cols={cols} gap={gap} rowH={rowH} items={items} currentPageId={currentPageId} onNavigatePage={onNavigatePage} />
                     </PreviewIframe>
                 ) : (
                     <GridCanvas

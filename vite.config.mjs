@@ -8,4 +8,10 @@ export default defineConfig({
   build: { outDir: "../../dist", emptyOutDir: true }, // output directory for the build
   server: { port: 5173, strictPort: true }, // keep in sync with electron wait-on port
   plugins: [react()], // enables React support
+  test: {
+    environment: 'jsdom',
+    setupFiles: 'test/setup.ts',
+    globals: true,
+    include: ['src/**/*.spec.{ts,tsx}', 'src/**/*.test.{ts,tsx}']
+  }
 });

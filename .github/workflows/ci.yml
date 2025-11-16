@@ -1,4 +1,41 @@
-﻿# .github/workflows/ci.yml
+﻿name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+jobs:
+  test:
+    name: Unit tests (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ["20.19.0", "22.12.0"]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js ${{ matrix.node }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint (informational)
+        run: npm run lint || echo "lint warnings/errors (non-blocking)"
+
+      - name: Run unit tests
+        run: npm run test
+
+      - name: Build renderer (sanity)
+        run: npm run build:renderer
+# .github/workflows/ci.yml
 name: CI
 
 on:
