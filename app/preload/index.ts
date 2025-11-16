@@ -4,36 +4,48 @@ import { contextBridge, ipcRenderer } from "electron";
 contextBridge.exposeInMainWorld("api", {
 	ping: () => "pong",
 	// Save a file to disk (Electron only)
-	saveFile: async (options: { defaultPath?: string; data: string }) => {
+	saveFile: async (options: { defaultPath?: string; data: string; encoding?: 'utf8' | 'base64' }) => {
 		return ipcRenderer.invoke("py:saveFile", options);
+	},
+	// Save a binary file (base64-encoded) to disk
+	saveFileBytes: async (options: { defaultPath?: string; dataBase64: string }) => {
+		return ipcRenderer.invoke("py:saveFileBytes", options);
 	},
 	// Open a file dialog and read the file contents
 	openFileDialog: async (options: { filters?: { name: string; extensions: string[] }[] }) => {
 		return ipcRenderer.invoke("py:openFileDialog", options);
 	},
-		writeFile: async (options: { filePath: string; data: string }) => {
-			return ipcRenderer.invoke("py:writeFile", options);
-		},
-		deleteFile: async (options: { filePath: string }) => {
-			return ipcRenderer.invoke("py:deleteFile", options);
-		},
-		showItemInFolder: async (options: { filePath: string }) => {
-			return ipcRenderer.invoke("py:showItemInFolder", options);
-		},
-		renameFile: async (options: { fromPath: string; toPath: string }) => {
-			return ipcRenderer.invoke("py:renameFile", options);
-		},
-		// Fetch text via main process to bypass renderer CORS restrictions (dev convenience)
-		fetchText: async (options: { url: string; headers?: Record<string, string> }) => {
-			return ipcRenderer.invoke("py:fetchText", options);
-		},
-		// Request taskbar/dock attention (flash) for notifications
-		flashFrame: async (options?: { durationMs?: number; urgent?: boolean }) => {
-			return ipcRenderer.invoke("py:flashFrame", options || {});
-		},
-		stopFlashFrame: async () => {
-			return ipcRenderer.invoke("py:stopFlashFrame");
-		},
+	// Open a file dialog and read the file as base64 bytes
+	openFileDialogBytes: async (options: { filters?: { name: string; extensions: string[] }[] }) => {
+		return ipcRenderer.invoke("py:openFileDialogBytes", options);
+	},
+	writeFile: async (options: { filePath: string; data: string; encoding?: 'utf8' | 'base64' }) => {
+		return ipcRenderer.invoke("py:writeFile", options);
+	},
+	// Write bytes (base64) directly to file
+	writeFileBytes: async (options: { filePath: string; dataBase64: string }) => {
+		return ipcRenderer.invoke("py:writeFileBytes", options);
+	},
+	deleteFile: async (options: { filePath: string }) => {
+		return ipcRenderer.invoke("py:deleteFile", options);
+	},
+	showItemInFolder: async (options: { filePath: string }) => {
+		return ipcRenderer.invoke("py:showItemInFolder", options);
+	},
+	renameFile: async (options: { fromPath: string; toPath: string }) => {
+		return ipcRenderer.invoke("py:renameFile", options);
+	},
+	// Fetch text via main process to bypass renderer CORS restrictions (dev convenience)
+	fetchText: async (options: { url: string; headers?: Record<string, string> }) => {
+		return ipcRenderer.invoke("py:fetchText", options);
+	},
+	// Request taskbar/dock attention (flash) for notifications
+	flashFrame: async (options?: { durationMs?: number; urgent?: boolean }) => {
+		return ipcRenderer.invoke("py:flashFrame", options || {});
+	},
+	stopFlashFrame: async () => {
+		return ipcRenderer.invoke("py:stopFlashFrame");
+	},
 }); // exposes a safe API to the renderer process
 
 

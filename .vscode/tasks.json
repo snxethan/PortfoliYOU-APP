@@ -11,6 +11,33 @@
 				"$tsc"
 			],
 			"group": "build"
+		},
+		{
+			"label": "Build renderer",
+			"type": "shell",
+			"command": "npm run build:renderer",
+			"args": [],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "Build renderer",
+			"type": "shell",
+			"command": "npm run build:renderer",
+			"args": [],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "Build renderer",
+			"type": "shell",
+			"command": "npm run build:renderer",
+			"args": [],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "build"
 		}
 	]
 }

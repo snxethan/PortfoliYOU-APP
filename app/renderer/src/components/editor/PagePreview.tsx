@@ -22,10 +22,13 @@ function PagePreviewInner({ width, cols, gap, rowH, items }: {
         return Math.max(12, ...items.map(it => it.y + it.h));
     }, [items]);
 
+    // Enforce square grid in preview: row height equals column width
+    const effRowH = colW;
+
     const height = useMemo(() => {
         const r = Math.max(1, rows);
-        return r * rowH + (r - 1) * gap;
-    }, [rows, rowH, gap]);
+        return r * effRowH + (r - 1) * gap;
+    }, [rows, effRowH, gap]);
 
     const sorted = useMemo(() => items.map((it, i) => ({ it, i }))
         .sort((a, b) => {
@@ -41,11 +44,11 @@ function PagePreviewInner({ width, cols, gap, rowH, items }: {
         >
             {sorted.map((item) => {
                 const unitX = colW + gap;
-                const unitY = rowH + gap;
+                const unitY = effRowH + gap;
                 const left = item.x * unitX;
                 const top = item.y * unitY;
                 const wpx = item.w * colW + (item.w - 1) * gap;
-                const hpx = item.h * rowH + (item.h - 1) * gap;
+                const hpx = item.h * effRowH + (item.h - 1) * gap;
                 return (
                     <div
                         key={item.id}

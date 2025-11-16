@@ -35,6 +35,7 @@
     "autoprefixer": "^10.4.21",
     "electron-updater": "^6.6.2",
     "firebase": "^12.4.0",
+    "jszip": "^3.10.1",
     "lint": "^1.1.2",
     "lucide-react": "^0.546.0",
     "postcss": "^8.5.6",

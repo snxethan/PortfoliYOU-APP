@@ -1,10 +1,11 @@
 import { useDraggable } from '@dnd-kit/core';
-import { Boxes, Search, ChevronDown, ChevronRight } from 'lucide-react';
+import { Boxes, Search, ChevronDown, ChevronRight, Image as ImageIcon, Mail, Type as TypeIcon } from 'lucide-react';
 import React, { memo, useEffect, useMemo, useState } from 'react';
 
 import { WidgetsRegistry } from '../../../widgets/registry';
 // Ensure built-in widgets are registered (side-effect import)
 import '../../../widgets/loader';
+// Assets are now rendered by the sidebar container beneath this palette
 
 function DraggablePaletteTile({ type, label, w, h }: { type: string; label: string; w: number; h: number }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: `palette:${type}`, data: { src: 'palette', type, w, h, label } });
@@ -13,10 +14,52 @@ function DraggablePaletteTile({ type, label, w, h }: { type: string; label: stri
       ref={setNodeRef}
       {...listeners}
       {...attributes}
-      className={`aspect-square rounded-md bg-[color:var(--muted)]/50 border border-[color:var(--border)] cursor-grab flex items-center justify-center text-center px-2 text-[11px] ${isDragging ? 'opacity-60' : ''}`}
+      className={`aspect-square rounded-md bg-[color:var(--muted)]/30 border border-[color:var(--border)] cursor-grab flex flex-col items-stretch justify-between text-center ${isDragging ? 'opacity-60' : ''}`}
       title={`Drag to canvas · ${w}x${h}`}
+      role="button"
+      aria-label={`Add ${label} widget`}
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          window.dispatchEvent(new CustomEvent('py:addWidget', { detail: { type, label, w, h } }));
+        }
+      }}
     >
-      <span className="line-clamp-2 leading-tight">{label}</span>
+      {/* Visual preview area */}
+      <div className="grow p-1 flex items-center justify-center overflow-hidden">
+        {type === 'image' ? (
+          <div className="w-full h-full rounded-md border border-dashed border-[color:var(--border)] bg-white flex items-center justify-center">
+            <ImageIcon size={28} className="text-[color:var(--fg-muted)]" />
+          </div>
+        ) : type === 'text' ? (
+          <div className="w-full h-full bg-white rounded-md border border-[color:var(--border)] flex items-center justify-center">
+            <span className="font-semibold text-[11px] tracking-wide text-black">Text</span>
+          </div>
+        ) : type === 'contact' ? (
+          <div className="w-full h-full bg-white rounded-md border border-[color:var(--border)] p-1 text-[8px] text-left">
+            <div className="mb-1 flex items-center gap-1 text-[color:var(--fg-muted)]"><Mail size={10} /> Email</div>
+            <div className="h-2.5 bg-[color:var(--muted)]/50 rounded mb-1" />
+            <div className="h-6 bg-[color:var(--muted)]/50 rounded mb-1" />
+            <div className="h-3 bg-[color:var(--muted)]/50 rounded w-10 ml-auto" />
+          </div>
+        ) : type === 'project' ? (
+          <div className="w-full h-full bg-white rounded-md border border-[color:var(--border)] p-1 text-left">
+            <div className="h-6 bg-[color:var(--muted)]/50 rounded mb-1" />
+            <div className="h-2 bg-[color:var(--muted)]/50 rounded w-3/4 mb-0.5" />
+            <div className="h-2 bg-[color:var(--muted)]/40 rounded w-1/2" />
+          </div>
+        ) : (
+          <div className="w-full h-full bg-white rounded-md border border-[color:var(--border)] flex items-center justify-center">
+            <TypeIcon size={16} className="text-[color:var(--fg-muted)]" />
+          </div>
+        )}
+      </div>
+      {/* Footer label */}
+      <div className="px-2 py-1 text-[10px] leading-tight border-t border-[color:var(--border)] bg-[color:var(--muted)]/20">
+        <div className="line-clamp-1" title={label}>{label}</div>
+        <div className="text-[color:var(--fg-muted)]">{w}×{h}</div>
+      </div>
     </div>
   );
 }
@@ -103,6 +146,7 @@ function WidgetsPalette() {
         {grouped.length === 0 && (
           <div className="text-[color:var(--fg-muted)]">No widgets match your search.</div>
         )}
+        {/* Assets are displayed by the sidebar outside this palette */}
       </div>
     </div>
   );

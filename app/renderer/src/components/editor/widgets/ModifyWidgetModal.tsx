@@ -3,7 +3,8 @@ import { Layers, Pin, PinOff, Lock, Unlock, ChevronsUp, ChevronsDown, ChevronUp,
 import { z } from "zod";
 
 import { WidgetsRegistry } from "../../../widgets/registry";
-import type { GridItem } from "../DraggableItem";
+import type { GridItem } from "../canvas/DraggableItem";
+import { useAssets } from "../../../providers/AssetsProvider";
 
 export default function ModifyWidgetModal({
     item,
@@ -37,6 +38,9 @@ export default function ModifyWidgetModal({
     const [zodSchema, setZodSchema] = useState<z.ZodObject<z.ZodRawShape> | null>(null);
     const [formValues, setFormValues] = useState<Record<string, unknown>>({});
     const [formErrors, setFormErrors] = useState<Record<string, string>>({});
+    const [defType, setDefType] = useState<string | null>(null);
+    const [selectedFileName, setSelectedFileName] = useState<string>("");
+    const assets = useAssets();
 
     useEffect(() => {
         setTitle(item.title);
@@ -48,6 +52,7 @@ export default function ModifyWidgetModal({
         WidgetsRegistry.ensure(item.type as string)
             .then((def) => {
                 if (!mounted) return;
+                try { setDefType((def as unknown as { type?: string }).type || item.type || null); } catch { setDefType(item.type || null); }
                 const schema = (def as unknown as { zodSchema?: z.ZodObject<z.ZodRawShape> }).zodSchema;
                 setZodSchema(schema ?? null);
                 if (schema) {
@@ -83,6 +88,24 @@ export default function ModifyWidgetModal({
             .finally(() => { });
         return () => { mounted = false; };
     }, [item]);
+
+    // Initialize/refresh chosen file label from current src when editing an image widget
+    useEffect(() => {
+        let alive = true;
+        async function go() {
+            if (defType !== 'image') return;
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const src = (formValues as any)?.src as unknown;
+            if (typeof src === 'string' && src.startsWith('asset://')) {
+                const hash = src.slice('asset://'.length);
+                try { const meta = await assets.get(hash); if (alive) setSelectedFileName(meta?.name || ''); } catch { /* ignore */ }
+            } else {
+                if (alive) setSelectedFileName('');
+            }
+        }
+        void go();
+        return () => { alive = false; };
+    }, [defType, formValues, assets]);
 
     const locked = !!item.locked;
     const pinned = !!item.pinned;
@@ -138,6 +161,80 @@ export default function ModifyWidgetModal({
                 </div>
 
                 <div className="space-y-5 text-sm">
+                    {/* Image quick upload (when editing Image widget) */}
+                    {defType === 'image' && (
+                        <div className="border border-[color:var(--border)] rounded-md p-3 bg-[color:var(--muted)]/30">
+                            <div className="text-[color:var(--fg-muted)] mb-2 font-medium">Image</div>
+                            <div className="flex items-center gap-3 text-xs">
+                                <label className={`inline-flex items-center justify-center px-3 py-2 rounded border border-dashed border-[color:var(--border)] bg-[color:var(--muted)]/40 cursor-pointer ${locked ? 'opacity-50 cursor-not-allowed' : ''}`}>
+                                    <span className="font-medium">Choose image</span>
+                                    <input
+                                        type="file"
+                                        accept="image/*"
+                                        className="sr-only"
+                                        disabled={locked}
+                                        onChange={async (e) => {
+                                            const f = e.target.files?.[0];
+                                            if (!f) { setSelectedFileName(""); return; }
+                                            setSelectedFileName(f.name);
+                                            try {
+                                                // Store in local asset store and reference via asset://hash
+                                                const metas = await assets.addFiles([f]);
+                                                const m = metas[0];
+                                                if (m?.hash) {
+                                                    const next = { ...formValues, src: `asset://${m.hash}` } as Record<string, unknown>;
+                                                    setFormValues(next);
+                                                    if (zodSchema && zodSchema.shape?.src) {
+                                                        const shape = zodSchema.shape as Record<string, z.ZodTypeAny>;
+                                                        const single = z.object({ src: shape['src'] as z.ZodTypeAny });
+                                                        const res = single.safeParse({ src: next.src });
+                                                        setFormErrors({ ...formErrors, src: res.success ? '' : (res.error.issues[0]?.message || 'Invalid value') });
+                                                    }
+                                                }
+                                            } catch { /* ignore */ }
+                                        }}
+                                    />
+                                </label>
+                                <span className={`px-2 py-1 rounded border border-[color:var(--border)] bg-[color:var(--muted)]/20 ${selectedFileName ? '' : 'text-[color:var(--fg-muted)]/70'}`}>
+                                    {selectedFileName || 'No file chosen'}
+                                </span>
+                            </div>
+                            {/* Choose from existing assets */}
+                            <div className="mt-3 text-xs flex items-center gap-2">
+                                <span className="text-[color:var(--fg-muted)]">Or pick from assets:</span>
+                                <select
+                                    className="input"
+                                    disabled={locked}
+                                    value={(() => {
+                                        // reflect current src if it's an asset
+                                        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                                        const src = (formValues as any)?.src as unknown;
+                                        if (typeof src === 'string' && src.startsWith('asset://')) return src.slice('asset://'.length);
+                                        return '';
+                                    })()}
+                                    onChange={async (e) => {
+                                        const hash = e.target.value;
+                                        if (!hash) return;
+                                        const next = { ...formValues, src: `asset://${hash}` } as Record<string, unknown>;
+                                        setFormValues(next);
+                                        try { const meta = await assets.get(hash); setSelectedFileName(meta?.name || ''); } catch { /* noop */ }
+                                        if (zodSchema && zodSchema.shape?.src) {
+                                            const shape = zodSchema.shape as Record<string, z.ZodTypeAny>;
+                                            const single = z.object({ src: shape['src'] as z.ZodTypeAny });
+                                            const res = single.safeParse({ src: next.src });
+                                            setFormErrors({ ...formErrors, src: res.success ? '' : (res.error.issues[0]?.message || 'Invalid value') });
+                                        }
+                                    }}
+                                >
+                                    <option value="">Select an asset…</option>
+                                    {assets.list.map((a) => (
+                                        <option key={a.hash} value={a.hash}>{a.name}</option>
+                                    ))}
+                                </select>
+                            </div>
+                        </div>
+                    )}
+
                     {/* Properties (zod-backed) */}
                     {zodSchema && (
                         <div className="border border-[color:var(--border)] rounded-md p-3 bg-[color:var(--muted)]/40">
@@ -153,6 +250,11 @@ export default function ModifyWidgetModal({
                                     const error = formErrors[key];
                                     const label = key.charAt(0).toUpperCase() + key.slice(1);
                                     const disabled = locked;
+                                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                                    const anyZ: any = z;
+                                    const isEnum = baseField instanceof anyZ.ZodEnum;
+                                    const isNativeEnum = baseField instanceof anyZ.ZodNativeEnum;
+                                    const isColorField = typeof value === 'string' && key.toLowerCase().includes('color');
                                     const common = {
                                         value, onChange: (e: React.ChangeEvent<HTMLInputElement>) => {
                                             const tgt = e.target;
@@ -177,11 +279,40 @@ export default function ModifyWidgetModal({
                                                 </div>
                                             ) : baseField instanceof z.ZodNumber ? (
                                                 <input className="input w-full" type="number" value={String(value ?? '')} onChange={common.onChange} disabled={disabled} />
+                                            ) : (isEnum || isNativeEnum) ? (
+                                                <select
+                                                    className="input w-full"
+                                                    value={String(value || '')}
+                                                    onChange={(e) => {
+                                                        const v = e.target.value;
+                                                        const next: Record<string, unknown> = { ...formValues, [key]: v };
+                                                        setFormValues(next);
+                                                        if (zodSchema) {
+                                                            const single = z.object({ [key]: (schema as z.ZodTypeAny) });
+                                                            const res = single.safeParse({ [key]: next[key] });
+                                                            setFormErrors({ ...formErrors, [key]: res.success ? '' : (res.error.issues[0]?.message || 'Invalid value') });
+                                                        }
+                                                    }}
+                                                    disabled={disabled}
+                                                >
+                                                    <option value="" disabled>Select…</option>
+                                                    {(() => {
+                                                        // derive options for enum types
+                                                        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                                                        const def: any = (baseField as any)._def;
+                                                        let opts: string[] = [];
+                                                        if (isEnum && Array.isArray(def?.values)) opts = def.values as string[];
+                                                        else if (isNativeEnum && def?.values) opts = Object.values(def.values).filter((v: unknown) => typeof v === 'string') as string[];
+                                                        return opts.map((opt) => (
+                                                            <option key={opt} value={opt}>{opt}</option>
+                                                        ));
+                                                    })()}
+                                                </select>
                                             ) : (
                                                 <input
                                                     className="input w-full"
                                                     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                                                    type={(baseField as any)._def?.checks?.some?.((c: any) => c?.kind === 'email') ? 'email' :
+                                                    type={isColorField ? 'color' : (baseField as any)._def?.checks?.some?.((c: any) => c?.kind === 'email') ? 'email' :
                                                         // eslint-disable-next-line @typescript-eslint/no-explicit-any
                                                         (baseField as any)._def?.checks?.some?.((c: any) => c?.kind === 'url') ? 'url' : 'text'}
                                                     value={String(value ?? '')}

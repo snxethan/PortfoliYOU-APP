@@ -1,4 +1,4 @@
-import React, { useRef } from "react";
+import React, { useMemo, useRef } from "react";
 
 import PreviewIframe from "./PreviewIframe";
 import PagePreview from "./PagePreview";
@@ -10,6 +10,8 @@ export type ViewportSurfaceProps = {
     pageHeight: number;
     setPageWidth: (w: number) => void;
     setPageHeight: (h: number) => void;
+    // Height behavior: 'expand' grows with content; 'fixed' keeps pageHeight and enables internal scroll
+    heightMode?: 'expand' | 'fixed';
 
     previewMode: boolean;
 
@@ -34,6 +36,7 @@ export type ViewportSurfaceProps = {
     onSendBackward?: (id: string) => void;
     onTogglePin?: (id: string) => void;
     onOpenModify?: (id: string) => void;
+    onDropAsset?: (id: string, hash: string) => void;
 };
 
 export default function ViewportSurface(props: ViewportSurfaceProps) {
@@ -42,6 +45,7 @@ export default function ViewportSurface(props: ViewportSurfaceProps) {
         pageHeight,
         setPageWidth,
         setPageHeight,
+        heightMode = 'expand',
         previewMode,
         cols,
         rowH,
@@ -61,52 +65,63 @@ export default function ViewportSurface(props: ViewportSurfaceProps) {
         onSendBackward,
         onTogglePin,
         onOpenModify,
+        onDropAsset,
     } = props;
 
     const scrollRef = useRef<HTMLDivElement | null>(null);
 
+    // Compute preview content height (same math as PagePreview) to allow expand mode to grow beyond pageHeight
+    const previewContentRows = useMemo(() => {
+        if (!items || items.length === 0) return 12;
+        return Math.max(12, ...items.map(it => it.y + it.h));
+    }, [items]);
+    const previewRowH = useMemo(() => {
+        if (cols <= 0) return rowH;
+        const inner = Math.max(0, pageWidth - gap * (cols - 1));
+        const cw = Math.floor(inner / cols);
+        return cw > 0 ? cw : rowH;
+    }, [pageWidth, cols, gap, rowH]);
+    const previewContentHeight = useMemo(() => {
+        const r = Math.max(1, previewContentRows);
+        return r * previewRowH + (r - 1) * gap;
+    }, [previewContentRows, previewRowH, gap]);
+    const effectivePageHeight = heightMode === 'expand' ? Math.max(pageHeight, previewMode ? previewContentHeight : pageHeight) : pageHeight;
+
     return (
-        <div className="p-4 min-w-0 overflow-x-auto">
+        <div ref={scrollRef} className="p-2 min-w-0 overflow-auto">
             <div
-                ref={scrollRef}
-                className={"mx-auto min-h-[28rem] border border-black bg-white shadow-sm rounded-md overflow-auto relative py-canvas-static"}
-                style={{ width: pageWidth, height: pageHeight }}
+                className={"mx-auto min-h-[28rem] border border-black bg-white shadow-sm rounded-md relative " + (heightMode === 'fixed' ? 'overflow-y-auto overflow-x-hidden' : 'overflow-visible')}
+                style={{ width: pageWidth, minHeight: pageHeight, height: heightMode === 'fixed' ? pageHeight : undefined }}
             >
-                <div className="p-4">
-                    {previewMode ? (
-                        (() => {
-                            const innerWidth = Math.max(0, pageWidth - 32);
-                            const height = Math.max(0, pageHeight - 32);
-                            return (
-                                <PreviewIframe width={innerWidth} height={height}>
-                                    <PagePreview width={innerWidth} cols={cols} gap={gap} rowH={rowH} items={items} />
-                                </PreviewIframe>
-                            );
-                        })()
-                    ) : (
-                        <GridCanvas
-                            cols={cols}
-                            gap={gap}
-                            rowH={rowH}
-                            items={items}
-                            onChange={onItemsChange}
-                            scrollEl={scrollRef.current}
-                            showGrid={showGrid}
-                            selectedId={selectedId}
-                            onSelect={onSelect}
-                            onDelete={onDelete}
-                            onDuplicate={onDuplicate}
-                            onItemMoveStart={onMoveStart}
-                            onItemMoveEnd={onMoveEnd}
-                            onBringToFront={onBringToFront}
-                            onSendToBack={onSendToBack}
-                            onBringForward={onBringForward}
-                            onSendBackward={onSendBackward}
-                            onTogglePin={onTogglePin}
-                            onOpenModify={onOpenModify}
-                        />
-                    )}
-                </div>
+                {previewMode ? (
+                    <PreviewIframe width={pageWidth} height={effectivePageHeight}>
+                        <PagePreview width={pageWidth} cols={cols} gap={gap} rowH={rowH} items={items} />
+                    </PreviewIframe>
+                ) : (
+                    <GridCanvas
+                        cols={cols}
+                        gap={gap}
+                        rowH={rowH}
+                        items={items}
+                        onChange={onItemsChange}
+                        scrollEl={scrollRef.current}
+                        viewportHeight={pageHeight}
+                        showGrid={showGrid}
+                        selectedId={selectedId}
+                        onSelect={onSelect}
+                        onDelete={onDelete}
+                        onDuplicate={onDuplicate}
+                        onItemMoveStart={onMoveStart}
+                        onItemMoveEnd={onMoveEnd}
+                        onBringToFront={onBringToFront}
+                        onSendToBack={onSendToBack}
+                        onBringForward={onBringForward}
+                        onSendBackward={onSendBackward}
+                        onTogglePin={onTogglePin}
+                        onOpenModify={onOpenModify}
+                        onDropAsset={onDropAsset}
+                    />
+                )}
                 {/* Resize handles */}
                 {/* Bottom-center: vertical resize */}
                 <div

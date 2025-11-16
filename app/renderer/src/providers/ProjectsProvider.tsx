@@ -4,6 +4,14 @@ import { onAuthStateChanged } from "firebase/auth";
 import { collection, doc, getDoc, getDocs, setDoc, serverTimestamp, query, where, orderBy } from "firebase/firestore";
 import { getFunctions, httpsCallable } from "firebase/functions";
 import { ref as storageRef, uploadBytes, getDownloadURL, getMetadata, getBytes } from "firebase/storage";
+import JSZip from "jszip";
+import { idbGet, idbPut, computeHash, stores, AssetMeta } from "../lib/assetsStore";
+type ZipEntry = {
+	async(type: 'arraybuffer'): Promise<ArrayBuffer>;
+	async(type: 'string'): Promise<string>;
+	dir: boolean;
+	name: string;
+};
 
 import { auth, db, storage } from "../lib/firebase";
 
@@ -223,18 +231,130 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 	// Helper to get current timestamp
 	const now = () => new Date().toISOString();
 
-	// Helper to serialize a project for file persistence
-	const buildExportPayload = (proj: LocalProject) => {
-		const payload: { _format: string; _version: number; exportedAt: string; project: LocalProject; assets: unknown[] } = {
+	// Helper: serialize project + referenced assets into a zip (base64)
+	const buildArchiveBase64 = async (proj: LocalProject) => {
+		const zip = new JSZip();
+		const payload: { _format: string; _version: number; exportedAt: string; project: LocalProject } = {
 			_format: "portfoliyou",
-			_version: 1,
+			_version: 2,
 			exportedAt: now(),
 			project: { ...proj },
-			assets: [],
 		};
-		delete payload.project._filePath;
-		delete payload.project._synced;
-		return JSON.stringify(payload, null, 2);
+		delete (payload.project as LocalProject)._filePath;
+		delete (payload.project as LocalProject)._synced;
+
+		// Collect referenced asset hashes from widgets (props.src can be asset://hash or assets/...)
+		const hashes = new Set<string>();
+		for (const w of Object.values(proj.widgets || {})) {
+			try {
+				const p = (w.props || {}) as Record<string, unknown>;
+				const src = typeof p['src'] === 'string' ? (p['src'] as string) : '';
+				if (src.startsWith('asset://')) hashes.add(src.slice('asset://'.length));
+			} catch { /* ignore */ }
+		}
+		// Emit project.json with src rewritten to relative assets path for portability
+		const projectForArchive: LocalProject = JSON.parse(JSON.stringify(payload.project));
+		for (const w of Object.values(projectForArchive.widgets || {})) {
+			try {
+				const p = (w.props || {}) as Record<string, unknown>;
+				const src = typeof p['src'] === 'string' ? (p['src'] as string) : '';
+				if (src.startsWith('asset://')) {
+					const h = src.slice('asset://'.length);
+					(p as Record<string, unknown>)['src'] = `assets/${h}`;
+				}
+			} catch { /* ignore */ }
+		}
+		const wrapper = { ...payload, project: projectForArchive };
+		zip.file("project.json", JSON.stringify(wrapper, null, 2));
+		// Add assets folder
+		if (hashes.size > 0) {
+			const folder = zip.folder('assets');
+			for (const h of hashes) {
+				try {
+					const blob = await idbGet<Blob>(stores.STORE_BLOBS, h);
+					if (!blob) continue;
+					// Preserve content-type via file options; JSZip stores binary only
+					const ab = await blob.arrayBuffer();
+					folder?.file(h, ab);
+					// Optionally include sidecar meta json
+					const meta = await idbGet<AssetMeta>(stores.STORE_META, h);
+					if (meta) folder?.file(`${h}.meta.json`, JSON.stringify(meta));
+				} catch { /* ignore */ }
+			}
+		}
+		const base64 = await zip.generateAsync({ type: 'base64' });
+		return base64;
+	};
+
+	// Helper: parse archive (ArrayBuffer) and load assets into local store; returns LocalProject
+	const importFromArchive = async (buf: ArrayBuffer): Promise<LocalProject> => {
+		const zip = await JSZip.loadAsync(buf);
+		const projEntry = zip.file('project.json');
+		if (!projEntry) throw new Error('missing-project-json');
+		const text = await projEntry.async('string');
+		let parsed: unknown;
+		try { parsed = JSON.parse(text); } catch { throw new Error('invalid-project-json'); }
+		// Unwrap wrapper
+		let raw: unknown = parsed;
+		if (typeof raw === 'object' && raw !== null) {
+			const r = raw as Record<string, unknown>;
+			if (r['_format'] === 'portfoliyou' && typeof r['project'] === 'object' && r['project'] !== null) raw = r['project'];
+		}
+		const project = migrateProjectSchema(raw);
+		// Import assets: any files under assets/ are stored and src rewritten to asset://hash
+		// First, compute available filenames in assets/
+		const assetsFolder = zip.folder('assets');
+		const files: Array<{ name: string; file: ZipEntry }> = [];
+		if (assetsFolder) {
+			assetsFolder.forEach((relPath: string, f: ZipEntry) => {
+				if (f.dir) return;
+				// Skip sidecar meta
+				if (relPath.endsWith('.meta.json')) return;
+				files.push({ name: relPath, file: f });
+			});
+		}
+		// Load and store
+		const nameToHash = new Map<string, string>();
+		for (const { name, file } of files) {
+			try {
+				const ab = await file.async('arraybuffer');
+				const blob = new Blob([ab]);
+				const hash = await computeHash(blob);
+				nameToHash.set(name, hash);
+				// Store blob and meta if not exists
+				const existing = await idbGet(stores.STORE_META, hash);
+				if (!existing) {
+					const metaSidecar = assetsFolder?.file(`${name}.meta.json`);
+					let meta: AssetMeta | undefined;
+					if (metaSidecar) {
+						try { meta = JSON.parse(await metaSidecar.async('string')) as AssetMeta; } catch { meta = undefined; }
+					}
+					const fullMeta: AssetMeta = meta ?? {
+						hash,
+						name,
+						type: 'application/octet-stream',
+						size: ab.byteLength,
+						createdAt: new Date().toISOString(),
+					};
+					await idbPut(stores.STORE_BLOBS, hash, blob);
+					await idbPut(stores.STORE_META, hash, fullMeta);
+				}
+			} catch { /* ignore single asset failures */ }
+		}
+		// Rewrite src from assets/<name> to asset://hash
+		const out: LocalProject = { ...project } as LocalProject;
+		for (const w of Object.values(out.widgets || {})) {
+			try {
+				const p = (w.props || {}) as Record<string, unknown>;
+				const src = typeof p['src'] === 'string' ? (p['src'] as string) : '';
+				if (src.startsWith('assets/')) {
+					const name = src.slice('assets/'.length);
+					const h = nameToHash.get(name) || nameToHash.get(src) /* sometimes include nested path */;
+					if (h) (p as Record<string, unknown>)['src'] = `asset://${h}`;
+				}
+			} catch { /* ignore */ }
+		}
+		return out;
 	};
 
 	const api = useMemo<ProjectsCtx>(() => {
@@ -384,9 +504,10 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 					pages: { [defaultPage.pageId]: defaultPage },
 					widgets: {},
 				};
-				const data = buildExportPayload(p);
+				const base64 = await buildArchiveBase64(p);
 				if (window.api?.saveFile) {
-					const res = await window.api.saveFile({ defaultPath: `${base}.portfoliyou`, data });
+					// Prefer binary save for archive
+					const res = await (window.api.saveFileBytes ? window.api.saveFileBytes({ defaultPath: `${base}.portfoliyou`, dataBase64: base64 }) : window.api.saveFile({ defaultPath: `${base}.portfoliyou`, data: base64, encoding: 'base64' }));
 					if (res.canceled || !res.filePath) return null;
 					p._filePath = res.filePath;
 					const next = [p, ...projects];
@@ -395,8 +516,9 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 					setSelectedProjectId(p.id); writeSelected(p.id);
 					return p;
 				} else {
-					// Browser fallback download
-					const blob = new Blob([data], { type: "application/json" });
+					// Browser fallback download of zip
+					const u8 = Uint8Array.from(atob(base64), c => c.charCodeAt(0));
+					const blob = new Blob([u8], { type: "application/zip" });
 					const url = URL.createObjectURL(blob);
 					const a = document.createElement("a"); a.href = url; a.download = `${base}.portfoliyou`;
 					document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
@@ -411,24 +533,43 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 				let imported: LocalProject | null = null;
 				let importedFilePath: string | undefined;
 				if (file) {
-					const text = await file.text();
-					try {
-						const data = JSON.parse(text);
-						// Validate schemaVersion and migrate if needed
-						imported = migrateProjectSchema(data);
-					} catch {
-						// fallback: invalid file
-						imported = null;
+					const buf = await file.arrayBuffer();
+					const u8 = new Uint8Array(buf);
+					const isZip = u8.length > 4 && u8[0] === 0x50 && u8[1] === 0x4b; // PK
+					if (isZip) {
+						try { imported = await importFromArchive(buf); } catch { imported = null; }
+					} else {
+						try {
+							const text = new TextDecoder('utf-8').decode(u8);
+							const data = JSON.parse(text);
+							imported = migrateProjectSchema(data);
+						} catch { imported = null; }
 					}
 				} else if (window.api?.openFileDialog) {
-					const res = await window.api.openFileDialog({ filters: [{ name: "PortfoliYOU", extensions: ["portfoliyou", "json"] }] });
-					if (!res.canceled && res.data) {
-						try {
-							const data = JSON.parse(res.data);
-							imported = migrateProjectSchema(data);
-							if (res.filePath) { imported._filePath = res.filePath; importedFilePath = res.filePath; }
-						} catch {
-							imported = null;
+					// Prefer binary bytes for archive
+					if (window.api.openFileDialogBytes) {
+						const res = await window.api.openFileDialogBytes({ filters: [{ name: "PortfoliYOU", extensions: ["portfoliyou", "zip", "json"] }] });
+						if (!res.canceled && (res.dataBase64 || res.data)) {
+							try {
+								if (res.dataBase64) {
+									const u8 = Uint8Array.from(atob(res.dataBase64 as string), c => c.charCodeAt(0));
+									const buf = u8.buffer.slice(u8.byteOffset, u8.byteOffset + u8.byteLength);
+									imported = await importFromArchive(buf);
+								} else if (res.data) {
+									const data = JSON.parse(res.data as string);
+									imported = migrateProjectSchema(data);
+								}
+								if (res.filePath) { imported!._filePath = res.filePath; importedFilePath = res.filePath; }
+							} catch { imported = null; }
+						}
+					} else {
+						const res = await window.api.openFileDialog({ filters: [{ name: "PortfoliYOU", extensions: ["portfoliyou", "json"] }] });
+						if (!res.canceled && res.data) {
+							try {
+								const data = JSON.parse(res.data);
+								imported = migrateProjectSchema(data);
+								if (res.filePath) { imported._filePath = res.filePath; importedFilePath = res.filePath; }
+							} catch { imported = null; }
 						}
 					}
 				}
@@ -567,13 +708,14 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 			exportProject: async (projectId: string) => {
 				const proj = projects.find(p => p.id === projectId);
 				if (!proj) return;
-				// Export format: wrap with metadata for validation
-				const json = buildExportPayload(proj);
+				const base64 = await buildArchiveBase64(proj);
 				if (window.api?.saveFile) {
-					await window.api.saveFile({ defaultPath: `${proj.name || "project"}.portfoliyou`, data: json });
+					if (window.api.saveFileBytes) await window.api.saveFileBytes({ defaultPath: `${proj.name || "project"}.portfoliyou`, dataBase64: base64 });
+					else await window.api.saveFile({ defaultPath: `${proj.name || "project"}.portfoliyou`, data: base64, encoding: 'base64' });
 				} else {
-					// Browser fallback: trigger download
-					const blob = new Blob([json], { type: "application/json" });
+					// Browser fallback: trigger download of zip
+					const u8 = Uint8Array.from(atob(base64), c => c.charCodeAt(0));
+					const blob = new Blob([u8], { type: "application/zip" });
 					const url = URL.createObjectURL(blob);
 					const a = document.createElement("a");
 					a.href = url; a.download = `${proj.name || "project"}.portfoliyou`;
@@ -586,29 +728,26 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 				const idx = projects.findIndex(p => p.id === projectId); if (idx < 0) return;
 				// Use backend-enforced limit via callable; do not create directly client-side
 				let proj = projects[idx];
-				// Prepare cloud payload; enforce 10-page cap for cloud storage by truncating beyond first 10
-				const prepareCloudPayload = (p: LocalProject) => {
-					const over = (p.pageOrder?.length || 0) > 10;
-					const keep = over ? p.pageOrder.slice(0, 10) : (p.pageOrder || []);
+				// Prepare cloud payload handled inline below
+				// Build archive from prepared payload
+				const trimmed = ((): LocalProject => {
+					const over = (proj.pageOrder?.length || 0) > 10;
+					const keep = over ? proj.pageOrder.slice(0, 10) : (proj.pageOrder || []);
 					const nextPages: Record<string, Page> = {};
 					const referenced = new Set<string>();
 					for (let i = 0; i < keep.length; i++) {
 						const id = keep[i];
-						const pg = p.pages[id];
+						const pg = proj.pages[id];
 						if (pg) {
 							nextPages[id] = { ...pg, order: i };
 							for (const wid of (pg.widgets || [])) referenced.add(wid);
 						}
 					}
-					// Filter widgets to only those referenced by kept pages
 					const nextWidgets: Record<string, Widget> = {};
-					for (const wid of referenced) {
-						if (p.widgets[wid]) nextWidgets[wid] = p.widgets[wid];
-					}
-					const trimmed: LocalProject = { ...p, pageOrder: keep, pages: nextPages, widgets: nextWidgets, updatedAt: now() } as LocalProject;
-					return buildExportPayload(trimmed);
-				};
-				const data = prepareCloudPayload(proj);
+					for (const wid of referenced) { if (proj.widgets[wid]) nextWidgets[wid] = proj.widgets[wid]; }
+					return { ...proj, pageOrder: keep, pages: nextPages, widgets: nextWidgets, updatedAt: now() } as LocalProject;
+				})();
+				const base64 = await buildArchiveBase64(trimmed);
 				// Determine cloud doc in top-level 'projects'
 				let cloudId = proj._cloudId;
 
@@ -809,11 +948,12 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 					window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'info', message: 'Uploading project to cloud…' } }));
 					// upload target details intentionally not logged in production builds
 					// Use Blob upload for reliability across environments (Electron/web)
-					const blob = new Blob([data], { type: 'application/json; charset=utf-8' });
+					const u8 = Uint8Array.from(atob(base64), c => c.charCodeAt(0));
+					const blob = new Blob([u8], { type: 'application/zip' });
 					let attempt = 0; let lastErr: unknown = null;
 					while (attempt < 2) {
 						try {
-							await uploadBytes(sref, blob, { contentType: 'application/json; charset=utf-8', cacheControl: 'no-cache' });
+							await uploadBytes(sref, blob, { contentType: 'application/zip', cacheControl: 'no-cache' });
 							lastErr = null; break;
 						} catch (e) {
 							lastErr = e; attempt++;
@@ -980,21 +1120,26 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 				let imported: LocalProject;
 				try {
 					const bytes = await getBytes(storageRef(storage, path));
-					const text = new TextDecoder('utf-8').decode(bytes);
-					imported = migrateProjectSchema(JSON.parse(text));
+					// Detect archive by magic 'PK'
+					const head = new Uint8Array(bytes);
+					if (head && head.byteLength > 4 && head[0] === 0x50 && head[1] === 0x4b) {
+						imported = await importFromArchive(bytes);
+					} else {
+						const text = new TextDecoder('utf-8').decode(bytes);
+						imported = migrateProjectSchema(JSON.parse(text));
+					}
 				} catch {
 					try {
 						const url = await getDownloadURL(storageRef(storage, path));
-						let text: string;
-						if (window.api?.fetchText) {
-							const res = await window.api.fetchText({ url });
-							if (!res || !res.ok) throw new Error('Download failed');
-							text = res.text as string;
+						const resp = await fetch(url);
+						const buf = await resp.arrayBuffer();
+						const u8 = new Uint8Array(buf);
+						if (u8 && u8.byteLength > 4 && u8[0] === 0x50 && u8[1] === 0x4b) {
+							imported = await importFromArchive(buf);
 						} else {
-							const resp = await fetch(url);
-							text = await resp.text();
+							const text = new TextDecoder('utf-8').decode(u8);
+							imported = migrateProjectSchema(JSON.parse(text));
 						}
-						imported = migrateProjectSchema(JSON.parse(text));
 					} catch {
 						window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'error', message: 'Failed to download cloud project. If this is a dev build, configure Storage CORS for http://localhost:5173 or try again.', persistent: false } }));
 						return null as unknown as LocalProject;
@@ -1025,22 +1170,26 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 				try {
 					// Prefer direct bytes via SDK to avoid any fetch/CORS quirks
 					const bytes = await getBytes(storageRef(storage, path));
-					const text = new TextDecoder('utf-8').decode(bytes);
-					imported = migrateProjectSchema(JSON.parse(text));
+					const head = new Uint8Array(bytes);
+					if (head && head.byteLength > 4 && head[0] === 0x50 && head[1] === 0x4b) {
+						imported = await importFromArchive(bytes);
+					} else {
+						const text = new TextDecoder('utf-8').decode(bytes);
+						imported = migrateProjectSchema(JSON.parse(text));
+					}
 				} catch {
 					// Fallback to download URL + fetch (use main-process fetch when available to bypass CORS in dev)
 					try {
 						const url = await getDownloadURL(storageRef(storage, path));
-						let text: string;
-						if (window.api?.fetchText) {
-							const res = await window.api.fetchText({ url });
-							if (!res || !res.ok) throw new Error('Download failed');
-							text = res.text as string;
+						const resp = await fetch(url);
+						const buf = await resp.arrayBuffer();
+						const u8 = new Uint8Array(buf);
+						if (u8 && u8.byteLength > 4 && u8[0] === 0x50 && u8[1] === 0x4b) {
+							imported = await importFromArchive(buf);
 						} else {
-							const resp = await fetch(url);
-							text = await resp.text();
+							const text = new TextDecoder('utf-8').decode(u8);
+							imported = migrateProjectSchema(JSON.parse(text));
 						}
-						imported = migrateProjectSchema(JSON.parse(text));
 					} catch {
 						window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'error', message: 'Failed to import cloud project (CORS). Configure Storage CORS for http://localhost:5173, or try Import local-only.', persistent: false } }));
 						return null as unknown as LocalProject;
@@ -1069,7 +1218,8 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 				// Do not show saving spinner while the OS Save dialog is open; set it only during actual disk write
 				if (needsSaveAs && window.api.saveFile) {
 					try {
-						const res = await window.api.saveFile({ defaultPath: `${proj.name || 'project'}.portfoliyou`, data: buildExportPayload(proj) });
+						const base64 = await buildArchiveBase64(proj);
+						const res = window.api.saveFileBytes ? await window.api.saveFileBytes({ defaultPath: `${proj.name || 'project'}.portfoliyou`, dataBase64: base64 }) : await window.api.saveFile({ defaultPath: `${proj.name || 'project'}.portfoliyou`, data: base64, encoding: 'base64' });
 						if (res.canceled || !res.filePath) return; // user canceled: no spinner to reset
 						proj = { ...proj, _filePath: res.filePath };
 						const next = [...projects]; next[idx] = proj; setProjects(next); writeStore(next);
@@ -1081,7 +1231,9 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 					setSaving(true);
 					try {
 						pushRevisionSnapshot(proj);
-						await window.api.writeFile({ filePath: proj._filePath, data: buildExportPayload(proj) });
+						const base64 = await buildArchiveBase64(proj);
+						if (window.api.writeFileBytes) await window.api.writeFileBytes({ filePath: proj._filePath, dataBase64: base64 });
+						else await window.api.writeFile({ filePath: proj._filePath, data: base64, encoding: 'base64' });
 						setLastSavedAt(now());
 					} catch {
 						// swallow to avoid UI disruption; notification system can be added later
@@ -1146,9 +1298,10 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 				if (!p._filePath) continue;
 				const prevUpdatedAt = prev[p.id];
 				if (p.updatedAt && p.updatedAt !== prevUpdatedAt) {
-					const data = buildExportPayload(p);
+					const base64 = await buildArchiveBase64(p);
 					pushRevisionSnapshot(p);
-					tasks.push(window.api!.writeFile({ filePath: p._filePath, data }));
+					if (window.api!.writeFileBytes) tasks.push(window.api!.writeFileBytes({ filePath: p._filePath, dataBase64: base64 }));
+					else tasks.push(window.api!.writeFile({ filePath: p._filePath, data: base64, encoding: 'base64' }));
 				}
 				// update snapshot
 				prev[p.id] = p.updatedAt;
@@ -1172,8 +1325,9 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 				const prevUpdatedAt = prev[p.id];
 				if (p.updatedAt && p.updatedAt !== prevUpdatedAt) {
 					pushRevisionSnapshot(p);
-					const data = buildExportPayload(p);
-					tasks.push(window.api!.writeFile({ filePath: p._filePath, data }));
+					const base64 = await buildArchiveBase64(p);
+					if (window.api!.writeFileBytes) tasks.push(window.api!.writeFileBytes({ filePath: p._filePath, dataBase64: base64 }));
+					else tasks.push(window.api!.writeFile({ filePath: p._filePath, data: base64, encoding: 'base64' }));
 					prev[p.id] = p.updatedAt;
 				}
 			}

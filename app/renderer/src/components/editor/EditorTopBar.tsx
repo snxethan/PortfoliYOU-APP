@@ -1,5 +1,5 @@
 import React from "react";
-import { Eye, Pencil, Grid as GridIcon, MonitorSmartphone, Smartphone, Redo, Undo } from "lucide-react";
+import { Eye, Pencil, Grid as GridIcon, MonitorSmartphone, Smartphone, Redo, Undo, ExternalLink } from "lucide-react";
 
 export type EditorTopBarProps = {
     selectedProjectName?: string;
@@ -19,11 +19,14 @@ export type EditorTopBarProps = {
     setMobileView: () => void;
     pageWidth: number;
     pageHeight: number;
+    heightMode: 'expand' | 'fixed';
+    setHeightMode: (m: 'expand' | 'fixed') => void;
 
     canUndo: boolean;
     canRedo: boolean;
     undo: () => void;
     redo: () => void;
+    onOpenWebpage?: () => void;
 };
 
 export default function EditorTopBar(props: EditorTopBarProps) {
@@ -41,19 +44,27 @@ export default function EditorTopBar(props: EditorTopBarProps) {
         setMobileView,
         pageWidth,
         pageHeight,
+        heightMode,
+        setHeightMode,
         canUndo,
         canRedo,
         undo,
         redo,
+        onOpenWebpage,
     } = props;
 
     return (
         <div className="flex items-center justify-between px-4 py-3 border-b border-[color:var(--border)] bg-[color:var(--muted)]/40">
             <div className="flex items-center gap-3 text-sm min-w-0">
-                {/* Only show the editor/preview toggle on the left */}
+                {/* Edit/Preview toggle */}
                 <button className={`btn btn-ghost flex items-center gap-2 text-sm ${previewMode ? 'nav-active' : ''}`} title="Toggle preview (no content editing while in Preview)" onClick={togglePreviewMode}>
                     {previewMode ? <Eye size={16} /> : <Pencil size={16} />}
                     {previewMode ? 'Preview' : 'Editing'}
+                </button>
+                {/* Open standalone webpage preview */}
+                <button className="btn btn-ghost flex items-center gap-2 text-sm" title="Open webpage (popup)" onClick={onOpenWebpage}>
+                    <Eye size={16} />
+                    Open webpage
                 </button>
             </div>
 
@@ -84,14 +95,19 @@ export default function EditorTopBar(props: EditorTopBarProps) {
                         <GridIcon size={16} />
                         Grid
                     </button>
+                    <div className="hidden sm:flex items-center gap-1 ml-2" title="Page height behavior">
+                        <span className="text-xs text-[color:var(--fg-muted)]">Height</span>
+                        <button className={`btn btn-ghost btn-xs ${heightMode === 'expand' ? 'nav-active' : ''}`} onClick={() => setHeightMode('expand')}>Expand</button>
+                        <button className={`btn btn-ghost btn-xs ${heightMode === 'fixed' ? 'nav-active' : ''}`} onClick={() => setHeightMode('fixed')}>Scroll</button>
+                    </div>
                 </div>
 
                 {/* Responsive toggles: desktop or mobile (active in preview too) */}
                 <div className="hidden md:flex items-center gap-1 mr-2" title="Viewport size">
-                    <button className={`btn btn-ghost btn-xs ${activeView === 'desktop' ? 'nav-active' : ''}`} onClick={setDesktopView}>
+                    <button className={`btn btn-ghost btn-xs ${activeView === 'desktop' ? 'nav-active' : ''}`} onClick={setDesktopView} aria-label="Desktop view">
                         <MonitorSmartphone size={14} />
                     </button>
-                    <button className={`btn btn-ghost btn-xs ${activeView === 'mobile' ? 'nav-active' : ''}`} onClick={setMobileView}>
+                    <button className={`btn btn-ghost btn-xs ${activeView === 'mobile' ? 'nav-active' : ''}`} onClick={setMobileView} aria-label="Mobile view">
                         <Smartphone size={14} />
                     </button>
                     <span className="ml-1 text-[10px] text-[color:var(--fg-muted)]">{pageWidth} × {pageHeight}px</span>

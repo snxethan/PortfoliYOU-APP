@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 import { Copy, Settings as SettingsIcon, Pin, PinOff, Trash2 } from "lucide-react";
 
-import WidgetRenderer from "../../widgets/Renderer";
+import WidgetRenderer from "../../../widgets/Renderer";
 
 export type GridItem = {
   id: string;
@@ -26,7 +26,7 @@ export type GridMetrics = {
 
 
 
-export default function DraggableItem({ item, metrics, onMove, scrollEl, onDelete, onDuplicate, onMoveStart, onMoveEnd, onBringToFront, onSendToBack, onBringForward, onSendBackward, onTogglePin, onOpenModify, selected, onSelect }: {
+export default function DraggableItem({ item, metrics, onMove, scrollEl, onDelete, onDuplicate, onMoveStart, onMoveEnd, onBringToFront, onSendToBack, onBringForward, onSendBackward, onTogglePin, onOpenModify, onDropAsset, selected, onSelect }: {
   item: GridItem;
   metrics: GridMetrics;
   onMove: (next: GridItem) => void;
@@ -41,6 +41,7 @@ export default function DraggableItem({ item, metrics, onMove, scrollEl, onDelet
   onSendBackward?: (id: string) => void;
   onTogglePin?: (id: string) => void;
   onOpenModify?: (id: string) => void;
+  onDropAsset?: (id: string, hash: string) => void;
   selected?: boolean;
   onSelect?: (id: string) => void;
 }) {
@@ -82,12 +83,9 @@ export default function DraggableItem({ item, metrics, onMove, scrollEl, onDelet
       const dy = e.clientY - r.sy;
       const baseX = colW + gap;
       const baseY = rowH + gap;
-      // Snap units scale with gap for micro adjustments; allow continuous scaling for small gaps
-      const factor = Math.max(0, gap) / 12;
-      const stepX = Math.max(1, Math.round(baseX * factor));
-      const stepY = Math.max(1, Math.round(baseY * factor));
-      let nw = Math.round((r.w0 * baseX + dx) / stepX * (stepX / baseX));
-      let nh = Math.round((r.h0 * baseY + dy) / stepY * (stepY / baseY));
+      // Strict grid snapping: whole-column and whole-row increments
+      let nw = r.w0 + Math.round(dx / baseX);
+      let nh = r.h0 + Math.round(dy / baseY);
       nw = Math.max(1, Math.min(nw, cols - item.x));
       nh = Math.max(1, nh);
       if (nw !== item.w || nh !== item.h) onMove({ ...item, w: nw, h: nh });
@@ -99,13 +97,10 @@ export default function DraggableItem({ item, metrics, onMove, scrollEl, onDelet
     const dy = e.clientY - s.sy;
     const baseX = colW + gap;
     const baseY = rowH + gap;
-    const factor = Math.max(0, gap) / 12;
-    const stepX = Math.max(1, Math.round(baseX * factor));
-    const stepY = Math.max(1, Math.round(baseY * factor));
-    const kx = Math.round(dx / stepX);
-    const ky = Math.round(dy / stepY);
-    let nx = s.x0 + kx * (stepX / baseX);
-    let ny = s.y0 + ky * (stepY / baseY);
+    const kx = Math.round(dx / baseX);
+    const ky = Math.round(dy / baseY);
+    let nx = s.x0 + kx;
+    let ny = s.y0 + ky;
     nx = Math.max(0, Math.min(nx, cols - item.w));
     ny = Math.max(0, ny);
     if (nx !== item.x || ny !== item.y) onMove({ ...item, x: nx, y: ny });
@@ -166,23 +161,12 @@ export default function DraggableItem({ item, metrics, onMove, scrollEl, onDelet
 
   const outlineClass = selected ? 'ring-2 ring-black border-black' : 'hover:ring-2 hover:ring-black';
   return (
-    <div className="absolute select-none group"
-      style={{ left: pxLeft, top: pxTop, width: pxW, height: pxH, zIndex: dragging ? 5000 : (typeof item.z === 'number' ? 100 + item.z : undefined) }}
-    >
+    <div className="absolute select-none group" style={{ left: pxLeft, top: pxTop, width: pxW, height: pxH, zIndex: dragging ? 5000 : (typeof item.z === 'number' ? 100 + item.z : undefined) }}>
       <div
         className={`h-full rounded-md border-2 bg-transparent ${outlineClass}`}
-        role="button"
-        aria-label={`Widget: ${item.title || item.type || 'item'}`}
-        aria-grabbed={dragging ? true : undefined}
-        tabIndex={0}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
-        onFocus={() => onSelect?.(item.id)}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter') { e.preventDefault(); onOpenModify?.(item.id); }
-          // Arrow key nudging is handled at the editor container level; allow bubbling
-        }}
         onDoubleClick={() => onOpenModify?.(item.id)}
       >
         {/* Floating toolbar at top-right */}
@@ -191,7 +175,6 @@ export default function DraggableItem({ item, metrics, onMove, scrollEl, onDelet
             <button
               className="cursor-pointer p-1 rounded bg-white text-black border-2 border-black hover:bg-neutral-100 shadow-sm"
               title="Widget settings"
-              aria-label="Widget settings"
               onClick={(e) => { e.stopPropagation(); onOpenModify(item.id); }}
             >
               <SettingsIcon size={14} />
@@ -201,7 +184,6 @@ export default function DraggableItem({ item, metrics, onMove, scrollEl, onDelet
             <button
               className={`cursor-pointer p-1 rounded bg-white text-black border-2 border-black hover:bg-neutral-100 shadow-sm ${item.locked ? 'opacity-50 cursor-not-allowed' : ''}`}
               title={item.pinned ? 'Unpin (allow move)' : 'Pin (prevent move)'}
-              aria-label={item.pinned ? 'Unpin widget' : 'Pin widget'}
               disabled={!!item.locked}
               onClick={(e) => { e.stopPropagation(); if (!item.locked) onTogglePin(item.id); }}
             >
@@ -212,7 +194,6 @@ export default function DraggableItem({ item, metrics, onMove, scrollEl, onDelet
             <button
               className={`cursor-pointer p-1 rounded bg-white text-black border-2 border-black hover:bg-neutral-100 shadow-sm ${item.locked ? 'opacity-50 cursor-not-allowed' : ''}`}
               title="Duplicate"
-              aria-label="Duplicate widget"
               onClick={(e) => { e.stopPropagation(); if (!item.locked) onDuplicate(item.id); }}
             >
               <Copy size={14} />
@@ -222,7 +203,6 @@ export default function DraggableItem({ item, metrics, onMove, scrollEl, onDelet
             <button
               className={`cursor-pointer p-1 rounded bg-white text-black border-2 border-black hover:bg-neutral-100 shadow-sm ${item.locked ? 'opacity-50 cursor-not-allowed' : ''}`}
               title="Delete"
-              aria-label="Delete widget"
               onClick={(e) => { e.stopPropagation(); if (!item.locked) onDelete(item.id); }}
             >
               <Trash2 size={14} />
@@ -231,7 +211,35 @@ export default function DraggableItem({ item, metrics, onMove, scrollEl, onDelet
         </div>
 
         {/* Render actual widget content */}
-        <div className="w-full h-full overflow-hidden">
+        <div
+          className="w-full h-full overflow-hidden"
+          onDragOver={(e) => {
+            // Allow dropping asset hashes onto image widgets
+            const isImage = item.type === 'image';
+            if (!isImage || item.locked) return;
+            const types = e.dataTransfer?.types || [];
+            if (Array.from(types).some(t => t === 'application/x-asset-hash' || t === 'text/asset-hash' || t === 'text/plain')) {
+              e.preventDefault();
+            }
+          }}
+          onDrop={(e) => {
+            const isImage = item.type === 'image';
+            if (!isImage || item.locked) return;
+            let hash = '';
+            try { hash = e.dataTransfer?.getData('application/x-asset-hash') || e.dataTransfer?.getData('text/asset-hash') || ''; } catch { /* ignore */ }
+            if (!hash) {
+              try {
+                const plain = e.dataTransfer?.getData('text/plain') || '';
+                if (plain.startsWith('asset://')) hash = plain.slice('asset://'.length);
+              } catch { /* ignore */ }
+            }
+            if (hash) {
+              e.preventDefault();
+              e.stopPropagation();
+              onDropAsset?.(item.id, hash);
+            }
+          }}
+        >
           {item.type ? (
             <WidgetRenderer instance={{ id: item.id, type: item.type, props: item.props ?? {} }} />
           ) : (

@@ -25,9 +25,9 @@ export default function PreviewIframe({
             if (!doc) return;
             // Minimal blank page styles and CSS variables fallback
             doc.open();
-            doc.write(`<!doctype html><html><head><meta charset="utf-8" />
+                        doc.write(`<!doctype html><html><head><meta charset="utf-8" />
         <style>
-          html, body { height: 100%; }
+                    html, body { height: 100%; overflow-x: hidden; overflow-y: auto; }
           *, *::before, *::after { box-sizing: border-box; }
           body { margin: 0; background: #ffffff; color: #111827; font: 14px/1.4 ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, Noto Sans, "Apple Color Emoji", "Segoe UI Emoji"; }
           :root {
@@ -43,6 +43,15 @@ export default function PreviewIframe({
         </style>
       </head><body><div id="__preview_root"></div></body></html>`);
             doc.close();
+            // Clone parent document styles into iframe so Tailwind/Vite CSS applies to preview
+            try {
+                const head = doc.head;
+                const parent = window.document;
+                const links = Array.from(parent.querySelectorAll('link[rel="stylesheet"]')) as HTMLLinkElement[];
+                const styles = Array.from(parent.querySelectorAll('style')) as HTMLStyleElement[];
+                for (const l of links) head.appendChild(l.cloneNode(true));
+                for (const s of styles) head.appendChild(s.cloneNode(true));
+            } catch { /* ignore style cloning issues */ }
             const root = doc.getElementById('__preview_root') as HTMLElement | null;
             setMountNode(root);
         };
@@ -59,7 +68,7 @@ export default function PreviewIframe({
         <iframe
             ref={iframeRef}
             className={className}
-            style={style}
+            style={{ display: 'block', ...style }}
             width={width}
             height={height}
             title="Page preview"

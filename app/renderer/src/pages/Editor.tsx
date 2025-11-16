@@ -1,6 +1,6 @@
 import { useEffect, useState, lazy, Suspense } from "react";
 import { useNavigate } from "react-router-dom";
-import { ChevronsLeft, ChevronsRight } from "lucide-react";
+import { ChevronsLeft, ChevronsRight, ChevronDown, ChevronRight } from "lucide-react";
 import { DndContext, PointerSensor, useSensor, useSensors, DragEndEvent, DragStartEvent, rectIntersection, DragOverlay } from "@dnd-kit/core";
 
 import { useProjects } from "../providers/ProjectsProvider";
@@ -11,6 +11,9 @@ import EditorTopBar from "../components/editor/EditorTopBar";
 import PageControls from "../components/editor/PageControls";
 import ViewportSurface from "../components/editor/ViewportSurface";
 import DragOverlayPreview from "../components/editor/DragOverlayPreview";
+import AssetsPanel from "../components/editor/widgets/AssetsPanel";
+import PreviewPopup from "../components/editor/PreviewPopup";
+import PagePreview from "../components/editor/PagePreview";
 
 const COLS = 12;
 const DEFAULT_ROW_H = 32; // px height per row (content area)
@@ -121,8 +124,13 @@ export default function EditorPage() {
   const canUndo = history.length > 0;
   const canRedo = redoStack.length > 0;
 
+  // Standalone popup preview state
+  const [popupOpen, setPopupOpen] = useState<boolean>(false);
+  function openWebpage() { setPopupOpen(true); }
+  function closeWebpage() { setPopupOpen(false); }
+
   const [pageWidth, setPageWidth] = useState<number>(() => {
-    try { return Number(localStorage.getItem('py_editor_page_w')) || 1100; } catch { return 1100; }
+    try { return Number(localStorage.getItem('py_editor_page_w')) || 1300; } catch { return 1300; }
   });
   const [activeView, setActiveView] = useState<'desktop' | 'mobile'>(() => {
     try { return (localStorage.getItem('py_editor_view') as 'desktop' | 'mobile') || 'desktop'; } catch { return 'desktop'; }
@@ -177,10 +185,32 @@ export default function EditorPage() {
     });
   }
 
+  // Collapsible sections inside the sidebar
+  const [widgetsOpen, setWidgetsOpen] = useState<boolean>(() => {
+    try { return (localStorage.getItem('py_widgets_section_open') ?? '1') === '1'; } catch { return true; }
+  });
+  const [assetsOpen, setAssetsOpen] = useState<boolean>(() => {
+    try { return (localStorage.getItem('py_assets_section_open') ?? '1') === '1'; } catch { return true; }
+  });
+  function toggleWidgetsOpen() {
+    setWidgetsOpen(prev => { const n = !prev; try { localStorage.setItem('py_widgets_section_open', n ? '1' : '0'); } catch { } return n; });
+  }
+  function toggleAssetsOpen() {
+    setAssetsOpen(prev => { const n = !prev; try { localStorage.setItem('py_assets_section_open', n ? '1' : '0'); } catch { } return n; });
+  }
+
   // Page viewport height (applies to canvas and preview)
   const [pageHeight, setPageHeight] = useState<number>(() => {
     try { return Number(localStorage.getItem('py_editor_page_h')) || 900; } catch { return 900; }
   });
+  // Height behavior: expand grows with content; fixed keeps pageHeight and allows internal scroll
+  const [heightMode, setHeightMode] = useState<'expand' | 'fixed'>(() => {
+    try { return (localStorage.getItem('py_editor_hmode') as 'expand' | 'fixed') || 'expand'; } catch { return 'expand'; }
+  });
+  function applyHeightMode(m: 'expand' | 'fixed') {
+    setHeightMode(m);
+    try { localStorage.setItem('py_editor_hmode', m); } catch { /* ignore */ }
+  }
 
   // Selection + keyboard shortcuts
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -287,6 +317,25 @@ export default function EditorPage() {
     setEditingId(null);
   }
 
+  // Keyboard add fallback from palette tiles
+  useEffect(() => {
+    function onAddWidget(e: Event) {
+      const ce = e as CustomEvent<{ type: string; label?: string; w?: number; h?: number }>;
+      const defW = Math.max(1, Math.min(COLS, ce.detail?.w ?? 4));
+      const defH = Math.max(1, ce.detail?.h ?? 4);
+      const id = typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : Math.random().toString(36).slice(2, 9);
+      const newItem: GridItem = { id, x: 0, y: 0, w: defW, h: defH, z: 0, title: ce.detail?.label || 'Widget', type: ce.detail?.type, props: {}, pinned: false, locked: false };
+      commitUpdate(`Add ${newItem.title}`, (prev) => {
+        const norm = normalizeZ(prev);
+        const maxZ = norm.length;
+        return [...norm, { ...newItem, z: maxZ }];
+      });
+      setSelectedId(id);
+    }
+    window.addEventListener('py:addWidget', onAddWidget as EventListener);
+    return () => window.removeEventListener('py:addWidget', onAddWidget as EventListener);
+  }, []);
+
   // Helper to normalize layering to 0..n-1 in ascending z order
   function normalizeZ(list: GridItem[]): GridItem[] {
     const withZ = list.map(it => ({ ...it, z: typeof it.z === 'number' ? it.z : 0 }));
@@ -349,7 +398,7 @@ export default function EditorPage() {
 
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-4 space-y-5">
       {!selectedProject && (
         <div className="surface p-4 border border-[color:var(--border)] text-sm text-[color:var(--fg-muted)]">
           No portfolio selected. Go to Home and open one.
@@ -372,10 +421,13 @@ export default function EditorPage() {
           setMobileView={setMobileView}
           pageWidth={pageWidth}
           pageHeight={pageHeight}
+          heightMode={heightMode}
+          setHeightMode={applyHeightMode}
           canUndo={canUndo}
           canRedo={canRedo}
           undo={undo}
           redo={redo}
+          onOpenWebpage={openWebpage}
         />
 
         {/* Page management section */}
@@ -521,16 +573,11 @@ export default function EditorPage() {
               // Compute grid coordinates using same math, then quantize to micro-step based on gap
               const colW = Math.floor(overRect.width / COLS);
               const baseX = colW + gap;
-              const baseY = DEFAULT_ROW_H + gap;
-              const factor = Math.max(0, gap) / 12;
-              const stepX = Math.max(1, Math.round(baseX * factor));
-              const stepY = Math.max(1, Math.round(baseY * factor));
+              const baseY = colW + gap; // square grid: row unit equals column unit
               const w = data.w ?? 4;
               const h = data.h ?? 4;
-              const qx = Math.round(relX / stepX) * (stepX / baseX);
-              const qy = Math.round(relY / stepY) * (stepY / baseY);
-              let x = Math.floor(qx);
-              let y = Math.floor(qy);
+              let x = Math.floor(relX / baseX);
+              let y = Math.floor(relY / baseY);
               x = Math.max(0, Math.min(x, COLS - w));
               y = Math.max(0, y);
               const id = typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : Math.random().toString(36).slice(2, 9);
@@ -558,6 +605,7 @@ export default function EditorPage() {
               pageHeight={pageHeight}
               setPageWidth={setPageWidth}
               setPageHeight={setPageHeight}
+              heightMode={heightMode}
               previewMode={previewMode}
               cols={COLS}
               rowH={DEFAULT_ROW_H}
@@ -603,6 +651,10 @@ export default function EditorPage() {
               onSendBackward={sendBackward}
               onTogglePin={togglePin}
               onOpenModify={openModify}
+              onDropAsset={(id, hash) => {
+                // Only handle for Image widgets: set src to asset://hash
+                commitUpdate('Set image from asset', (prev) => prev.map(it => it.id === id && it.type === 'image' ? { ...it, props: { ...(it.props as Record<string, unknown>), src: `asset://${hash}` } } : it));
+              }}
             />
 
             {/* Widget Sidebar (collapsible) */}
@@ -616,15 +668,51 @@ export default function EditorPage() {
               ) : (
                 <div className="h-full flex flex-col">
                   <div className="flex items-center justify-between p-2 border-b border-[color:var(--border)] bg-[color:var(--muted)]/40">
-                    <div className="text-xs text-[color:var(--fg-muted)]">Widgets</div>
+                    <div className="text-xs text-[color:var(--fg-muted)]">CANVAS DASHBOARD</div>
                     <button className="btn btn-ghost btn-xs" title="Collapse palette" onClick={togglePalette}>
                       <ChevronsRight size={14} />
                     </button>
                   </div>
-                  <div className="p-3 overflow-auto grow">
-                    <Suspense fallback={<div className="text-xs text-[color:var(--fg-muted)] p-2">Loading widgets…</div>}>
-                      <WidgetsPalette />
-                    </Suspense>
+                  <div className="p-2 overflow-auto grow space-y-3">
+                    {/* Widgets section */}
+                    <div className="border border-[color:var(--border)] rounded-md overflow-hidden">
+                      <button
+                        className="w-full flex items-center justify-between gap-2 px-2 py-1.5 bg-[color:var(--muted)]/40 text-[10px] tracking-wide uppercase"
+                        onClick={toggleWidgetsOpen}
+                        title={widgetsOpen ? 'Collapse' : 'Expand'}
+                      >
+                        <span className="flex items-center gap-2">
+                          {widgetsOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                          Widgets
+                        </span>
+                      </button>
+                      {widgetsOpen && (
+                        <div className="p-2">
+                          <Suspense fallback={<div className="text-xs text-[color:var(--fg-muted)] p-2">Loading widgets…</div>}>
+                            <WidgetsPalette />
+                          </Suspense>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Assets section */}
+                    <div className="border border-[color:var(--border)] rounded-md overflow-hidden">
+                      <button
+                        className="w-full flex items-center justify-between gap-2 px-2 py-1.5 bg-[color:var(--muted)]/40 text-[10px] tracking-wide uppercase"
+                        onClick={toggleAssetsOpen}
+                        title={assetsOpen ? 'Collapse' : 'Expand'}
+                      >
+                        <span className="flex items-center gap-2">
+                          {assetsOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                          Assets
+                        </span>
+                      </button>
+                      {assetsOpen && (
+                        <div className="p-2">
+                          <AssetsPanel hideHeader />
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </div>
               )}
@@ -634,6 +722,13 @@ export default function EditorPage() {
       </section>
 
       {/* Preview now replaces canvas above when toggled */}
+
+      {/* Standalone popup window preview (renders current page) */}
+      <PreviewPopup open={popupOpen} onClose={closeWebpage} title="PortfoliYOU – Preview" width={pageWidth} height={pageHeight}>
+        <div style={{ width: pageWidth }}>
+          <PagePreview width={pageWidth} cols={COLS} gap={gap} rowH={DEFAULT_ROW_H} items={items} />
+        </div>
+      </PreviewPopup>
 
       {editingItem && (
         <Suspense fallback={null}>

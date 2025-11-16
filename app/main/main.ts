@@ -116,15 +116,28 @@ app.on("activate", () => {
 });
 
 // IPC: Save a file to disk
-ipcMain.handle("py:saveFile", async (_event, opts: { defaultPath?: string; data: string }) => {
-  const { defaultPath, data } = opts || {};
+ipcMain.handle("py:saveFile", async (_event, opts: { defaultPath?: string; data: string; encoding?: 'utf8' | 'base64' }) => {
+  const { defaultPath, data, encoding } = opts || {};
   const result = await dialog.showSaveDialog({
     title: "Save PortfoliYOU file",
     defaultPath: defaultPath || "project.portfoliyou",
     filters: [{ name: "PortfoliYOU", extensions: ["portfoliyou", "json"] }],
   });
   if (result.canceled || !result.filePath) return { canceled: true };
-  await fs.writeFile(result.filePath, data, "utf8");
+  await fs.writeFile(result.filePath, data, encoding === 'base64' ? { encoding: 'base64' } : "utf8");
+  return { canceled: false, filePath: result.filePath };
+});
+
+// IPC: Save base64 bytes to disk
+ipcMain.handle("py:saveFileBytes", async (_event, opts: { defaultPath?: string; dataBase64: string }) => {
+  const { defaultPath, dataBase64 } = opts || {};
+  const result = await dialog.showSaveDialog({
+    title: "Save PortfoliYOU file",
+    defaultPath: defaultPath || "project.portfoliyou",
+    filters: [{ name: "PortfoliYOU", extensions: ["portfoliyou", "zip"] }],
+  });
+  if (result.canceled || !result.filePath) return { canceled: true };
+  await fs.writeFile(result.filePath, dataBase64, { encoding: 'base64' });
   return { canceled: false, filePath: result.filePath };
 });
 
@@ -141,12 +154,36 @@ ipcMain.handle("py:openFileDialog", async (_event, opts: { filters?: { name: str
   return { canceled: false, filePath, data };
 });
 
+// IPC: Open file dialog and read file as base64 bytes
+ipcMain.handle("py:openFileDialogBytes", async (_event, opts: { filters?: { name: string; extensions: string[] }[] }) => {
+  const result = await dialog.showOpenDialog({
+    title: "Open PortfoliYOU file",
+    filters: opts?.filters || [{ name: "PortfoliYOU", extensions: ["portfoliyou", "zip"] }],
+    properties: ["openFile"],
+  });
+  if (result.canceled || !result.filePaths?.[0]) return { canceled: true };
+  const filePath = result.filePaths[0];
+  const buf = await fs.readFile(filePath);
+  const dataBase64 = buf.toString('base64');
+  return { canceled: false, filePath, dataBase64 };
+});
+
 // IPC: Write directly to file path
-ipcMain.handle("py:writeFile", async (_event, opts?: { filePath: string; data: string }) => {
+ipcMain.handle("py:writeFile", async (_event, opts?: { filePath: string; data: string; encoding?: 'utf8' | 'base64' }) => {
   const filePath = opts?.filePath ?? "";
   const data = opts?.data ?? "";
+  const encoding = opts?.encoding;
   if (!filePath) return { ok: false, error: "No filePath" };
-  await fs.writeFile(filePath, data, "utf8");
+  await fs.writeFile(filePath, data, encoding === 'base64' ? { encoding: 'base64' } : "utf8");
+  return { ok: true };
+});
+
+// IPC: Write base64 bytes directly to file path
+ipcMain.handle("py:writeFileBytes", async (_event, opts?: { filePath: string; dataBase64: string }) => {
+  const filePath = opts?.filePath ?? "";
+  const dataBase64 = opts?.dataBase64 ?? "";
+  if (!filePath) return { ok: false, error: "No filePath" };
+  await fs.writeFile(filePath, dataBase64, { encoding: 'base64' });
   return { ok: true };
 });
 

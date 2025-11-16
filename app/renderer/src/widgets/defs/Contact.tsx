@@ -5,7 +5,7 @@ import type { WidgetDefinition } from '../types';
 
 const def: WidgetDefinition<{ email?: string }> = {
     type: 'contact',
-    label: 'Contact Form',
+    label: 'Email Contact',
     defaultProps: { email: '' },
     grid: { w: 6, h: 6 },
     render: (props) => (

@@ -6,7 +6,7 @@ WidgetsRegistry.register(
 );
 
 WidgetsRegistry.register(
-  { type: 'image', label: 'Image', grid: { w: 4, h: 4 }, category: 'Media' },
+  { type: 'image', label: 'Image', grid: { w: 2, h: 2 }, category: 'Media' },
   () => import('./defs/Image').then(m => m.default as import('./types').WidgetDefinition<unknown>)
 );
 
@@ -16,6 +16,6 @@ WidgetsRegistry.register(
 );
 
 WidgetsRegistry.register(
-  { type: 'contact', label: 'Contact Form', grid: { w: 6, h: 6 }, category: 'Contact' },
+  { type: 'contact', label: 'Email Contact', grid: { w: 6, h: 6 }, category: 'Contact' },
   () => import('./defs/Contact').then(m => m.default as import('./types').WidgetDefinition<unknown>)
 );
