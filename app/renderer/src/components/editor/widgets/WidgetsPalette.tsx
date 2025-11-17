@@ -1,6 +1,6 @@
 import { useDraggable } from '@dnd-kit/core';
 import type { LucideIcon } from 'lucide-react';
-import { Boxes, Search, ChevronDown, ChevronRight, Image as ImageIcon, Mail, Type as TypeIcon, Compass, GalleryHorizontalEnd, Layers, Frame, LayoutGrid, AppWindow } from 'lucide-react';
+import { Boxes, Search, ChevronDown, ChevronRight, Image as ImageIcon, Mail, Type as TypeIcon, Compass, GalleryHorizontalEnd, Layers, Frame, LayoutGrid, AppWindow, Play, Link2 } from 'lucide-react';
 import React, { memo, useEffect, useMemo, useState } from 'react';
 
 import { WidgetsRegistry } from '../../../widgets/registry';
@@ -24,15 +24,11 @@ const fallbackPreview: Required<Pick<PreviewConfig, 'icon'>> = {
 
 const previewConfigs: Record<string, PreviewConfig> = {
   image: { icon: ImageIcon, label: 'Image' },
-  text: {
-    render: () => (
-      <div className={PREVIEW_SHELL_CLASS}>
-        <span className="font-semibold text-base tracking-widest text-black">Text</span>
-      </div>
-    ),
-  },
+  text: { icon: TypeIcon, label: 'Text' },
+  video: { icon: Play, label: 'Video' },
+  link: { icon: Link2, label: 'Link' },
   contact: { icon: Mail, label: 'Contact' },
-  'nav-link': { icon: Compass, label: 'Nav', accentClass: 'text-[color:var(--accent)]' },
+  'nav-link': { icon: Compass, label: 'Nav Link' },
   project: { icon: LayoutGrid, label: 'Project' },
   carousel: { icon: GalleryHorizontalEnd, label: 'Carousel' },
   'portfolio-island': { icon: Layers, label: 'Island' },

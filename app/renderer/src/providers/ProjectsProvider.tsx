@@ -10,6 +10,8 @@ import { idbGet, idbPut, computeHash, stores, AssetMeta } from "../lib/assetsSto
 import { auth, db, storage } from "../lib/firebase";
 
 import { useNotifications } from './NotificationsProvider';
+import { sanitizeVideoProps } from '../widgets/videoProps';
+import type { VideoWidgetProps } from '../widgets/videoProps';
 
 type ZipEntry = {
 	async(type: 'arraybuffer'): Promise<ArrayBuffer>;
@@ -76,6 +78,31 @@ export type LocalProject = Project & {
 	_cloudId?: string; // firestore document id for cloud copy
 };
 
+function sanitizeVideoWidgetProps(widget: Widget): Widget {
+	const rawProps = (widget?.props || {}) as Partial<VideoWidgetProps>;
+	const safeProps = sanitizeVideoProps(rawProps);
+	return { ...widget, props: safeProps };
+}
+
+function sanitizeProjectVideoWidgets(project: LocalProject): LocalProject {
+	if (!project || typeof project !== 'object') return project;
+	const widgets = project.widgets;
+	if (!widgets || typeof widgets !== 'object') return project;
+	let sanitized: Record<string, Widget> | null = null;
+	for (const [widgetId, widget] of Object.entries(widgets)) {
+		if (!widget || typeof widget !== 'object') continue;
+		if (widget.type !== 'video') continue;
+		if (!sanitized) sanitized = { ...widgets } as Record<string, Widget>;
+		sanitized[widgetId] = sanitizeVideoWidgetProps(widget as Widget);
+	}
+	if (!sanitized) return project;
+	return { ...project, widgets: sanitized };
+}
+
+function sanitizeProjectsList(projects: LocalProject[]): LocalProject[] {
+	return projects.map(sanitizeProjectVideoWidgets);
+}
+
 type ProjectsCtx = {
 	projects: LocalProject[];
 	hasAny: boolean;
@@ -130,9 +157,16 @@ type ProjectsCtx = {
 const Ctx = createContext<ProjectsCtx | null>(null);
 
 function readStore(): LocalProject[] {
-	try { return JSON.parse(localStorage.getItem("py.projects") || "[]"); } catch { return []; }
+	try {
+		const raw = JSON.parse(localStorage.getItem("py.projects") || "[]");
+		if (!Array.isArray(raw)) return [];
+		return sanitizeProjectsList(raw as LocalProject[]);
+	} catch { return []; }
 }
-function writeStore(list: LocalProject[]) { localStorage.setItem("py.projects", JSON.stringify(list)); }
+function writeStore(list: LocalProject[]) {
+	const sanitized = sanitizeProjectsList(list);
+	localStorage.setItem("py.projects", JSON.stringify(sanitized));
+}
 function readSelected(): string | null { try { return JSON.parse(localStorage.getItem("py.selectedProjectId") || "null"); } catch { return null; } }
 function writeSelected(id: string | null) { localStorage.setItem("py.selectedProjectId", JSON.stringify(id)); }
 
@@ -149,7 +183,8 @@ function pushRevisionSnapshot(proj: LocalProject) {
 		// Avoid duplicate snapshots with same updatedAt
 		const last = existing[0];
 		if (last && last.data.updatedAt === proj.updatedAt) return;
-		const snapshot: RevisionEntry = { savedAt: new Date().toISOString(), data: { ...proj, _filePath: undefined, _synced: undefined } as LocalProject };
+		const clean = sanitizeProjectVideoWidgets(proj);
+		const snapshot: RevisionEntry = { savedAt: new Date().toISOString(), data: { ...clean, _filePath: undefined, _synced: undefined } as LocalProject };
 		const next = [snapshot, ...existing].slice(0, 5);
 		localStorage.setItem(key, JSON.stringify(next));
 	} catch { /* ignore */ }
@@ -244,19 +279,20 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 
 	// Helper: serialize project + referenced assets into a zip (base64)
 	const buildArchiveBase64 = async (proj: LocalProject) => {
+		const sanitizedProject = sanitizeProjectVideoWidgets(proj);
 		const zip = new JSZip();
 		const payload: { _format: string; _version: number; exportedAt: string; project: LocalProject } = {
 			_format: "portfoliyou",
 			_version: 2,
 			exportedAt: now(),
-			project: { ...proj },
+			project: { ...sanitizedProject },
 		};
 		delete (payload.project as LocalProject)._filePath;
 		delete (payload.project as LocalProject)._synced;
 
 		// Collect referenced asset hashes from widgets (props.src can be asset://hash or assets/...)
 		const hashes = new Set<string>();
-		for (const w of Object.values(proj.widgets || {})) {
+		for (const w of Object.values(sanitizedProject.widgets || {})) {
 			try {
 				const p = (w.props || {}) as Record<string, unknown>;
 				const src = typeof p['src'] === 'string' ? (p['src'] as string) : '';
@@ -1301,6 +1337,7 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 				// Update name in memory first
 				proj = { ...proj, name: newName, updatedAt: now() } as LocalProject;
 				let next = [...projects]; next[idx] = proj; setProjects(next); writeStore(next);
+				try { notify({ type: 'success', message: `Project renamed to "${newName}"`, title: proj.name, persistent: false }); } catch { /* noop */ }
 				// If there is a bound file, try to rename it to match newName
 				if (proj._filePath && window.api?.renameFile) {
 					// sanitize filename
@@ -1422,8 +1459,9 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 		if (typeof obj['themes'] !== 'object' || obj['themes'] === null) obj['themes'] = {};
 		if (typeof obj['pages'] !== 'object' || obj['pages'] === null) obj['pages'] = {};
 		if (typeof obj['widgets'] !== 'object' || obj['widgets'] === null) obj['widgets'] = {};
-		obj['updatedAt'] = now();
-		return obj as LocalProject;
+		const migrated = sanitizeProjectVideoWidgets(obj as LocalProject);
+		migrated.updatedAt = now();
+		return migrated;
 	}
 
 	return <Ctx.Provider value={api}>{children}</Ctx.Provider>;

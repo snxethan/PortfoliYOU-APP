@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useState, lazy, Suspense } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, lazy, Suspense } from "react";
 import { useNavigate } from "react-router-dom";
 import { ChevronsLeft, ChevronsRight, ChevronDown, ChevronRight } from "lucide-react";
-import { DndContext, PointerSensor, useSensor, useSensors, DragEndEvent, DragStartEvent, rectIntersection, DragOverlay } from "@dnd-kit/core";
+import { DndContext, PointerSensor, useSensor, useSensors, DragEndEvent, DragStartEvent, rectIntersection, DragOverlay, type Modifier } from "@dnd-kit/core";
 
 import { useProjects } from "../providers/ProjectsProvider";
 import { useNotifications } from '../providers/NotificationsProvider';
@@ -339,6 +339,26 @@ export default function EditorPage() {
   // Active drag preview for palette items
   type PaletteDrag = { src?: string; label?: string; w?: number; h?: number } | undefined;
   const [activeDrag, setActiveDrag] = useState<PaletteDrag>(undefined);
+  const dragPointerStart = useRef<{ x: number; y: number } | null>(null);
+  const dragPointerOffset = useRef<{ x: number; y: number } | null>(null);
+  const dragOverlaySize = useRef<{ width: number; height: number } | null>(null);
+
+  const dragOverlayCursorAlign = useMemo<Modifier>(() => (({ transform, activeNodeRect }) => {
+    if (!transform) return transform;
+    const pointerOffset = dragPointerOffset.current;
+    const overlaySize = dragOverlaySize.current;
+    const fallbackOffsetX = activeNodeRect ? activeNodeRect.width / 2 : 0;
+    const fallbackOffsetY = activeNodeRect ? activeNodeRect.height / 2 : 0;
+    const offsetX = pointerOffset?.x ?? fallbackOffsetX;
+    const offsetY = pointerOffset?.y ?? fallbackOffsetY;
+    const overlayHalfW = overlaySize ? overlaySize.width / 2 : fallbackOffsetX;
+    const overlayHalfH = overlaySize ? overlaySize.height / 2 : fallbackOffsetY;
+    return {
+      ...transform,
+      x: transform.x + offsetX - overlayHalfW,
+      y: transform.y + offsetY - overlayHalfH,
+    };
+  }) as Modifier, []);
 
   // Modify panel
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -618,6 +638,22 @@ export default function EditorPage() {
             const data = event.active.data.current as PaletteDrag;
             if (data?.src === 'palette') {
               setActiveDrag(data);
+              const pointerEvent = event.activatorEvent as PointerEvent | undefined;
+              if (pointerEvent && typeof pointerEvent.clientX === 'number' && typeof pointerEvent.clientY === 'number') {
+                dragPointerStart.current = { x: pointerEvent.clientX, y: pointerEvent.clientY };
+                const initialRect = event.active.rect.current.initial;
+                if (initialRect) {
+                  dragPointerOffset.current = {
+                    x: pointerEvent.clientX - initialRect.left,
+                    y: pointerEvent.clientY - initialRect.top,
+                  };
+                } else {
+                  dragPointerOffset.current = null;
+                }
+              } else {
+                dragPointerStart.current = null;
+                dragPointerOffset.current = null;
+              }
             }
           }}
           onDragEnd={(event: DragEndEvent) => {
@@ -628,10 +664,11 @@ export default function EditorPage() {
               const overRect = over.rect;
               const initial = active.rect.current.initial;
               if (!initial) return;
-              const centerX = initial.left + initial.width / 2 + event.delta.x;
-              const centerY = initial.top + initial.height / 2 + event.delta.y;
-              const relX = centerX - overRect.left;
-              const relY = centerY - overRect.top;
+              const startPointer = dragPointerStart.current;
+              const pointerX = startPointer ? startPointer.x + event.delta.x : initial.left + initial.width / 2 + event.delta.x;
+              const pointerY = startPointer ? startPointer.y + event.delta.y : initial.top + initial.height / 2 + event.delta.y;
+              const relX = pointerX - overRect.left;
+              const relY = pointerY - overRect.top;
 
               // Compute grid coordinates using same math, then quantize to micro-step based on gap
               const effectiveZoom = zoom || 1;
@@ -658,12 +695,20 @@ export default function EditorPage() {
             }
             // Clear drag overlay when drop completes
             setActiveDrag(undefined);
+            dragPointerStart.current = null;
+            dragPointerOffset.current = null;
+            dragOverlaySize.current = null;
           }}
-          onDragCancel={() => setActiveDrag(undefined)}
+          onDragCancel={() => {
+            setActiveDrag(undefined);
+            dragPointerStart.current = null;
+            dragPointerOffset.current = null;
+            dragOverlaySize.current = null;
+          }}
         >
           {/* Visible drag preview while dragging from the palette */}
-          <DragOverlay dropAnimation={null}>
-            <DragOverlayPreview activeDrag={activeDrag} />
+          <DragOverlay dropAnimation={null} modifiers={[dragOverlayCursorAlign]}>
+            <DragOverlayPreview activeDrag={activeDrag} onMeasure={(size) => { dragOverlaySize.current = size; }} />
           </DragOverlay>
           <div className="grid gap-0 min-h-[28rem]" style={{ gridTemplateColumns: paletteCollapsed ? '1fr 1.5rem' : '1fr 16rem' }} onKeyDown={onKeyDown} tabIndex={0}>
             {/* Canvas or Preview inside a page-like viewport */}

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Layers, Pin, PinOff, Lock, Unlock, ChevronsUp, ChevronsDown, ChevronUp, ChevronDown, X, Trash2 } from "lucide-react";
 import { z } from "zod";
 
@@ -67,6 +67,9 @@ function serializeCarouselEditorItems(items: CarouselEditorItem[]): CarouselItem
         .filter((item) => !!item.src);
 }
 
+const ENTER_SUBMIT_BLOCKED_TYPES = new Set(['checkbox', 'radio', 'range', 'color', 'date', 'datetime-local', 'month', 'week', 'time', 'file']);
+const VIDEO_APPEARANCE_FIELDS = new Set(['shape', 'borderWidth', 'borderRadius', 'borderColor', 'borderStyle']);
+
 export default function ModifyWidgetModal({
     item,
     onClose,
@@ -105,12 +108,24 @@ export default function ModifyWidgetModal({
     const [formValues, setFormValues] = useState<Record<string, unknown>>({});
     const [formErrors, setFormErrors] = useState<Record<string, string>>({});
     const [defType, setDefType] = useState<string | null>(null);
-    const [selectedFileName, setSelectedFileName] = useState<string>("");
+    const [imageFileName, setImageFileName] = useState<string>("");
+    const [videoFileName, setVideoFileName] = useState<string>("");
+    const [posterFileName, setPosterFileName] = useState<string>("");
     const [carouselItems, setCarouselItems] = useState<CarouselEditorItem[]>([]);
     const [carouselError, setCarouselError] = useState<string | null>(null);
     const assets = useAssets();
+    const imageAssetOptions = useMemo(() => assets.list.filter(asset => asset.type?.startsWith('image/')), [assets.list]);
+    const videoAssetOptions = useMemo(() => assets.list.filter(asset => asset.type?.startsWith('video/')), [assets.list]);
     const resolvedDefType = defType || item.type || null;
     const isCarousel = resolvedDefType === 'carousel';
+    const isVideo = resolvedDefType === 'video';
+    const videoShapeValue = ((typeof formValues.shape === 'string' ? formValues.shape : null) || 'rectangle') as 'rectangle' | 'rounded' | 'circle';
+    const rawBorderWidth = formValues.borderWidth;
+    const rawBorderRadius = formValues.borderRadius;
+    const videoBorderWidthValue = typeof rawBorderWidth === 'number' && Number.isFinite(rawBorderWidth) ? rawBorderWidth : '';
+    const videoBorderRadiusValue = typeof rawBorderRadius === 'number' && Number.isFinite(rawBorderRadius) ? rawBorderRadius : '';
+    const videoBorderColorValue = (typeof formValues.borderColor === 'string' && /^#([0-9a-fA-F]{3}){1,2}$/.test(formValues.borderColor)) ? formValues.borderColor : '#e5e7eb';
+    const videoBorderStyleValue = (typeof formValues.borderStyle === 'string' ? formValues.borderStyle : 'solid') as 'solid' | 'dashed' | 'dotted';
     // Collapsible sections (persist across openings)
     const [compOpen, setCompOpen] = useState<boolean>(() => {
         try { return localStorage.getItem('py_comp_props_open') === '1'; } catch { return false; }
@@ -124,12 +139,48 @@ export default function ModifyWidgetModal({
     function toggleWidgetOpen() {
         setWidgetOpen(prev => { const n = !prev; try { localStorage.setItem('py_widget_props_open', n ? '1' : '0'); } catch { /* noop */ } return n; });
     }
+    function persistedToggle(key: string, setter: React.Dispatch<React.SetStateAction<boolean>>) {
+        setter(prev => {
+            const next = !prev;
+            try { localStorage.setItem(key, next ? '1' : '0'); } catch { /* noop */ }
+            return next;
+        });
+    }
+    const [imageToolsOpen, setImageToolsOpen] = useState<boolean>(() => {
+        try { return localStorage.getItem('py_image_tools_open') !== '0'; } catch { return true; }
+    });
+    const [videoToolsOpen, setVideoToolsOpen] = useState<boolean>(() => {
+        try { return localStorage.getItem('py_video_tools_open') !== '0'; } catch { return true; }
+    });
+    const [carouselToolsOpen, setCarouselToolsOpen] = useState<boolean>(() => {
+        try { return localStorage.getItem('py_carousel_tools_open') !== '0'; } catch { return true; }
+    });
+    const [protectionOpen, setProtectionOpen] = useState<boolean>(() => {
+        try { return localStorage.getItem('py_widget_protection_open') !== '0'; } catch { return true; }
+    });
+    const [layerOpen, setLayerOpen] = useState<boolean>(() => {
+        try { return localStorage.getItem('py_widget_layers_open') !== '0'; } catch { return true; }
+    });
 
     // Keyboard helpers
     function handleEnterSubmitComp(e: React.KeyboardEvent) {
         if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey && !locked) {
             e.preventDefault();
             applyForm();
+        }
+    }
+    function handleEnterSubmitAnywhere(e: React.KeyboardEvent) {
+        if (locked || e.defaultPrevented) return;
+        if (e.key !== 'Enter' || e.shiftKey || e.ctrlKey || e.metaKey) return;
+        const target = e.target as HTMLElement | null;
+        if (!target) return;
+        if (target instanceof HTMLTextAreaElement) return;
+        if (target instanceof HTMLInputElement) {
+            const type = target.type?.toLowerCase();
+            if (!type || !ENTER_SUBMIT_BLOCKED_TYPES.has(type)) {
+                e.preventDefault();
+                applyForm();
+            }
         }
     }
     function handleCtrlEnterApplyJson(e: React.KeyboardEvent) {
@@ -237,9 +288,32 @@ export default function ModifyWidgetModal({
             const src = formValues.src;
             if (typeof src === 'string' && src.startsWith('asset://')) {
                 const hash = src.slice('asset://'.length);
-                try { const meta = await assets.get(hash); if (alive) setSelectedFileName(meta?.name || ''); } catch { /* ignore */ }
+                try { const meta = await assets.get(hash); if (alive) setImageFileName(meta?.name || ''); } catch { /* ignore */ }
             } else {
-                if (alive) setSelectedFileName('');
+                if (alive) setImageFileName('');
+            }
+        }
+        void go();
+        return () => { alive = false; };
+    }, [defType, formValues, assets]);
+
+    useEffect(() => {
+        let alive = true;
+        async function go() {
+            if (defType !== 'video') return;
+            const src = formValues.src;
+            if (typeof src === 'string' && src.startsWith('asset://')) {
+                const hash = src.slice('asset://'.length);
+                try { const meta = await assets.get(hash); if (alive) setVideoFileName(meta?.name || ''); } catch { /* ignore */ }
+            } else {
+                if (alive) setVideoFileName('');
+            }
+            const poster = formValues.poster;
+            if (typeof poster === 'string' && poster.startsWith('asset://')) {
+                const hash = poster.slice('asset://'.length);
+                try { const meta = await assets.get(hash); if (alive) setPosterFileName(meta?.name || ''); } catch { /* ignore */ }
+            } else {
+                if (alive) setPosterFileName('');
             }
         }
         void go();
@@ -249,6 +323,28 @@ export default function ModifyWidgetModal({
     const locked = !!item.locked;
     const pinned = !!item.pinned;
 
+    function validateField(key: string, value: unknown) {
+        if (!zodSchema) {
+            setFormErrors(prev => ({ ...prev, [key]: '' }));
+            return;
+        }
+        const shape = zodSchema.shape as Record<string, z.ZodTypeAny>;
+        const field = shape?.[key];
+        if (!field) {
+            setFormErrors(prev => ({ ...prev, [key]: '' }));
+            return;
+        }
+        const single = z.object({ [key]: field });
+        const res = single.safeParse({ [key]: value });
+        setFormErrors(prev => ({ ...prev, [key]: res.success ? '' : (res.error.issues[0]?.message || 'Invalid value') }));
+    }
+
+    function setFieldValue(key: string, value: unknown) {
+        const next = { ...formValues, [key]: value };
+        setFormValues(next);
+        validateField(key, value);
+    }
+
     function applyProps() {
         if (locked) return;
         try {
@@ -256,7 +352,7 @@ export default function ModifyWidgetModal({
             setPropsError(null);
             setCarouselError(null);
             onApplyProps(parsed);
-            notify({ type: 'success', message: `${widgetName} JSON settings applied successfully`, title: selectedProject?.name, persistent: false });
+            notify({ type: 'success', message: `${widgetName} JSON settings applied successfully`, title: selectedProject?.name || 'Editor', persistent: false });
         } catch {
             setPropsError("Invalid JSON");
         }
@@ -287,7 +383,7 @@ export default function ModifyWidgetModal({
             payload = { ...payload, items: serialized };
         }
         onApplyProps(payload);
-        notify({ type: 'success', message: `${widgetName} settings applied successfully`, title: selectedProject?.name, persistent: false });
+        notify({ type: 'success', message: `${widgetName} settings applied successfully`, title: selectedProject?.name || 'Editor', persistent: false });
     }
 
     const pinDisabled = locked;
@@ -303,6 +399,7 @@ export default function ModifyWidgetModal({
             <div
                 className="surface p-5 w-full max-w-4xl border border-[color:var(--border)] rounded-md max-h-[85vh] overflow-auto"
                 onClick={(e) => e.stopPropagation()}
+                onKeyDown={handleEnterSubmitAnywhere}
             >
                 <div className="flex items-center justify-center mb-3 relative">
                     <button className="btn btn-ghost btn-xs absolute right-0 top-0" onClick={onClose} aria-label="Close">
@@ -324,161 +421,405 @@ export default function ModifyWidgetModal({
                             <div className="p-3 space-y-3 bg-[color:var(--muted)]/30">
                                 {/* Image quick upload (when editing Image widget) */}
                                 {defType === 'image' && (
-                                    <div className="border border-[color:var(--border)] rounded-md p-3 bg-[color:var(--muted)]/20">
-                                        <div className="text-[color:var(--fg-muted)] mb-2 font-medium">Image</div>
-                                        <div className="flex items-center gap-3 text-xs">
-                                            <label className={`inline-flex items-center justify-center px-3 py-2 rounded border border-dashed border-[color:var(--border)] bg-[color:var(--muted)]/40 cursor-pointer ${locked ? 'opacity-50 cursor-not-allowed' : ''}`}>
-                                                <span className="font-medium">Choose image</span>
-                                                <input
-                                                    type="file"
-                                                    accept="image/*"
-                                                    className="sr-only"
-                                                    disabled={locked}
-                                                    onChange={async (e) => {
-                                                        const f = e.target.files?.[0];
-                                                        if (!f) { setSelectedFileName(""); return; }
-                                                        setSelectedFileName(f.name);
-                                                        try {
-                                                            const metas = await assets.addFiles([f]);
-                                                            const m = metas[0];
-                                                            if (m?.hash) {
-                                                                const next = { ...formValues, src: `asset://${m.hash}` } as Record<string, unknown>;
-                                                                setFormValues(next);
-                                                                if (zodSchema && zodSchema.shape?.src) {
-                                                                    const shape = zodSchema.shape as Record<string, z.ZodTypeAny>;
-                                                                    const single = z.object({ src: shape['src'] as z.ZodTypeAny });
-                                                                    const res = single.safeParse({ src: next.src });
-                                                                    setFormErrors({ ...formErrors, src: res.success ? '' : (res.error.issues[0]?.message || 'Invalid value') });
-                                                                }
-                                                            }
-                                                        } catch { /* ignore */ }
-                                                    }}
-                                                />
-                                            </label>
-                                            <span className={`px-2 py-1 rounded border border-[color:var(--border)] bg-[color:var(--muted)]/20 ${selectedFileName ? '' : 'text-[color:var(--fg-muted)]/70'}`}>
-                                                {selectedFileName || 'No file chosen'}
-                                            </span>
-                                        </div>
-                                        <div className="mt-3 text-xs flex items-center gap-2">
-                                            <span className="text-[color:var(--fg-muted)]">Or pick from assets:</span>
-                                            <select
-                                                className="input"
-                                                disabled={locked}
-                                                value={(() => {
-                                                    const src = formValues.src;
-                                                    if (typeof src === 'string' && src.startsWith('asset://')) return src.slice('asset://'.length);
-                                                    return '';
-                                                })()}
-                                                onChange={async (e) => {
-                                                    const hash = e.target.value;
-                                                    if (!hash) return;
-                                                    const next = { ...formValues, src: `asset://${hash}` } as Record<string, unknown>;
-                                                    setFormValues(next);
-                                                    try { const meta = await assets.get(hash); setSelectedFileName(meta?.name || ''); } catch { /* noop */ }
-                                                    if (zodSchema && zodSchema.shape?.src) {
-                                                        const shape = zodSchema.shape as Record<string, z.ZodTypeAny>;
-                                                        const single = z.object({ src: shape['src'] as z.ZodTypeAny });
-                                                        const res = single.safeParse({ src: next.src });
-                                                        setFormErrors({ ...formErrors, src: res.success ? '' : (res.error.issues[0]?.message || 'Invalid value') });
-                                                    }
-                                                }}
-                                            >
-                                                <option value="">Select an asset…</option>
-                                                {assets.list.map((a) => (
-                                                    <option key={a.hash} value={a.hash}>{a.name}</option>
-                                                ))}
-                                            </select>
-                                        </div>
+                                    <div className="border border-[color:var(--border)] rounded-md bg-[color:var(--muted)]/20">
+                                        <button className="w-full flex items-center justify-between gap-2 px-3 py-2 text-xs font-semibold text-[color:var(--fg-muted)]" onClick={() => persistedToggle('py_image_tools_open', setImageToolsOpen)}>
+                                            <span>Image</span>
+                                            <span>{imageToolsOpen ? '▾' : '▸'}</span>
+                                        </button>
+                                        {imageToolsOpen && (
+                                            <div className="p-3 pt-0 space-y-3">
+                                                <div className="flex items-center gap-3 text-xs">
+                                                    <label className={`inline-flex items-center justify-center px-3 py-2 rounded border border-dashed border-[color:var(--border)] bg-[color:var(--muted)]/40 cursor-pointer ${locked ? 'opacity-50 cursor-not-allowed' : ''}`}>
+                                                        <span className="font-medium">Choose image</span>
+                                                        <input
+                                                            type="file"
+                                                            accept="image/*"
+                                                            className="sr-only"
+                                                            disabled={locked}
+                                                            onChange={async (e) => {
+                                                                const f = e.target.files?.[0];
+                                                                if (!f) { setImageFileName(""); return; }
+                                                                setImageFileName(f.name);
+                                                                try {
+                                                                    const metas = await assets.addFiles([f]);
+                                                                    const m = metas[0];
+                                                                    if (m?.hash) {
+                                                                        setFieldValue('src', `asset://${m.hash}`);
+                                                                    }
+                                                                } catch { /* ignore */ }
+                                                            }}
+                                                        />
+                                                    </label>
+                                                    <span className={`px-2 py-1 rounded border border-[color:var(--border)] bg-[color:var(--muted)]/20 ${imageFileName ? '' : 'text-[color:var(--fg-muted)]/70'}`}>
+                                                        {imageFileName || 'No file chosen'}
+                                                    </span>
+                                                </div>
+                                                <div className="mt-3 text-xs flex items-center gap-2">
+                                                    <span className="text-[color:var(--fg-muted)]">Or pick from assets:</span>
+                                                    <select
+                                                        className="input"
+                                                        disabled={locked}
+                                                        value={(() => {
+                                                            const src = formValues.src;
+                                                            if (typeof src === 'string' && src.startsWith('asset://')) return src.slice('asset://'.length);
+                                                            return '';
+                                                        })()}
+                                                        onChange={async (e) => {
+                                                            const hash = e.target.value;
+                                                            if (!hash) return;
+                                                            setFieldValue('src', `asset://${hash}`);
+                                                            try { const meta = await assets.get(hash); setImageFileName(meta?.name || ''); } catch { /* noop */ }
+                                                        }}
+                                                    >
+                                                        <option value="">Select an asset…</option>
+                                                        {imageAssetOptions.map((a) => (
+                                                            <option key={a.hash} value={a.hash}>{a.name}</option>
+                                                        ))}
+                                                    </select>
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+
+                                {isVideo && (
+                                    <div className="border border-[color:var(--border)] rounded-md bg-[color:var(--muted)]/20">
+                                        <button className="w-full flex items-center justify-between gap-2 px-3 py-2 text-xs font-semibold text-[color:var(--fg-muted)]" onClick={() => persistedToggle('py_video_tools_open', setVideoToolsOpen)}>
+                                            <span>Video settings</span>
+                                            <span>{videoToolsOpen ? '▾' : '▸'}</span>
+                                        </button>
+                                        {videoToolsOpen && (
+                                            <div className="p-3 space-y-3">
+                                                <div>
+                                                    <div className="text-[color:var(--fg-muted)] font-medium mb-1">Video source</div>
+                                                    <p className="text-xs text-[color:var(--fg-muted)]/90">Upload a file, pick an uploaded asset, or paste a link (YouTube, MP4, etc.).</p>
+                                                </div>
+                                                <div className="flex items-center gap-3 text-xs">
+                                                    <label className={`inline-flex items-center justify-center px-3 py-2 rounded border border-dashed border-[color:var(--border)] bg-[color:var(--muted)]/40 cursor-pointer ${locked ? 'opacity-50 cursor-not-allowed' : ''}`}>
+                                                        <span className="font-medium">Choose video</span>
+                                                        <input
+                                                            type="file"
+                                                            accept="video/*"
+                                                            className="sr-only"
+                                                            disabled={locked}
+                                                            onChange={async (e) => {
+                                                                const f = e.target.files?.[0];
+                                                                if (!f) { setVideoFileName(''); return; }
+                                                                setVideoFileName(f.name);
+                                                                try {
+                                                                    const metas = await assets.addFiles([f]);
+                                                                    const m = metas[0];
+                                                                    if (m?.hash) {
+                                                                        setFieldValue('src', `asset://${m.hash}`);
+                                                                    }
+                                                                } catch { /* ignore */ }
+                                                            }}
+                                                        />
+                                                    </label>
+                                                    <span className={`px-2 py-1 rounded border border-[color:var(--border)] bg-[color:var(--muted)]/20 ${videoFileName ? '' : 'text-[color:var(--fg-muted)]/70'}`}>
+                                                        {videoFileName || 'No file chosen'}
+                                                    </span>
+                                                </div>
+                                                {videoAssetOptions.length > 0 && (
+                                                    <div>
+                                                        <label className="block text-[color:var(--fg-muted)] text-xs mb-1">Pick from assets</label>
+                                                        <select
+                                                            className="input"
+                                                            disabled={locked}
+                                                            value={(() => {
+                                                                const src = formValues.src;
+                                                                if (typeof src === 'string' && src.startsWith('asset://')) return src.slice('asset://'.length);
+                                                                return '';
+                                                            })()}
+                                                            onChange={async (e) => {
+                                                                const hash = e.target.value;
+                                                                if (!hash) return;
+                                                                setFieldValue('src', `asset://${hash}`);
+                                                                try { const meta = await assets.get(hash); setVideoFileName(meta?.name || ''); } catch { /* noop */ }
+                                                            }}
+                                                        >
+                                                            <option value="">Select a video asset…</option>
+                                                            {videoAssetOptions.map((asset) => (
+                                                                <option key={asset.hash} value={asset.hash}>{asset.name}</option>
+                                                            ))}
+                                                        </select>
+                                                    </div>
+                                                )}
+                                                <div>
+                                                    <label className="block text-[color:var(--fg-muted)] text-xs mb-1">Paste video link</label>
+                                                    <input
+                                                        className="input w-full"
+                                                        type="url"
+                                                        placeholder="https://www.youtube.com/watch?v=..."
+                                                        value={typeof formValues.src === 'string' ? formValues.src : ''}
+                                                        onChange={(e) => setFieldValue('src', e.target.value)}
+                                                        onKeyDown={handleEnterSubmitComp}
+                                                        disabled={locked}
+                                                    />
+                                                    {formErrors.src && <div className="text-red-500 text-xs mt-1">{formErrors.src}</div>}
+                                                </div>
+                                                <div className="pt-3 border-t border-[color:var(--border)] space-y-2">
+                                                    <div className="text-[color:var(--fg-muted)] font-medium">Poster image (optional)</div>
+                                                    <div className="flex items-center gap-3 text-xs">
+                                                        <label className={`inline-flex items-center justify-center px-3 py-2 rounded border border-dashed border-[color:var(--border)] bg-[color:var(--muted)]/40 cursor-pointer ${locked ? 'opacity-50 cursor-not-allowed' : ''}`}>
+                                                            <span className="font-medium">Choose image</span>
+                                                            <input
+                                                                type="file"
+                                                                accept="image/*"
+                                                                className="sr-only"
+                                                                disabled={locked}
+                                                                onChange={async (e) => {
+                                                                    const f = e.target.files?.[0];
+                                                                    if (!f) { setPosterFileName(''); return; }
+                                                                    setPosterFileName(f.name);
+                                                                    try {
+                                                                        const metas = await assets.addFiles([f]);
+                                                                        const m = metas[0];
+                                                                        if (m?.hash) {
+                                                                            setFieldValue('poster', `asset://${m.hash}`);
+                                                                        }
+                                                                    } catch { /* noop */ }
+                                                                }}
+                                                            />
+                                                        </label>
+                                                        <span className={`px-2 py-1 rounded border border-[color:var(--border)] bg-[color:var(--muted)]/20 ${posterFileName ? '' : 'text-[color:var(--fg-muted)]/70'}`}>
+                                                            {posterFileName || 'No file chosen'}
+                                                        </span>
+                                                    </div>
+                                                    {imageAssetOptions.length > 0 && (
+                                                        <div>
+                                                            <label className="block text-[color:var(--fg-muted)] text-xs mb-1">Pick from assets</label>
+                                                            <select
+                                                                className="input"
+                                                                disabled={locked}
+                                                                value={(() => {
+                                                                    const poster = formValues.poster;
+                                                                    if (typeof poster === 'string' && poster.startsWith('asset://')) return poster.slice('asset://'.length);
+                                                                    return '';
+                                                                })()}
+                                                                onChange={async (e) => {
+                                                                    const hash = e.target.value;
+                                                                    if (!hash) return;
+                                                                    setFieldValue('poster', `asset://${hash}`);
+                                                                    try { const meta = await assets.get(hash); setPosterFileName(meta?.name || ''); } catch { /* noop */ }
+                                                                }}
+                                                            >
+                                                                <option value="">Select an image asset…</option>
+                                                                {imageAssetOptions.map((asset) => (
+                                                                    <option key={asset.hash} value={asset.hash}>{asset.name}</option>
+                                                                ))}
+                                                            </select>
+                                                        </div>
+                                                    )}
+                                                    <div>
+                                                        <label className="block text-[color:var(--fg-muted)] text-xs mb-1">Paste poster link</label>
+                                                        <input
+                                                            className="input w-full"
+                                                            type="url"
+                                                            placeholder="https://example.com/poster.jpg"
+                                                            value={typeof formValues.poster === 'string' ? formValues.poster : ''}
+                                                            onChange={(e) => setFieldValue('poster', e.target.value)}
+                                                            onKeyDown={handleEnterSubmitComp}
+                                                            disabled={locked}
+                                                        />
+                                                    </div>
+                                                    {formErrors.poster && <div className="text-red-500 text-xs">{formErrors.poster}</div>}
+                                                    <div className="text-[10px] text-[color:var(--fg-muted)]">Shown while the player loads.</div>
+                                                </div>
+                                                <div className="pt-3 border-t border-[color:var(--border)] space-y-3">
+                                                    <div className="text-[color:var(--fg-muted)] font-medium">Appearance</div>
+                                                    <div>
+                                                        <label className="block text-[color:var(--fg-muted)] text-xs mb-1">Shape</label>
+                                                        <div className="flex flex-wrap gap-2">
+                                                            {(['rectangle', 'rounded', 'circle'] as const).map((shape) => (
+                                                                <button
+                                                                    key={shape}
+                                                                    type="button"
+                                                                    className={`px-3 py-1.5 rounded border text-xs font-semibold transition ${videoShapeValue === shape ? 'bg-[color:var(--accent)]/20 border-[color:var(--accent)] text-[color:var(--accent)]' : 'border-[color:var(--border)] text-[color:var(--fg-muted)] bg-[color:var(--surface)]'}`}
+                                                                    onClick={() => setFieldValue('shape', shape)}
+                                                                    disabled={locked}
+                                                                >
+                                                                    {shape.charAt(0).toUpperCase() + shape.slice(1)}
+                                                                </button>
+                                                            ))}
+                                                        </div>
+                                                        {formErrors.shape && <div className="text-red-500 text-xs mt-1">{formErrors.shape}</div>}
+                                                    </div>
+                                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                                        <div>
+                                                            <label className="block text-[color:var(--fg-muted)] text-xs mb-1">Border width (px)</label>
+                                                            <input
+                                                                className="input w-full"
+                                                                type="number"
+                                                                min={0}
+                                                                max={48}
+                                                                step={1}
+                                                                value={videoBorderWidthValue === '' ? '' : videoBorderWidthValue}
+                                                                onChange={(e) => {
+                                                                    const raw = e.target.value;
+                                                                    setFieldValue('borderWidth', raw === '' ? undefined : Number(raw));
+                                                                }}
+                                                                onKeyDown={handleEnterSubmitComp}
+                                                                disabled={locked}
+                                                            />
+                                                            {formErrors.borderWidth && <div className="text-red-500 text-xs mt-1">{formErrors.borderWidth}</div>}
+                                                        </div>
+                                                        <div>
+                                                            <label className="block text-[color:var(--fg-muted)] text-xs mb-1">Border radius (px)</label>
+                                                            <input
+                                                                className="input w-full"
+                                                                type="number"
+                                                                min={0}
+                                                                max={240}
+                                                                step={1}
+                                                                value={videoBorderRadiusValue === '' ? '' : videoBorderRadiusValue}
+                                                                onChange={(e) => {
+                                                                    const raw = e.target.value;
+                                                                    setFieldValue('borderRadius', raw === '' ? undefined : Number(raw));
+                                                                }}
+                                                                onKeyDown={handleEnterSubmitComp}
+                                                                disabled={locked}
+                                                            />
+                                                            {formErrors.borderRadius && <div className="text-red-500 text-xs mt-1">{formErrors.borderRadius}</div>}
+                                                        </div>
+                                                    </div>
+                                                    <div>
+                                                        <label className="block text-[color:var(--fg-muted)] text-xs mb-1">Border style</label>
+                                                        <select
+                                                            className="input w-full"
+                                                            value={videoBorderStyleValue}
+                                                            onChange={(e) => setFieldValue('borderStyle', e.target.value)}
+                                                            disabled={locked}
+                                                        >
+                                                            <option value="solid">Solid</option>
+                                                            <option value="dashed">Dashed</option>
+                                                            <option value="dotted">Dotted</option>
+                                                        </select>
+                                                        {formErrors.borderStyle && <div className="text-red-500 text-xs mt-1">{formErrors.borderStyle}</div>}
+                                                    </div>
+                                                    <div>
+                                                        <label className="block text-[color:var(--fg-muted)] text-xs mb-1">Border color</label>
+                                                        <div className="flex items-center gap-2">
+                                                            <input
+                                                                type="color"
+                                                                className="rounded border border-[color:var(--border)] bg-[color:var(--muted)]/40 h-8 w-12 cursor-pointer"
+                                                                value={videoBorderColorValue}
+                                                                onChange={(e) => setFieldValue('borderColor', e.target.value)}
+                                                                disabled={locked}
+                                                                aria-label="Border color"
+                                                            />
+                                                            <input
+                                                                className="input flex-1 font-mono text-xs"
+                                                                value={typeof formValues.borderColor === 'string' ? formValues.borderColor : ''}
+                                                                onChange={(e) => setFieldValue('borderColor', e.target.value)}
+                                                                onKeyDown={handleEnterSubmitComp}
+                                                                placeholder="#e5e7eb"
+                                                                disabled={locked}
+                                                            />
+                                                        </div>
+                                                        {formErrors.borderColor && <div className="text-red-500 text-xs mt-1">{formErrors.borderColor}</div>}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        )}
                                     </div>
                                 )}
 
                                 {isCarousel && (
-                                    <div className="border border-[color:var(--border)] rounded-md p-3 bg-[color:var(--muted)]/20 space-y-3">
-                                        <div className="flex items-center justify-between">
-                                            <div className="text-[color:var(--fg-muted)] font-medium">Carousel slides</div>
-                                            <button className="btn btn-ghost btn-xs" type="button" onClick={addCarouselItem} disabled={locked}>Add slide</button>
-                                        </div>
-                                        <div className="space-y-3">
-                                            {carouselItems.map((slide, idx) => {
-                                                const assetOptions = assets.list.filter((asset) => {
-                                                    if (slide.mediaType === 'video') return asset.type?.startsWith('video/');
-                                                    return asset.type?.startsWith('image/');
-                                                });
-                                                return (
-                                                    <div key={slide.id} className="border border-[color:var(--border)] rounded-md p-3 bg-[color:var(--surface)] shadow-sm space-y-2">
-                                                        <div className="flex items-center justify-between text-xs font-medium">
-                                                            <span>Slide {idx + 1}</span>
-                                                            <div className="flex items-center gap-1">
-                                                                <button className="btn btn-ghost btn-xs text-[color:var(--fg)] bg-[color:var(--muted)]/40 border border-[color:var(--border)] hover:bg-[color:var(--muted)]/60" type="button" onClick={() => moveCarouselItem(slide.id, -1)} disabled={locked || idx === 0} title="Move up">
-                                                                    <ChevronUp size={12} />
-                                                                </button>
-                                                                <button className="btn btn-ghost btn-xs text-[color:var(--fg)] bg-[color:var(--muted)]/40 border border-[color:var(--border)] hover:bg-[color:var(--muted)]/60" type="button" onClick={() => moveCarouselItem(slide.id, 1)} disabled={locked || idx === carouselItems.length - 1} title="Move down">
-                                                                    <ChevronDown size={12} />
-                                                                </button>
-                                                                <button className="btn btn-ghost btn-xs text-red-500 border border-red-500/30 bg-red-500/10 hover:bg-red-500/20" type="button" onClick={() => removeCarouselItem(slide.id)} disabled={locked} title="Remove slide">
-                                                                    <Trash2 size={12} />
-                                                                </button>
+                                    <div className="border border-[color:var(--border)] rounded-md bg-[color:var(--muted)]/20">
+                                        <button className="w-full flex items-center justify-between gap-2 px-3 py-2 text-xs font-semibold text-[color:var(--fg-muted)]" onClick={() => persistedToggle('py_carousel_tools_open', setCarouselToolsOpen)}>
+                                            <span>Carousel slides</span>
+                                            <span>{carouselToolsOpen ? '▾' : '▸'}</span>
+                                        </button>
+                                        {carouselToolsOpen && (
+                                            <div className="p-3 space-y-3">
+                                                <div className="flex items-center justify-between">
+                                                    <div className="text-[color:var(--fg-muted)] font-medium">Slides</div>
+                                                    <button className="btn btn-ghost btn-xs" type="button" onClick={addCarouselItem} disabled={locked}>Add slide</button>
+                                                </div>
+                                                <div className="space-y-3">
+                                                    {carouselItems.map((slide, idx) => {
+                                                        const assetOptions = assets.list.filter((asset) => {
+                                                            if (slide.mediaType === 'video') return asset.type?.startsWith('video/');
+                                                            return asset.type?.startsWith('image/');
+                                                        });
+                                                        return (
+                                                            <div key={slide.id} className="border border-[color:var(--border)] rounded-md p-3 bg-[color:var(--surface)] shadow-sm space-y-2">
+                                                                <div className="flex items-center justify-between text-xs font-medium">
+                                                                    <span>Slide {idx + 1}</span>
+                                                                    <div className="flex items-center gap-1">
+                                                                        <button className="btn btn-ghost btn-xs text-[color:var(--fg)] bg-[color:var(--muted)]/40 border border-[color:var(--border)] hover:bg-[color:var(--muted)]/60" type="button" onClick={() => moveCarouselItem(slide.id, -1)} disabled={locked || idx === 0} title="Move up">
+                                                                            <ChevronUp size={12} />
+                                                                        </button>
+                                                                        <button className="btn btn-ghost btn-xs text-[color:var(--fg)] bg-[color:var(--muted)]/40 border border-[color:var(--border)] hover:bg-[color:var(--muted)]/60" type="button" onClick={() => moveCarouselItem(slide.id, 1)} disabled={locked || idx === carouselItems.length - 1} title="Move down">
+                                                                            <ChevronDown size={12} />
+                                                                        </button>
+                                                                        <button className="btn btn-ghost btn-xs text-red-500 border border-red-500/30 bg-red-500/10 hover:bg-red-500/20" type="button" onClick={() => removeCarouselItem(slide.id)} disabled={locked} title="Remove slide">
+                                                                            <Trash2 size={12} />
+                                                                        </button>
+                                                                    </div>
+                                                                </div>
+                                                                <div>
+                                                                    <label className="block text-[color:var(--fg-muted)] text-xs mb-1">Media type</label>
+                                                                    <select className="input w-full" value={slide.mediaType} onChange={(e) => updateCarouselItem(slide.id, { mediaType: e.target.value as 'image' | 'video' })} disabled={locked}>
+                                                                        <option value="image">Image</option>
+                                                                        <option value="video">Video</option>
+                                                                    </select>
+                                                                </div>
+                                                                <div>
+                                                                    <label className="block text-[color:var(--fg-muted)] text-xs mb-1">Source (asset:// or URL)</label>
+                                                                    <input
+                                                                        className="input w-full"
+                                                                        value={slide.source}
+                                                                        onChange={(e) => updateCarouselItem(slide.id, { source: e.target.value })}
+                                                                        placeholder="asset://hash or https://example.com/media"
+                                                                        disabled={locked}
+                                                                    />
+                                                                </div>
+                                                                {assetOptions.length > 0 && (
+                                                                    <div>
+                                                                        <label className="block text-[color:var(--fg-muted)] text-xs mb-1">Pick from assets</label>
+                                                                        <select
+                                                                            className="input w-full"
+                                                                            value=""
+                                                                            onChange={(e) => {
+                                                                                const hash = e.target.value;
+                                                                                if (!hash) return;
+                                                                                updateCarouselItem(slide.id, { source: `asset://${hash}` });
+                                                                            }}
+                                                                            disabled={locked}
+                                                                        >
+                                                                            <option value="">Select asset…</option>
+                                                                            {assetOptions.map((asset) => (
+                                                                                <option key={asset.hash} value={asset.hash}>{asset.name}</option>
+                                                                            ))}
+                                                                        </select>
+                                                                    </div>
+                                                                )}
+                                                                {slide.mediaType === 'image' && (
+                                                                    <div>
+                                                                        <label className="block text-[color:var(--fg-muted)] text-xs mb-1">Alt text</label>
+                                                                        <input className="input w-full" value={slide.alt} onChange={(e) => updateCarouselItem(slide.id, { alt: e.target.value })} disabled={locked} />
+                                                                    </div>
+                                                                )}
+                                                                {slide.mediaType === 'video' && (
+                                                                    <div>
+                                                                        <label className="block text-[color:var(--fg-muted)] text-xs mb-1">Poster image (optional)</label>
+                                                                        <input className="input w-full" value={slide.poster || ''} onChange={(e) => updateCarouselItem(slide.id, { poster: e.target.value })} placeholder="asset://hash or URL" disabled={locked} />
+                                                                    </div>
+                                                                )}
+                                                                <div>
+                                                                    <label className="block text-[color:var(--fg-muted)] text-xs mb-1">Caption</label>
+                                                                    <input className="input w-full" value={slide.caption} onChange={(e) => updateCarouselItem(slide.id, { caption: e.target.value })} disabled={locked} />
+                                                                </div>
                                                             </div>
-                                                        </div>
-                                                        <div>
-                                                            <label className="block text-[color:var(--fg-muted)] text-xs mb-1">Media type</label>
-                                                            <select className="input w-full" value={slide.mediaType} onChange={(e) => updateCarouselItem(slide.id, { mediaType: e.target.value as 'image' | 'video' })} disabled={locked}>
-                                                                <option value="image">Image</option>
-                                                                <option value="video">Video</option>
-                                                            </select>
-                                                        </div>
-                                                        <div>
-                                                            <label className="block text-[color:var(--fg-muted)] text-xs mb-1">Source (asset:// or URL)</label>
-                                                            <input
-                                                                className="input w-full"
-                                                                value={slide.source}
-                                                                onChange={(e) => updateCarouselItem(slide.id, { source: e.target.value })}
-                                                                placeholder="asset://hash or https://example.com/media"
-                                                                disabled={locked}
-                                                            />
-                                                        </div>
-                                                        {assetOptions.length > 0 && (
-                                                            <div>
-                                                                <label className="block text-[color:var(--fg-muted)] text-xs mb-1">Pick from assets</label>
-                                                                <select
-                                                                    className="input w-full"
-                                                                    value=""
-                                                                    onChange={(e) => {
-                                                                        const hash = e.target.value;
-                                                                        if (!hash) return;
-                                                                        updateCarouselItem(slide.id, { source: `asset://${hash}` });
-                                                                    }}
-                                                                    disabled={locked}
-                                                                >
-                                                                    <option value="">Select asset…</option>
-                                                                    {assetOptions.map((asset) => (
-                                                                        <option key={asset.hash} value={asset.hash}>{asset.name}</option>
-                                                                    ))}
-                                                                </select>
-                                                            </div>
-                                                        )}
-                                                        {slide.mediaType === 'image' && (
-                                                            <div>
-                                                                <label className="block text-[color:var(--fg-muted)] text-xs mb-1">Alt text</label>
-                                                                <input className="input w-full" value={slide.alt} onChange={(e) => updateCarouselItem(slide.id, { alt: e.target.value })} disabled={locked} />
-                                                            </div>
-                                                        )}
-                                                        {slide.mediaType === 'video' && (
-                                                            <div>
-                                                                <label className="block text-[color:var(--fg-muted)] text-xs mb-1">Poster image (optional)</label>
-                                                                <input className="input w-full" value={slide.poster || ''} onChange={(e) => updateCarouselItem(slide.id, { poster: e.target.value })} placeholder="asset://hash or URL" disabled={locked} />
-                                                            </div>
-                                                        )}
-                                                        <div>
-                                                            <label className="block text-[color:var(--fg-muted)] text-xs mb-1">Caption</label>
-                                                            <input className="input w-full" value={slide.caption} onChange={(e) => updateCarouselItem(slide.id, { caption: e.target.value })} disabled={locked} />
-                                                        </div>
-                                                    </div>
-                                                );
-                                            })}
-                                        </div>
-                                        {carouselError && (
-                                            <div className="text-red-500 text-xs">{carouselError}</div>
+                                                        );
+                                                    })}
+                                                </div>
+                                                {carouselError && (
+                                                    <div className="text-red-500 text-xs">{carouselError}</div>
+                                                )}
+                                            </div>
                                         )}
                                     </div>
                                 )}
@@ -490,6 +831,7 @@ export default function ModifyWidgetModal({
                                         <div className="space-y-2">
                                             {Object.entries(zodSchema.shape).map(([key, schema]) => {
                                                 const field = schema as z.ZodTypeAny;
+                                                if (isVideo && (key === 'src' || key === 'poster' || VIDEO_APPEARANCE_FIELDS.has(key))) return null;
                                                 const isOptional = field instanceof z.ZodOptional;
                                                 // Unwrap optional
                                                 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -504,9 +846,19 @@ export default function ModifyWidgetModal({
                                                 );
                                                 if (hideForNavLink) return null;
                                                 let label = key.charAt(0).toUpperCase() + key.slice(1);
+                                                let helperText: string | null = null;
                                                 if (defType === 'nav-link') {
                                                     if (key === 'color') label = navStyle === 'button' ? 'Background color' : 'Text color';
                                                     if (key === 'textColor') label = 'Text color';
+                                                }
+                                                if (defType === 'link') {
+                                                    if (key === 'iconLeft') {
+                                                        label = 'Prefix icon/text';
+                                                        helperText = 'Optional emoji or short text shown before the link label.';
+                                                    } else if (key === 'iconRight') {
+                                                        label = 'Suffix icon/text';
+                                                        helperText = 'Optional emoji or short text shown after the link label.';
+                                                    }
                                                 }
                                                 const disabled = locked;
                                                 const isCarouselIntervalField = isCarousel && key === 'interval';
@@ -673,6 +1025,7 @@ export default function ModifyWidgetModal({
                                                                 disabled={disabled}
                                                             />
                                                         )}
+                                                        {!!helperText && <div className="mt-1 text-[10px] text-[color:var(--fg-muted)]">{helperText}</div>}
                                                         {!!error && <div className="mt-1 text-xs text-red-500">{error}</div>}
                                                     </div>
                                                 );
@@ -705,13 +1058,19 @@ export default function ModifyWidgetModal({
                                         onChange={(e) => setTitle(e.target.value)}
                                         onBlur={() => {
                                             const v = title.trim();
-                                            if (!locked && v && v !== item.title) { onRename(v); notify({ type: 'success', message: `${widgetName} renamed to "${v}"`, title: selectedProject?.name, persistent: false }); }
+                                            if (!locked && v && v !== item.title) {
+                                                onRename(v);
+                                                notify({ type: 'update', message: `${widgetName} renamed to "${v}"`, title: selectedProject?.name || 'Editor', persistent: false });
+                                            }
                                         }}
                                         onKeyDown={(e) => {
                                             if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
                                                 e.preventDefault();
                                                 const v = title.trim();
-                                                if (!locked && v && v !== item.title) { onRename(v); notify({ type: 'success', message: `${widgetName} renamed to "${v}"`, title: selectedProject?.name, persistent: false }); }
+                                                if (!locked && v && v !== item.title) {
+                                                    onRename(v);
+                                                    notify({ type: 'update', message: `${widgetName} renamed to "${v}"`, title: selectedProject?.name || 'Editor', persistent: false });
+                                                }
                                             }
                                         }}
                                         data-testid="widget-name-input"
@@ -719,46 +1078,60 @@ export default function ModifyWidgetModal({
                                 </div>
 
                                 {/* Protection */}
-                                <div className="border border-[color:var(--border)] rounded-md p-3 bg-[color:var(--muted)]/40">
-                                    <div className="text-[color:var(--fg-muted)] mb-2 font-medium">Protection</div>
-                                    <div className="flex items-center gap-2">
-                                        <button
-                                            className={`btn btn-ghost flex items-center gap-2 ${pinDisabled ? 'opacity-50 cursor-not-allowed' : ''}`}
-                                            onClick={() => { if (!pinDisabled) onTogglePin(); }}
-                                            title={pinned ? 'Unpin (allow move)' : 'Pin (prevent move)'}
-                                            disabled={pinDisabled}
-                                        >
-                                            {pinned ? <Pin size={16} /> : <PinOff size={16} />}
-                                            <span>{pinned ? 'Pinned' : 'Pin'}</span>
-                                        </button>
-                                        <button
-                                            className="btn btn-ghost flex items-center gap-2"
-                                            onClick={onToggleLock}
-                                            title={locked ? 'Unlock (allow modify)' : 'Lock (prevent modify)'}
-                                        >
-                                            {locked ? <Lock size={16} /> : <Unlock size={16} />}
-                                            <span>{locked ? 'Locked' : 'Lock'}</span>
-                                        </button>
-                                    </div>
+                                <div className="border border-[color:var(--border)] rounded-md">
+                                    <button className="w-full flex items-center justify-between gap-2 px-3 py-2 text-xs font-semibold text-[color:var(--fg-muted)]" onClick={() => persistedToggle('py_widget_protection_open', setProtectionOpen)}>
+                                        <span>Protection</span>
+                                        <span>{protectionOpen ? '▾' : '▸'}</span>
+                                    </button>
+                                    {protectionOpen && (
+                                        <div className="p-3 bg-[color:var(--muted)]/40">
+                                            <div className="flex items-center gap-2">
+                                                <button
+                                                    className={`btn btn-ghost flex items-center gap-2 ${pinDisabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                                    onClick={() => { if (!pinDisabled) onTogglePin(); }}
+                                                    title={pinned ? 'Unpin (allow move)' : 'Pin (prevent move)'}
+                                                    disabled={pinDisabled}
+                                                >
+                                                    {pinned ? <Pin size={16} /> : <PinOff size={16} />}
+                                                    <span>{pinned ? 'Pinned' : 'Pin'}</span>
+                                                </button>
+                                                <button
+                                                    className="btn btn-ghost flex items-center gap-2"
+                                                    onClick={onToggleLock}
+                                                    title={locked ? 'Unlock (allow modify)' : 'Lock (prevent modify)'}
+                                                >
+                                                    {locked ? <Lock size={16} /> : <Unlock size={16} />}
+                                                    <span>{locked ? 'Locked' : 'Lock'}</span>
+                                                </button>
+                                            </div>
+                                        </div>
+                                    )}
                                 </div>
 
                                 {/* Layer order */}
-                                <div className="border border-[color:var(--border)] rounded-md p-3">
-                                    <div className="text-[color:var(--fg-muted)] mb-2 font-medium">Layer order</div>
-                                    <div className="grid grid-cols-2 gap-2">
-                                        <button className="btn btn-ghost flex items-center gap-2" onClick={onBringToFront} disabled={locked} title="Bring to front">
-                                            <ChevronsUp size={16} /> Bring to front
-                                        </button>
-                                        <button className="btn btn-ghost flex items-center gap-2" onClick={onSendToBack} disabled={locked} title="Send to back">
-                                            <ChevronsDown size={16} /> Send to back
-                                        </button>
-                                        <button className="btn btn-ghost flex items-center gap-2" onClick={onBringForward} disabled={locked} title="Move up one layer">
-                                            <ChevronUp size={16} /> Move up
-                                        </button>
-                                        <button className="btn btn-ghost flex items-center gap-2" onClick={onSendBackward} disabled={locked} title="Move down one layer">
-                                            <ChevronDown size={16} /> Move down
-                                        </button>
-                                    </div>
+                                <div className="border border-[color:var(--border)] rounded-md">
+                                    <button className="w-full flex items-center justify-between gap-2 px-3 py-2 text-xs font-semibold text-[color:var(--fg-muted)]" onClick={() => persistedToggle('py_widget_layers_open', setLayerOpen)}>
+                                        <span>Layer order</span>
+                                        <span>{layerOpen ? '▾' : '▸'}</span>
+                                    </button>
+                                    {layerOpen && (
+                                        <div className="p-3">
+                                            <div className="grid grid-cols-2 gap-2">
+                                                <button className="btn btn-ghost flex items-center gap-2" onClick={onBringToFront} disabled={locked} title="Bring to front">
+                                                    <ChevronsUp size={16} /> Bring to front
+                                                </button>
+                                                <button className="btn btn-ghost flex items-center gap-2" onClick={onSendToBack} disabled={locked} title="Send to back">
+                                                    <ChevronsDown size={16} /> Send to back
+                                                </button>
+                                                <button className="btn btn-ghost flex items-center gap-2" onClick={onBringForward} disabled={locked} title="Move up one layer">
+                                                    <ChevronUp size={16} /> Move up
+                                                </button>
+                                                <button className="btn btn-ghost flex items-center gap-2" onClick={onSendBackward} disabled={locked} title="Move down one layer">
+                                                    <ChevronDown size={16} /> Move down
+                                                </button>
+                                            </div>
+                                        </div>
+                                    )}
                                 </div>
 
                                 {/* Widget info */}
@@ -795,7 +1168,12 @@ export default function ModifyWidgetModal({
                             className="inline-flex items-center justify-center p-2 rounded bg-red-500/10 text-red-500 border border-red-500/50 hover:bg-red-500/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400/70 focus-visible:ring-offset-2 focus-visible:ring-offset-[color:var(--surface)]"
                             title="Delete widget"
                             aria-label="Delete widget"
-                            onClick={() => { if (confirm('Delete this widget? This cannot be undone.')) onDelete(); }}
+                            onClick={() => {
+                                if (confirm('Delete this widget? This cannot be undone.')) {
+                                    onDelete();
+                                    notify({ type: 'warning', message: `${widgetName} deleted from the editor`, title: selectedProject?.name || 'Editor', persistent: false });
+                                }
+                            }}
                         >
                             <Trash2 size={14} />
                         </button>

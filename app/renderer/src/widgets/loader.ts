@@ -11,6 +11,11 @@ WidgetsRegistry.register(
 );
 
 WidgetsRegistry.register(
+  { type: 'video', label: 'Video', grid: { w: 6, h: 4 }, category: 'Media' },
+  () => import('./defs/Video').then(m => m.default as import('./types').WidgetDefinition<unknown>)
+);
+
+WidgetsRegistry.register(
   { type: 'project', label: 'Project Card', grid: { w: 6, h: 4 }, category: 'Portfolio' },
   () => import('./defs/Project').then(m => m.default as import('./types').WidgetDefinition<unknown>)
 );
@@ -21,6 +26,11 @@ WidgetsRegistry.register(
 );
 
 // Navigation
+WidgetsRegistry.register(
+  { type: 'link', label: 'Link', grid: { w: 3, h: 2 }, category: 'Navigation' },
+  () => import('./defs/Link').then(m => m.default as import('./types').WidgetDefinition<unknown>)
+);
+
 WidgetsRegistry.register(
   { type: 'nav-link', label: 'Nav Link', grid: { w: 3, h: 2 }, category: 'Navigation' },
   () => import('./defs/NavLink').then(m => m.default as import('./types').WidgetDefinition<unknown>)
