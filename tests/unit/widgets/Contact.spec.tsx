@@ -2,8 +2,10 @@ import React from 'react';
 import { render, screen } from '@testing-library/react';
 import { describe, it, expect } from 'vitest';
 
-import ContactDef from '../defs/Contact';
-import { WidgetContext } from '../sdk';
+import ContactDef from '../../../app/renderer/src/widgets/defs/Contact';
+import { WidgetContext } from '../../../app/renderer/src/widgets/sdk';
+
+const schema = ContactDef.zodSchema!;
 
 function withCtx(node: React.ReactNode, ctx?: Partial<React.ContextType<typeof WidgetContext>>) {
     const value = { id: 'w1', editing: false, interactive: true, updateProps: () => { }, ...ctx };
@@ -17,7 +19,7 @@ describe('Contact widget', () => {
     });
 
     it('zod validates valid props', () => {
-        const ok = ContactDef.zodSchema.safeParse({
+        const ok = schema.safeParse({
             heading: 'Contact',
             submitAction: 'event',
             mailtoTo: '',
@@ -26,7 +28,7 @@ describe('Contact widget', () => {
     });
 
     it('zod rejects invalid mailto email', () => {
-        const bad = ContactDef.zodSchema.safeParse({ mailtoTo: 'not-an-email' });
+        const bad = schema.safeParse({ mailtoTo: 'not-an-email' });
         expect(bad.success).toBe(false);
     });
 

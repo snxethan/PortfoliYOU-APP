@@ -8,7 +8,6 @@ export type PageControlsProps = {
     currentPageId: string | null;
     onSelectPage: (id: string | null) => void;
     onCreatePage: () => void;
-    onRenameCurrentPage: () => void; // deprecated in favor of inline rename
     onRenameInline: (newName: string) => void;
     onDeleteCurrentPage: () => void;
     onOpenSettings: () => void;
@@ -21,7 +20,6 @@ export default function PageControls({
     currentPageId,
     onSelectPage,
     onCreatePage,
-    onRenameCurrentPage,
     onRenameInline,
     onDeleteCurrentPage,
     onOpenSettings,
@@ -74,7 +72,7 @@ export default function PageControls({
                                 <Plus size={14} />
                             </button>
                             {/* Delete page button to the right of plus */}
-                            <button className="btn btn-ghost btn-xs" title="Delete current page" aria-label="Delete page" onClick={() => onDeleteCurrentPage()} disabled={!currentPageId}>
+                            <button className="btn btn-ghost btn-xs text-red-500 border border-red-500/40 hover:bg-red-500/10" title="Delete current page" aria-label="Delete page" onClick={() => onDeleteCurrentPage()} disabled={!currentPageId}>
                                 <Trash2 size={14} />
                             </button>
                         </>

@@ -26,11 +26,12 @@ export type GridMetrics = {
 
 
 
-export default function DraggableItem({ item, metrics, onMove, scrollEl, onDelete, onDuplicate, onMoveStart, onMoveEnd, onBringToFront, onSendToBack, onBringForward, onSendBackward, onTogglePin, onOpenModify, onDropAsset, selected, onSelect }: {
+export default function DraggableItem({ item, metrics, onMove, scrollEl, zoom, onDelete, onDuplicate, onMoveStart, onMoveEnd, onBringToFront, onSendToBack, onBringForward, onSendBackward, onTogglePin, onOpenModify, onDropAsset, selected, onSelect }: {
   item: GridItem;
   metrics: GridMetrics;
   onMove: (next: GridItem) => void;
   scrollEl?: HTMLElement | null;
+  zoom: number;
   onDelete?: (id: string) => void;
   onDuplicate?: (id: string) => void;
   onMoveStart?: (prev: GridItem) => void;
@@ -48,14 +49,22 @@ export default function DraggableItem({ item, metrics, onMove, scrollEl, onDelet
   // Prevent unused param lint when certain actions are intentionally not rendered in toolbar
   void onDelete; void onBringToFront; void onSendToBack; void onBringForward; void onSendBackward;
   const { colW, rowH, gap, cols } = metrics;
+  const zoomFactor = zoom || 1;
   const startRef = useRef<{ x0: number; y0: number; sx: number; sy: number } | null>(null);
   const resizeRef = useRef<{ w0: number; h0: number; sx: number; sy: number } | null>(null);
   const [dragging, setDragging] = useState(false);
+  const [hovered, setHovered] = useState(false);
 
-  const pxLeft = item.x * (colW + gap);
-  const pxTop = item.y * (rowH + gap);
-  const pxW = item.w * colW + (item.w - 1) * gap;
-  const pxH = item.h * rowH + (item.h - 1) * gap;
+  const gapPx = gap * zoomFactor;
+  const colPx = colW * zoomFactor;
+  const rowPx = rowH * zoomFactor;
+  const unitX = (colW + gap) * zoomFactor;
+  const unitY = (rowH + gap) * zoomFactor;
+
+  const pxLeft = item.x * unitX;
+  const pxTop = item.y * unitY;
+  const pxW = item.w * colPx + (item.w - 1) * gapPx;
+  const pxH = item.h * rowPx + (item.h - 1) * gapPx;
 
   function onPointerDown(e: React.PointerEvent<HTMLDivElement>) {
     // Only left click initiates drag
@@ -79,8 +88,8 @@ export default function DraggableItem({ item, metrics, onMove, scrollEl, onDelet
     if (resizeRef.current) {
       // Resizing
       const r = resizeRef.current;
-      const dx = e.clientX - r.sx;
-      const dy = e.clientY - r.sy;
+      const dx = (e.clientX - r.sx) / zoomFactor;
+      const dy = (e.clientY - r.sy) / zoomFactor;
       const baseX = colW + gap;
       const baseY = rowH + gap;
       // Strict grid snapping: whole-column and whole-row increments
@@ -93,8 +102,8 @@ export default function DraggableItem({ item, metrics, onMove, scrollEl, onDelet
     }
     if (!startRef.current) return;
     const s = startRef.current;
-    const dx = e.clientX - s.sx;
-    const dy = e.clientY - s.sy;
+    const dx = (e.clientX - s.sx) / zoomFactor;
+    const dy = (e.clientY - s.sy) / zoomFactor;
     const baseX = colW + gap;
     const baseY = rowH + gap;
     const kx = Math.round(dx / baseX);
@@ -160,6 +169,7 @@ export default function DraggableItem({ item, metrics, onMove, scrollEl, onDelet
   }
 
   const outlineClass = selected ? 'ring-2 ring-black border-black' : 'hover:ring-2 hover:ring-black';
+  const toolbarVisible = !!selected || hovered;
   return (
     <div className="absolute select-none group" style={{ left: pxLeft, top: pxTop, width: pxW, height: pxH, zIndex: dragging ? 5000 : (typeof item.z === 'number' ? 100 + item.z : undefined) }} data-widget-id={item.id} data-testid="widget-item">
       <div
@@ -172,13 +182,20 @@ export default function DraggableItem({ item, metrics, onMove, scrollEl, onDelet
           if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpenModify?.(item.id); }
           // Arrow key nudging handled at editor container; allow bubbling
         }}
+        onPointerEnter={() => setHovered(true)}
+        onPointerLeave={() => setHovered(false)}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         onDoubleClick={() => onOpenModify?.(item.id)}
       >
         {/* Floating toolbar at top-right */}
-        <div className={`absolute right-1 top-1 flex items-center gap-1 transition-opacity ${selected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'} ${selected ? 'pointer-events-auto' : 'pointer-events-none group-hover:pointer-events-auto'}`} data-nodrag="true">
+        <div
+          className={`absolute right-1 top-1 flex items-center gap-1 transition-opacity ${toolbarVisible ? 'opacity-100 visible' : 'opacity-0 invisible'}`}
+          style={{ pointerEvents: toolbarVisible ? 'auto' : 'none', zIndex: 20 }}
+          data-nodrag="true"
+          aria-hidden={!toolbarVisible}
+        >
           {onOpenModify && (
             <button
               className="cursor-pointer p-1 rounded bg-white text-black border-2 border-black hover:bg-neutral-100 shadow-sm"
@@ -210,7 +227,7 @@ export default function DraggableItem({ item, metrics, onMove, scrollEl, onDelet
           )}
           {onDelete && (
             <button
-              className={`cursor-pointer p-1 rounded bg-white text-black border-2 border-black hover:bg-neutral-100 shadow-sm ${item.locked ? 'opacity-50 cursor-not-allowed' : ''}`}
+              className={`cursor-pointer p-1 rounded bg-red-50 text-red-600 border-2 border-red-500 hover:bg-red-100 shadow-sm ${item.locked ? 'opacity-50 cursor-not-allowed' : ''}`}
               title="Delete"
               onClick={(e) => { e.stopPropagation(); if (!item.locked) onDelete(item.id); }}
             >

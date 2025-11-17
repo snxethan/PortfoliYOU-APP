@@ -29,7 +29,7 @@ export default function PreviewPopup({
   useEffect(() => {
     if (!open) {
       // Close if previously opened
-      try { winRef.current?.close(); } catch { }
+      try { winRef.current?.close(); } catch { /* noop */ }
       winRef.current = null;
       setMountNode(null);
       return;
@@ -45,10 +45,10 @@ export default function PreviewPopup({
     // Write minimal HTML + base styles and scroll behavior
     const doc = win.document;
     doc.open();
-    doc.write(`<!doctype html><html><head><meta charset=\"utf-8\" /><title>${title}</title>
+    doc.write(`<!doctype html><html><head><meta charset="utf-8" /><title>${title}</title>
 <style>
   html, body { height: 100%; margin: 0; }
-  body { background: #ffffff; color: #111827; font: 14px/1.4 ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, Noto Sans, \"Apple Color Emoji\", \"Segoe UI Emoji\"; overflow-x: hidden; overflow-y: auto; }
+  body { background: #ffffff; color: #111827; font: 14px/1.4 ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, Noto Sans, "Apple Color Emoji", "Segoe UI Emoji"; overflow-x: hidden; overflow-y: auto; }
   :root {
     --bg: #ffffff;
     --surface: #ffffff;
@@ -61,7 +61,7 @@ export default function PreviewPopup({
   }
   #__preview_root { min-height: 100%; display: flex; justify-content: center; align-items: flex-start; padding: 16px; box-sizing: border-box; }
 </style>
-</head><body><div id=\"__preview_root\"></div></body></html>`);
+</head><body><div id="__preview_root"></div></body></html>`);
     doc.close();
 
     // Clone parent styles so Tailwind/Vite CSS applies
@@ -79,19 +79,18 @@ export default function PreviewPopup({
 
     const onBeforeUnload = () => {
       onClose?.();
-      try { winRef.current = null; } catch { }
+      try { winRef.current = null; } catch { /* noop */ }
       setMountNode(null);
     };
     win.addEventListener('beforeunload', onBeforeUnload);
     return () => {
       win.removeEventListener('beforeunload', onBeforeUnload);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, title, features]);
 
   useEffect(() => {
     return () => {
-      try { winRef.current?.close(); } catch { }
+      try { winRef.current?.close(); } catch { /* noop */ }
       winRef.current = null;
     };
   }, []);

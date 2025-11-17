@@ -7,6 +7,65 @@ import type { GridItem } from "../canvas/DraggableItem";
 import { useAssets } from "../../../providers/AssetsProvider";
 import { useNotifications } from "../../../providers/NotificationsProvider";
 import { useProjects } from "../../../providers/ProjectsProvider";
+import type { CarouselItem } from "../../../widgets/defs/Carousel";
+
+type CarouselEditorItem = {
+    id: string;
+    mediaType: 'image' | 'video';
+    source: string;
+    alt: string;
+    caption: string;
+    poster?: string;
+};
+
+function makeCarouselId(seed?: number) {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') return crypto.randomUUID();
+    const base = Math.random().toString(36).slice(2, 9);
+    return seed !== undefined ? `slide-${seed}-${base}` : base;
+}
+
+function normalizeCarouselEditorItems(raw: unknown): CarouselEditorItem[] {
+    if (!Array.isArray(raw)) return [];
+    return raw.map((entry, idx) => {
+        const data = (entry || {}) as CarouselItem;
+        const mediaType: 'image' | 'video' = data.mediaType === 'video' ? 'video' : 'image';
+        const source = typeof data.src === 'string' && data.src
+            ? data.src
+            : (typeof data.assetId === 'string' ? data.assetId : '');
+        return {
+            id: data.id || makeCarouselId(idx),
+            mediaType,
+            source: source || '',
+            alt: typeof data.alt === 'string' ? data.alt : '',
+            caption: typeof data.caption === 'string' ? data.caption : '',
+            poster: typeof data.poster === 'string' ? data.poster : '',
+        } satisfies CarouselEditorItem;
+    });
+}
+
+function createBlankCarouselItem(): CarouselEditorItem {
+    return {
+        id: makeCarouselId(),
+        mediaType: 'image',
+        source: '',
+        alt: '',
+        caption: '',
+        poster: '',
+    };
+}
+
+function serializeCarouselEditorItems(items: CarouselEditorItem[]): CarouselItem[] {
+    return items
+        .map((item) => ({
+            id: item.id,
+            mediaType: item.mediaType,
+            src: item.source.trim(),
+            alt: item.alt.trim() || undefined,
+            caption: item.caption.trim() || undefined,
+            poster: item.poster?.trim() || undefined,
+        }))
+        .filter((item) => !!item.src);
+}
 
 export default function ModifyWidgetModal({
     item,
@@ -47,7 +106,11 @@ export default function ModifyWidgetModal({
     const [formErrors, setFormErrors] = useState<Record<string, string>>({});
     const [defType, setDefType] = useState<string | null>(null);
     const [selectedFileName, setSelectedFileName] = useState<string>("");
+    const [carouselItems, setCarouselItems] = useState<CarouselEditorItem[]>([]);
+    const [carouselError, setCarouselError] = useState<string | null>(null);
     const assets = useAssets();
+    const resolvedDefType = defType || item.type || null;
+    const isCarousel = resolvedDefType === 'carousel';
     // Collapsible sections (persist across openings)
     const [compOpen, setCompOpen] = useState<boolean>(() => {
         try { return localStorage.getItem('py_comp_props_open') === '1'; } catch { return false; }
@@ -56,10 +119,10 @@ export default function ModifyWidgetModal({
         try { return localStorage.getItem('py_widget_props_open') === '1'; } catch { return false; }
     });
     function toggleCompOpen() {
-        setCompOpen(prev => { const n = !prev; try { localStorage.setItem('py_comp_props_open', n ? '1' : '0'); } catch { } return n; });
+        setCompOpen(prev => { const n = !prev; try { localStorage.setItem('py_comp_props_open', n ? '1' : '0'); } catch { /* noop */ } return n; });
     }
     function toggleWidgetOpen() {
-        setWidgetOpen(prev => { const n = !prev; try { localStorage.setItem('py_widget_props_open', n ? '1' : '0'); } catch { } return n; });
+        setWidgetOpen(prev => { const n = !prev; try { localStorage.setItem('py_widget_props_open', n ? '1' : '0'); } catch { /* noop */ } return n; });
     }
 
     // Keyboard helpers
@@ -76,10 +139,53 @@ export default function ModifyWidgetModal({
         }
     }
 
+    function updateCarouselItem(id: string, patch: Partial<CarouselEditorItem>) {
+        setCarouselError(null);
+        setCarouselItems(prev => prev.map(item => item.id === id ? { ...item, ...patch } : item));
+    }
+
+    function moveCarouselItem(id: string, direction: -1 | 1) {
+        setCarouselError(null);
+        setCarouselItems(prev => {
+            const idx = prev.findIndex(item => item.id === id);
+            if (idx === -1) return prev;
+            const target = idx + direction;
+            if (target < 0 || target >= prev.length) return prev;
+            const next = [...prev];
+            const [entry] = next.splice(idx, 1);
+            next.splice(target, 0, entry);
+            return next;
+        });
+    }
+
+    function removeCarouselItem(id: string) {
+        setCarouselError(null);
+        setCarouselItems(prev => {
+            if (prev.length <= 1) {
+                return prev.map((item, idx) => idx === 0 ? { ...item, source: '', alt: '', caption: '', poster: '' } : item);
+            }
+            return prev.filter(item => item.id !== id);
+        });
+    }
+
+    function addCarouselItem() {
+        setCarouselError(null);
+        setCarouselItems(prev => [...prev, createBlankCarouselItem()]);
+    }
+
     useEffect(() => {
         setTitle(item.title);
         try { setPropsText(JSON.stringify(item.props ?? {}, null, 2)); } catch { setPropsText("{}"); }
         setPropsError(null);
+        if (item.type === 'carousel') {
+            const rawItems = (item.props as { items?: CarouselItem[] })?.items;
+            const normalized = normalizeCarouselEditorItems(rawItems);
+            setCarouselItems(normalized.length > 0 ? normalized : [createBlankCarouselItem()]);
+            setCarouselError(null);
+        } else {
+            setCarouselItems([]);
+            setCarouselError(null);
+        }
         // Load widget definition to check for zod schema
         let mounted = true;
         if (!item.type) { setZodSchema(null); return () => { }; }
@@ -128,8 +234,7 @@ export default function ModifyWidgetModal({
         let alive = true;
         async function go() {
             if (defType !== 'image') return;
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const src = (formValues as any)?.src as unknown;
+            const src = formValues.src;
             if (typeof src === 'string' && src.startsWith('asset://')) {
                 const hash = src.slice('asset://'.length);
                 try { const meta = await assets.get(hash); if (alive) setSelectedFileName(meta?.name || ''); } catch { /* ignore */ }
@@ -149,6 +254,7 @@ export default function ModifyWidgetModal({
         try {
             const parsed = JSON.parse(propsText);
             setPropsError(null);
+            setCarouselError(null);
             onApplyProps(parsed);
             notify({ type: 'success', message: `${widgetName} JSON settings applied successfully`, title: selectedProject?.name, persistent: false });
         } catch {
@@ -170,7 +276,17 @@ export default function ModifyWidgetModal({
             return;
         }
         setFormErrors({});
-        onApplyProps(parsed.data);
+        let payload: Record<string, unknown> = parsed.data;
+        if (isCarousel) {
+            const serialized = serializeCarouselEditorItems(carouselItems);
+            if (serialized.length === 0) {
+                setCarouselError('Add at least one slide with a source.');
+                return;
+            }
+            setCarouselError(null);
+            payload = { ...payload, items: serialized };
+        }
+        onApplyProps(payload);
         notify({ type: 'success', message: `${widgetName} settings applied successfully`, title: selectedProject?.name, persistent: false });
     }
 
@@ -249,7 +365,7 @@ export default function ModifyWidgetModal({
                                                 className="input"
                                                 disabled={locked}
                                                 value={(() => {
-                                                    const src = (formValues as any)?.src as unknown;
+                                                    const src = formValues.src;
                                                     if (typeof src === 'string' && src.startsWith('asset://')) return src.slice('asset://'.length);
                                                     return '';
                                                 })()}
@@ -273,6 +389,97 @@ export default function ModifyWidgetModal({
                                                 ))}
                                             </select>
                                         </div>
+                                    </div>
+                                )}
+
+                                {isCarousel && (
+                                    <div className="border border-[color:var(--border)] rounded-md p-3 bg-[color:var(--muted)]/20 space-y-3">
+                                        <div className="flex items-center justify-between">
+                                            <div className="text-[color:var(--fg-muted)] font-medium">Carousel slides</div>
+                                            <button className="btn btn-ghost btn-xs" type="button" onClick={addCarouselItem} disabled={locked}>Add slide</button>
+                                        </div>
+                                        <div className="space-y-3">
+                                            {carouselItems.map((slide, idx) => {
+                                                const assetOptions = assets.list.filter((asset) => {
+                                                    if (slide.mediaType === 'video') return asset.type?.startsWith('video/');
+                                                    return asset.type?.startsWith('image/');
+                                                });
+                                                return (
+                                                    <div key={slide.id} className="border border-[color:var(--border)] rounded-md p-3 bg-[color:var(--surface)] shadow-sm space-y-2">
+                                                        <div className="flex items-center justify-between text-xs font-medium">
+                                                            <span>Slide {idx + 1}</span>
+                                                            <div className="flex items-center gap-1">
+                                                                <button className="btn btn-ghost btn-xs text-[color:var(--fg)] bg-[color:var(--muted)]/40 border border-[color:var(--border)] hover:bg-[color:var(--muted)]/60" type="button" onClick={() => moveCarouselItem(slide.id, -1)} disabled={locked || idx === 0} title="Move up">
+                                                                    <ChevronUp size={12} />
+                                                                </button>
+                                                                <button className="btn btn-ghost btn-xs text-[color:var(--fg)] bg-[color:var(--muted)]/40 border border-[color:var(--border)] hover:bg-[color:var(--muted)]/60" type="button" onClick={() => moveCarouselItem(slide.id, 1)} disabled={locked || idx === carouselItems.length - 1} title="Move down">
+                                                                    <ChevronDown size={12} />
+                                                                </button>
+                                                                <button className="btn btn-ghost btn-xs text-red-500 border border-red-500/30 bg-red-500/10 hover:bg-red-500/20" type="button" onClick={() => removeCarouselItem(slide.id)} disabled={locked} title="Remove slide">
+                                                                    <Trash2 size={12} />
+                                                                </button>
+                                                            </div>
+                                                        </div>
+                                                        <div>
+                                                            <label className="block text-[color:var(--fg-muted)] text-xs mb-1">Media type</label>
+                                                            <select className="input w-full" value={slide.mediaType} onChange={(e) => updateCarouselItem(slide.id, { mediaType: e.target.value as 'image' | 'video' })} disabled={locked}>
+                                                                <option value="image">Image</option>
+                                                                <option value="video">Video</option>
+                                                            </select>
+                                                        </div>
+                                                        <div>
+                                                            <label className="block text-[color:var(--fg-muted)] text-xs mb-1">Source (asset:// or URL)</label>
+                                                            <input
+                                                                className="input w-full"
+                                                                value={slide.source}
+                                                                onChange={(e) => updateCarouselItem(slide.id, { source: e.target.value })}
+                                                                placeholder="asset://hash or https://example.com/media"
+                                                                disabled={locked}
+                                                            />
+                                                        </div>
+                                                        {assetOptions.length > 0 && (
+                                                            <div>
+                                                                <label className="block text-[color:var(--fg-muted)] text-xs mb-1">Pick from assets</label>
+                                                                <select
+                                                                    className="input w-full"
+                                                                    value=""
+                                                                    onChange={(e) => {
+                                                                        const hash = e.target.value;
+                                                                        if (!hash) return;
+                                                                        updateCarouselItem(slide.id, { source: `asset://${hash}` });
+                                                                    }}
+                                                                    disabled={locked}
+                                                                >
+                                                                    <option value="">Select asset…</option>
+                                                                    {assetOptions.map((asset) => (
+                                                                        <option key={asset.hash} value={asset.hash}>{asset.name}</option>
+                                                                    ))}
+                                                                </select>
+                                                            </div>
+                                                        )}
+                                                        {slide.mediaType === 'image' && (
+                                                            <div>
+                                                                <label className="block text-[color:var(--fg-muted)] text-xs mb-1">Alt text</label>
+                                                                <input className="input w-full" value={slide.alt} onChange={(e) => updateCarouselItem(slide.id, { alt: e.target.value })} disabled={locked} />
+                                                            </div>
+                                                        )}
+                                                        {slide.mediaType === 'video' && (
+                                                            <div>
+                                                                <label className="block text-[color:var(--fg-muted)] text-xs mb-1">Poster image (optional)</label>
+                                                                <input className="input w-full" value={slide.poster || ''} onChange={(e) => updateCarouselItem(slide.id, { poster: e.target.value })} placeholder="asset://hash or URL" disabled={locked} />
+                                                            </div>
+                                                        )}
+                                                        <div>
+                                                            <label className="block text-[color:var(--fg-muted)] text-xs mb-1">Caption</label>
+                                                            <input className="input w-full" value={slide.caption} onChange={(e) => updateCarouselItem(slide.id, { caption: e.target.value })} disabled={locked} />
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                        {carouselError && (
+                                            <div className="text-red-500 text-xs">{carouselError}</div>
+                                        )}
                                     </div>
                                 )}
 
@@ -302,6 +509,7 @@ export default function ModifyWidgetModal({
                                                     if (key === 'textColor') label = 'Text color';
                                                 }
                                                 const disabled = locked;
+                                                const isCarouselIntervalField = isCarousel && key === 'interval';
                                                 // eslint-disable-next-line @typescript-eslint/no-explicit-any
                                                 const anyZ: any = z;
                                                 const isEnum = baseField instanceof anyZ.ZodEnum;
@@ -323,6 +531,38 @@ export default function ModifyWidgetModal({
                                                         }
                                                     }, disabled
                                                 };
+                                                if (isCarouselIntervalField) {
+                                                    const secondsValue = typeof value === 'number' && Number.isFinite(value) ? (value / 1000) : '';
+                                                    return (
+                                                        <div key={key}>
+                                                            <label className="block text-[color:var(--fg-muted)] mb-1">Slide interval (seconds)</label>
+                                                            <input
+                                                                className="input w-full"
+                                                                type="number"
+                                                                min={0.5}
+                                                                max={60}
+                                                                step={0.5}
+                                                                value={secondsValue === '' ? '' : secondsValue}
+                                                                onChange={(e) => {
+                                                                    const raw = e.target.value;
+                                                                    const num = raw === '' ? undefined : Number(raw);
+                                                                    const ms = typeof num === 'number' && !Number.isNaN(num) ? Math.round(num * 1000) : undefined;
+                                                                    const next: Record<string, unknown> = { ...formValues, [key]: ms };
+                                                                    setFormValues(next);
+                                                                    if (zodSchema) {
+                                                                        const single = z.object({ [key]: (schema as z.ZodTypeAny) });
+                                                                        const res = single.safeParse({ [key]: next[key] });
+                                                                        setFormErrors({ ...formErrors, [key]: res.success ? '' : (res.error.issues[0]?.message || 'Invalid value') });
+                                                                    }
+                                                                }}
+                                                                onKeyDown={handleEnterSubmitComp}
+                                                                disabled={disabled}
+                                                            />
+                                                            <div className="text-[10px] text-[color:var(--fg-muted)] mt-1">0.5s – 60s, half-second steps.</div>
+                                                            {error && <div className="text-red-500 text-xs mt-1">{error}</div>}
+                                                        </div>
+                                                    );
+                                                }
                                                 return (
                                                     <div key={key}>
                                                         <label className="block text-[color:var(--fg-muted)] mb-1">{label}{!isOptional ? ' *' : ''}</label>
@@ -410,7 +650,7 @@ export default function ModifyWidgetModal({
                                                         ) : isColorField ? (
                                                             <div className="flex items-center gap-2">
                                                                 <input
-                                                                    className="rounded border border-[color:var(--border)] bg-[color:var(--muted)]/40"
+                                                                    className="rounded border border-[color:var(--border)] bg-[color:var(--muted)]/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[color:var(--surface)]"
                                                                     type="color"
                                                                     value={String((value as string) || '#2563eb')}
                                                                     onChange={common.onChange}
@@ -552,7 +792,7 @@ export default function ModifyWidgetModal({
                 {onDelete && !locked && (
                     <div className="mt-4 flex items-center justify-end">
                         <button
-                            className="btn btn-error btn-xs"
+                            className="inline-flex items-center justify-center p-2 rounded bg-red-500/10 text-red-500 border border-red-500/50 hover:bg-red-500/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400/70 focus-visible:ring-offset-2 focus-visible:ring-offset-[color:var(--surface)]"
                             title="Delete widget"
                             aria-label="Delete widget"
                             onClick={() => { if (confirm('Delete this widget? This cannot be undone.')) onDelete(); }}

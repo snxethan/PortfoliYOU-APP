@@ -1,20 +1,22 @@
 import '../types/electron.d.ts';
 import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { useNotifications } from './NotificationsProvider';
 import { onAuthStateChanged } from "firebase/auth";
 import { collection, doc, getDoc, getDocs, setDoc, serverTimestamp, query, where, orderBy } from "firebase/firestore";
 import { getFunctions, httpsCallable } from "firebase/functions";
 import { ref as storageRef, uploadBytes, getDownloadURL, getMetadata, getBytes } from "firebase/storage";
 import JSZip from "jszip";
+
 import { idbGet, idbPut, computeHash, stores, AssetMeta } from "../lib/assetsStore";
+import { auth, db, storage } from "../lib/firebase";
+
+import { useNotifications } from './NotificationsProvider';
+
 type ZipEntry = {
 	async(type: 'arraybuffer'): Promise<ArrayBuffer>;
 	async(type: 'string'): Promise<string>;
 	dir: boolean;
 	name: string;
 };
-
-import { auth, db, storage } from "../lib/firebase";
 
 export type Theme = {
 	themeId: string;
@@ -674,7 +676,7 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 				if (changed) { setProjects(next); writeStore(next); }
 			},
 			autosaveEnabled,
-			setAutosaveEnabled: (v: boolean) => { try { localStorage.setItem('py_autosave_enabled', v ? '1' : '0'); } catch { } setAutosaveEnabled(v); try { notify({ type: 'info', message: v ? 'Autosave enabled' : 'Autosave disabled', persistent: false }); } catch { /* ignore */ } },
+			setAutosaveEnabled: (v: boolean) => { try { localStorage.setItem('py_autosave_enabled', v ? '1' : '0'); } catch { /* noop */ } setAutosaveEnabled(v); try { notify({ type: 'info', message: v ? 'Autosave enabled' : 'Autosave disabled', persistent: false }); } catch { /* ignore */ } },
 			getPageItems: (projectId: string, pageId: string) => {
 				const proj = projects.find(p => p.id === projectId); if (!proj) return [];
 				const page = proj.pages[pageId]; if (!page) return [];

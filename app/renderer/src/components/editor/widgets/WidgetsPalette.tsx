@@ -1,11 +1,56 @@
 import { useDraggable } from '@dnd-kit/core';
-import { Boxes, Search, ChevronDown, ChevronRight, Image as ImageIcon, Mail, Type as TypeIcon, Link2 } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
+import { Boxes, Search, ChevronDown, ChevronRight, Image as ImageIcon, Mail, Type as TypeIcon, Compass, GalleryHorizontalEnd, Layers, Frame, LayoutGrid, AppWindow } from 'lucide-react';
 import React, { memo, useEffect, useMemo, useState } from 'react';
 
 import { WidgetsRegistry } from '../../../widgets/registry';
 // Ensure built-in widgets are registered (side-effect import)
 import '../../../widgets/loader';
 // Assets are now rendered by the sidebar container beneath this palette
+
+const PREVIEW_ICON_SIZE = 26;
+const PREVIEW_SHELL_CLASS = 'w-full h-full bg-white rounded-md border border-[color:var(--border)] flex flex-col items-center justify-center text-[color:var(--fg-muted)]';
+
+type PreviewConfig = {
+  icon?: LucideIcon;
+  label?: string;
+  accentClass?: string;
+  render?: () => React.ReactNode;
+};
+
+const fallbackPreview: Required<Pick<PreviewConfig, 'icon'>> = {
+  icon: TypeIcon,
+};
+
+const previewConfigs: Record<string, PreviewConfig> = {
+  image: { icon: ImageIcon, label: 'Image' },
+  text: {
+    render: () => (
+      <div className={PREVIEW_SHELL_CLASS}>
+        <span className="font-semibold text-base tracking-widest text-black">Text</span>
+      </div>
+    ),
+  },
+  contact: { icon: Mail, label: 'Contact' },
+  'nav-link': { icon: Compass, label: 'Nav', accentClass: 'text-[color:var(--accent)]' },
+  project: { icon: LayoutGrid, label: 'Project' },
+  carousel: { icon: GalleryHorizontalEnd, label: 'Carousel' },
+  'portfolio-island': { icon: Layers, label: 'Island' },
+  embed: { icon: Frame, label: 'Embed' },
+  'preview-popup': { icon: AppWindow, label: 'Popup' },
+};
+
+function renderPreview(type: string) {
+  const config = previewConfigs[type] ?? {};
+  if (config.render) return config.render();
+  const Icon = config.icon ?? fallbackPreview.icon;
+  return (
+    <div className={PREVIEW_SHELL_CLASS}>
+      <Icon size={PREVIEW_ICON_SIZE} className={config.accentClass ?? 'text-[color:var(--fg-muted)]'} />
+      {config.label && <span className="mt-1 text-[10px] font-semibold tracking-wide text-[color:var(--fg-muted)]">{config.label}</span>}
+    </div>
+  );
+}
 
 function DraggablePaletteTile({ type, label, w, h }: { type: string; label: string; w: number; h: number }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: `palette:${type}`, data: { src: 'palette', type, w, h, label } });
@@ -29,39 +74,7 @@ function DraggablePaletteTile({ type, label, w, h }: { type: string; label: stri
     >
       {/* Visual preview area */}
       <div className="grow p-1 flex items-center justify-center overflow-hidden">
-        {type === 'image' ? (
-          <div className="w-full h-full rounded-md border border-dashed border-[color:var(--border)] bg-white flex items-center justify-center">
-            <ImageIcon size={28} className="text-[color:var(--fg-muted)]" />
-          </div>
-        ) : type === 'text' ? (
-          <div className="w-full h-full bg-white rounded-md border border-[color:var(--border)] flex items-center justify-center">
-            <span className="font-semibold text-[11px] tracking-wide text-black">Text</span>
-          </div>
-        ) : type === 'contact' ? (
-          <div className="w-full h-full bg-white rounded-md border border-[color:var(--border)] p-1 text-[8px] text-left">
-            <div className="mb-1 flex items-center gap-1 text-[color:var(--fg-muted)]"><Mail size={10} /> Email</div>
-            <div className="h-2.5 bg-[color:var(--muted)]/50 rounded mb-1" />
-            <div className="h-6 bg-[color:var(--muted)]/50 rounded mb-1" />
-            <div className="h-3 bg-[color:var(--muted)]/50 rounded w-10 ml-auto" />
-          </div>
-        ) : type === 'project' ? (
-          <div className="w-full h-full bg-white rounded-md border border-[color:var(--border)] p-1 text-left">
-            <div className="h-6 bg-[color:var(--muted)]/50 rounded mb-1" />
-            <div className="h-2 bg-[color:var(--muted)]/50 rounded w-3/4 mb-0.5" />
-            <div className="h-2 bg-[color:var(--muted)]/40 rounded w-1/2" />
-          </div>
-        ) : type === 'nav-link' ? (
-          <div className="w-full h-full bg-white rounded-md border border-[color:var(--border)] flex items-center justify-center">
-            <div className="flex items-center gap-1">
-              <Link2 size={14} className="text-[color:var(--accent)]" />
-              <span className="text-[11px] font-semibold text-[color:var(--accent)] underline">Link</span>
-            </div>
-          </div>
-        ) : (
-          <div className="w-full h-full bg-white rounded-md border border-[color:var(--border)] flex items-center justify-center">
-            <TypeIcon size={16} className="text-[color:var(--fg-muted)]" />
-          </div>
-        )}
+        {renderPreview(type)}
       </div>
       {/* Footer label */}
       <div className="px-2 py-1 text-[10px] leading-tight border-t border-[color:var(--border)] bg-[color:var(--muted)]/20">
@@ -73,7 +86,7 @@ function DraggablePaletteTile({ type, label, w, h }: { type: string; label: stri
 }
 
 function WidgetsPalette() {
-  const metas = WidgetsRegistry.list();
+  const metas = useMemo(() => WidgetsRegistry.list(), []);
   const [query, setQuery] = useState('');
   const [openMap, setOpenMap] = useState<Record<string, boolean>>(() => {
     try {

@@ -220,7 +220,7 @@ export default function DraggableItem({ item, metrics, onMove, scrollEl, onDelet
           )}
           {onDelete && (
             <button
-              className={`cursor-pointer p-1 rounded bg-white text-black border-2 border-black hover:bg-neutral-100 shadow-sm ${item.locked ? 'opacity-50 cursor-not-allowed' : ''}`}
+              className={`cursor-pointer p-1 rounded bg-red-50 text-red-600 border-2 border-red-500 hover:bg-red-100 shadow-sm ${item.locked ? 'opacity-50 cursor-not-allowed' : ''}`}
               title="Delete"
               aria-label="Delete widget"
               onClick={(e) => { e.stopPropagation(); if (!item.locked) onDelete(item.id); }}

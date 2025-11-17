@@ -2,8 +2,10 @@ import React from 'react';
 import { render, screen } from '@testing-library/react';
 import { describe, it, expect } from 'vitest';
 
-import NavLinkDef from '../defs/NavLink';
-import { WidgetContext } from '../sdk';
+import NavLinkDef from '../../../app/renderer/src/widgets/defs/NavLink';
+import { WidgetContext } from '../../../app/renderer/src/widgets/sdk';
+
+const schema = NavLinkDef.zodSchema!;
 
 function withCtx(node: React.ReactNode, ctx?: Partial<React.ContextType<typeof WidgetContext>>) {
     const value = { id: 'w1', editing: false, interactive: true, updateProps: () => { }, currentPageId: undefined, ...ctx };
@@ -17,12 +19,12 @@ describe('NavLink widget', () => {
     });
 
     it('validates props with zod (valid)', () => {
-        const ok = NavLinkDef.zodSchema.safeParse({ label: 'Home', targetPageId: 'home_1', style: 'link', color: '#000', underline: true });
+        const ok = schema.safeParse({ label: 'Home', targetPageId: 'home_1', style: 'link', color: '#000', underline: true });
         expect(ok.success).toBe(true);
     });
 
     it('rejects invalid targetPageId', () => {
-        const bad = NavLinkDef.zodSchema.safeParse({ label: 'Home', targetPageId: 'bad id' });
+        const bad = schema.safeParse({ label: 'Home', targetPageId: 'bad id' });
         expect(bad.success).toBe(false);
     });
 

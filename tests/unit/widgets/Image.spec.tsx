@@ -2,7 +2,9 @@ import React from 'react';
 import { render } from '@testing-library/react';
 import { describe, it, expect } from 'vitest';
 
-import ImageDef from '../defs/Image';
+import ImageDef from '../../../app/renderer/src/widgets/defs/Image';
+
+const schema = ImageDef.zodSchema!;
 
 // For default render (src='') the widget returns an empty container and does not
 // resolve assets, so no provider mocking is needed.
@@ -14,12 +16,12 @@ describe('Image widget', () => {
     });
 
     it('zod validates valid props', () => {
-        const ok = ImageDef.zodSchema.safeParse({ src: '', alt: 'Img', fit: 'cover', radius: 4, scale: 1, shape: 'rounded' });
+        const ok = schema.safeParse({ src: '', alt: 'Img', fit: 'cover', radius: 4, scale: 1, shape: 'rounded' });
         expect(ok.success).toBe(true);
     });
 
     it('zod rejects invalid src format', () => {
-        const bad = ImageDef.zodSchema.safeParse({ src: 'invalid-url', alt: 'Img' });
+        const bad = schema.safeParse({ src: 'invalid-url', alt: 'Img' });
         expect(bad.success).toBe(false);
     });
 

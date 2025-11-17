@@ -2,8 +2,10 @@ import React from 'react';
 import { render, screen } from '@testing-library/react';
 import { describe, it, expect } from 'vitest';
 
-import ProjectDef from '../defs/Project';
-import { WidgetContext } from '../sdk';
+import ProjectDef from '../../../app/renderer/src/widgets/defs/Project';
+import { WidgetContext } from '../../../app/renderer/src/widgets/sdk';
+
+const schema = ProjectDef.zodSchema!;
 
 function withCtx(node: React.ReactNode) {
     const value = { id: 'w1', editing: false, interactive: true, updateProps: () => { } } as const;
@@ -17,12 +19,12 @@ describe('Project widget', () => {
     });
 
     it('zod validates valid props', () => {
-        const ok = ProjectDef.zodSchema.safeParse({ title: 'T', description: 'D', headingLevel: 'h2' });
+        const ok = schema.safeParse({ title: 'T', description: 'D', headingLevel: 'h2' });
         expect(ok.success).toBe(true);
     });
 
     it('zod rejects missing title', () => {
-        const bad = ProjectDef.zodSchema.safeParse({ title: '' });
+        const bad = schema.safeParse({ title: '' });
         expect(bad.success).toBe(false);
     });
 

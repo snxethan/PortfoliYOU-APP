@@ -1,5 +1,5 @@
 import React from "react";
-import { Eye, Pencil, Grid as GridIcon, MonitorSmartphone, Smartphone, Redo, Undo, ExternalLink } from "lucide-react";
+import { Eye, Pencil, Grid as GridIcon, MonitorSmartphone, Smartphone, Redo, Undo, Minus, Plus, RefreshCw } from "lucide-react";
 
 export type EditorTopBarProps = {
     selectedProjectName?: string;
@@ -21,6 +21,10 @@ export type EditorTopBarProps = {
     pageHeight: number;
     heightMode: 'expand' | 'fixed';
     setHeightMode: (m: 'expand' | 'fixed') => void;
+    zoom: number;
+    onZoomIn: () => void;
+    onZoomOut: () => void;
+    onResetZoom: () => void;
 
     canUndo: boolean;
     canRedo: boolean;
@@ -51,6 +55,10 @@ export default function EditorTopBar(props: EditorTopBarProps) {
         undo,
         redo,
         onOpenWebpage,
+        zoom,
+        onZoomIn,
+        onZoomOut,
+        onResetZoom,
     } = props;
 
     return (
@@ -59,13 +67,29 @@ export default function EditorTopBar(props: EditorTopBarProps) {
                 {/* Edit/Preview toggle */}
                 <button className={`btn btn-ghost flex items-center gap-2 text-sm ${previewMode ? 'nav-active' : ''}`} title="Toggle preview (no content editing while in Preview)" onClick={togglePreviewMode}>
                     {previewMode ? <Eye size={16} /> : <Pencil size={16} />}
-                    {previewMode ? 'Preview' : 'Editing'}
+                    {previewMode ? 'Displaying' : 'Editing'}
                 </button>
                 {/* Open standalone webpage preview */}
                 <button className="btn btn-ghost flex items-center gap-2 text-sm" title="Open webpage (popup)" onClick={onOpenWebpage}>
                     <Eye size={16} />
-                    Open webpage
+                    Preview Page
                 </button>
+                {selectedProjectName && (
+                    onTitleClick ? (
+                        <button
+                            className="btn btn-ghost text-xs max-w-[12rem] truncate"
+                            type="button"
+                            title="Go back to project overview"
+                            onClick={onTitleClick}
+                        >
+                            {selectedProjectName}
+                        </button>
+                    ) : (
+                        <span className="text-xs text-[color:var(--fg-muted)] truncate max-w-[12rem]" title={selectedProjectName}>
+                            {selectedProjectName}
+                        </span>
+                    )
+                )}
             </div>
 
             <div className="flex items-center gap-3">
@@ -95,6 +119,20 @@ export default function EditorTopBar(props: EditorTopBarProps) {
                         <GridIcon size={16} />
                         Grid
                     </button>
+                    <div className="flex items-center gap-1 ml-2" title="Canvas zoom">
+                        <button className="btn btn-ghost btn-xs" onClick={onZoomOut} aria-label="Zoom out">
+                            <Minus size={14} />
+                        </button>
+                        <div className="px-2 py-0.5 text-[11px] font-semibold min-w-[3.5rem] text-center border border-[color:var(--border)] rounded bg-white text-[color:var(--fg)]">
+                            {Math.round(zoom * 100)}%
+                        </div>
+                        <button className="btn btn-ghost btn-xs" onClick={onZoomIn} aria-label="Zoom in">
+                            <Plus size={14} />
+                        </button>
+                        <button className="btn btn-ghost btn-xs" onClick={onResetZoom} title="Reset zoom" aria-label="Reset zoom">
+                            <RefreshCw size={12} />
+                        </button>
+                    </div>
                     <div className="hidden sm:flex items-center gap-1 ml-2" title="Page height behavior">
                         <span className="text-xs text-[color:var(--fg-muted)]">Height</span>
                         <button className={`btn btn-ghost btn-xs ${heightMode === 'expand' ? 'nav-active' : ''}`} onClick={() => setHeightMode('expand')}>Expand</button>

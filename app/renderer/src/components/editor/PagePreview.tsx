@@ -24,8 +24,8 @@ function PagePreviewInner({ width, cols, gap, rowH, items, currentPageId, onNavi
         return Math.max(12, ...items.map(it => it.y + it.h));
     }, [items]);
 
-    // Enforce square grid in preview: row height equals column width
-    const effRowH = colW;
+    // Enforce square grid in preview; fall back to provided row height when width is 0
+    const effRowH = colW > 0 ? colW : rowH;
 
     const height = useMemo(() => {
         const r = Math.max(1, rows);

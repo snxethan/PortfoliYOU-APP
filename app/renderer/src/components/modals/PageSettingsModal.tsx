@@ -41,7 +41,7 @@ export default function PageSettingsModal({
                         <X size={14} />
                     </button>
                     <div className="flex items-center gap-2 text-sm font-medium">
-                        <Layers size={16} /> Page settings
+                        <Layers size={16} /> {title}
                     </div>
                 </div>
                 <form onSubmit={(e) => { e.preventDefault(); const v = name.trim(); if (v) onSave({ name: v, starter }); }}>

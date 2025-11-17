@@ -4,6 +4,15 @@ import { WidgetsRegistry } from './registry';
 import type { WidgetDefinition, WidgetInstance } from './types';
 import { WidgetContext } from './sdk';
 
+type RenderProxyProps<P> = {
+  render: (props: P) => React.ReactNode;
+  props: P;
+};
+
+function WidgetRenderProxy<P>({ render, props }: RenderProxyProps<P>) {
+  return <>{render(props)}</>;
+}
+
 export default function WidgetRenderer({ instance, editing = false, interactive = true, onChangeProps, currentPageId }: { instance: WidgetInstance<unknown>; editing?: boolean; interactive?: boolean; onChangeProps?: (partial: Record<string, unknown>) => void; currentPageId?: string }) {
   const [def, setDef] = useState<WidgetDefinition<unknown> | undefined>(() => WidgetsRegistry.get(instance.type));
 
@@ -31,7 +40,7 @@ export default function WidgetRenderer({ instance, editing = false, interactive 
   };
   return (
     <WidgetContext.Provider value={{ id: instance.id, editing, interactive, updateProps, currentPageId }}>
-      {def.render(instance.props)}
+      <WidgetRenderProxy render={def.render} props={instance.props} />
     </WidgetContext.Provider>
   );
 }

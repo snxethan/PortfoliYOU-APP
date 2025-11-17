@@ -1,5 +1,5 @@
-﻿import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
-import { Suspense, lazy, useEffect } from "react";
+﻿import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
+import { Suspense, lazy, useEffect, useState, useCallback } from "react";
 
 import Sidebar from "./components/Sidebar";
 import PortfolioIsland from "./components/portfolio-island/PortfolioIsland";
@@ -41,6 +41,7 @@ export default function App() {
             <AssetsProvider>
               <CloudSettingsProvider>
                 <SaveHotkeys />
+                <GlobalZoomControls />
                 <NotificationsUI />
                 <div className="min-h-screen grid grid-cols-[var(--sidebar-w,15rem)_1fr]">
                   <Sidebar />
@@ -103,6 +104,86 @@ function SaveHotkeys() {
     window.addEventListener('keydown', onKeyDown, { capture: true });
     return () => window.removeEventListener('keydown', onKeyDown, { capture: true } as EventListenerOptions);
   }, [selectedProjectId, saveProject]);
+  return null;
+}
+
+const MIN_APP_ZOOM = 0.8;
+const MAX_APP_ZOOM = 1.6;
+
+function GlobalZoomControls() {
+  const location = useLocation();
+  const isEditorRoute = location.pathname.startsWith('/editor');
+  const clamp = useCallback((value: number) => {
+    if (!Number.isFinite(value)) return 1;
+    return Math.min(MAX_APP_ZOOM, Math.max(MIN_APP_ZOOM, value));
+  }, []);
+  const [appZoom, setAppZoom] = useState(() => {
+    try {
+      const stored = Number(localStorage.getItem('py_app_zoom'));
+      if (!stored) return 1;
+      return clamp(stored);
+    } catch {
+      return 1;
+    }
+  });
+
+  useEffect(() => {
+    const value = clamp(appZoom);
+    document.body?.style.setProperty('zoom', value.toString());
+    document.documentElement?.style.setProperty('--py-app-zoom', value.toString());
+    try { localStorage.setItem('py_app_zoom', value.toString()); } catch { /* ignore */ }
+  }, [appZoom, clamp]);
+
+  useEffect(() => {
+    return () => {
+      document.body?.style.removeProperty('zoom');
+      document.documentElement?.style.removeProperty('--py-app-zoom');
+    };
+  }, []);
+
+  const adjustZoom = useCallback((delta: number) => {
+    setAppZoom(prev => clamp(Number((prev + delta).toFixed(3))));
+  }, [clamp]);
+
+  const resetZoom = useCallback(() => {
+    setAppZoom(1);
+  }, []);
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      const ctrl = e.ctrlKey || e.metaKey;
+      if (!ctrl) return;
+      const key = e.key;
+      const isZoomIn = key === '+' || key === '=' || key === 'Add';
+      const isZoomOut = key === '-' || key === '_' || key === 'Subtract';
+      const isReset = key === '0' || key === ')' || key === 'Digit0';
+      if (!isZoomIn && !isZoomOut && !isReset) return;
+      if (isEditorRoute && !e.shiftKey) return; // canvas handles plain Ctrl combos
+      e.preventDefault();
+      e.stopPropagation();
+      if (isZoomIn) adjustZoom(0.1);
+      else if (isZoomOut) adjustZoom(-0.1);
+      else if (isReset) resetZoom();
+    };
+    window.addEventListener('keydown', handler, true);
+    return () => window.removeEventListener('keydown', handler, true);
+  }, [adjustZoom, resetZoom, isEditorRoute]);
+
+  useEffect(() => {
+    const handler = (e: WheelEvent) => {
+      const ctrl = e.ctrlKey || e.metaKey;
+      if (!ctrl) return;
+      if (isEditorRoute && !e.shiftKey) return; // let editor canvas handle
+      e.preventDefault();
+      e.stopPropagation();
+      const delta = e.deltaY;
+      adjustZoom(delta > 0 ? -0.05 : 0.05);
+    };
+    const opts: AddEventListenerOptions = { passive: false, capture: true };
+    window.addEventListener('wheel', handler, opts);
+    return () => window.removeEventListener('wheel', handler, opts);
+  }, [adjustZoom, isEditorRoute]);
+
   return null;
 }
 

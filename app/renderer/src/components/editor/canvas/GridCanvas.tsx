@@ -1,27 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo } from "react";
 import { useDroppable } from "@dnd-kit/core";
 
 import DraggableItem, { GridItem, GridMetrics } from "./DraggableItem";
 
-export function useElementSize<T extends HTMLElement>() {
-  const ref = useRef<T | null>(null);
-  const [size, setSize] = useState<{ width: number; height: number }>({ width: 0, height: 0 });
-  useEffect(() => {
-    if (!ref.current) return;
-    const el = ref.current;
-    const ro = new ResizeObserver((entries) => {
-      for (const e of entries) {
-        const cr = e.contentRect;
-        setSize({ width: Math.floor(cr.width), height: Math.floor(cr.height) });
-      }
-    });
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
-  return { ref, size } as const;
-}
-
-export default function GridCanvas({ cols, gap, rowH, items, onChange, scrollEl, viewportHeight, onDelete, onDuplicate, onItemMoveStart, onItemMoveEnd, onBringToFront, onSendToBack, onBringForward, onSendBackward, onTogglePin, onOpenModify, onDropAsset, showGrid, selectedId, onSelect }: {
+export default function GridCanvas({ pageWidth, zoom, cols, gap, rowH, items, onChange, scrollEl, viewportHeight, onDelete, onDuplicate, onItemMoveStart, onItemMoveEnd, onBringToFront, onSendToBack, onBringForward, onSendBackward, onTogglePin, onOpenModify, onDropAsset, showGrid, selectedId, onSelect }: {
+  pageWidth: number;
+  zoom: number;
   cols: number;
   gap: number;
   rowH: number;
@@ -44,19 +28,21 @@ export default function GridCanvas({ cols, gap, rowH, items, onChange, scrollEl,
   selectedId?: string | null;
   onSelect?: (id: string | null) => void;
 }) {
-  const { ref, size } = useElementSize<HTMLDivElement>();
   const { setNodeRef, isOver } = useDroppable({ id: 'grid-canvas' });
-  const { width } = size;
+  const zoomFactor = zoom || 1;
 
-  const colW = useMemo(() => {
+  const logicalColW = useMemo(() => {
     if (cols <= 0) return 0;
-    // Decouple column width from gap so gap affects spacing between items and step size more clearly
-    return Math.floor(width / cols);
-  }, [width, cols]);
+    return Math.floor(pageWidth / cols);
+  }, [pageWidth, cols]);
+  const logicalRowH = logicalColW > 0 ? logicalColW : rowH;
+  const metrics: GridMetrics = useMemo(() => ({ colW: logicalColW, rowH: logicalRowH, gap, cols }), [logicalColW, logicalRowH, gap, cols]);
 
-  // Enforce square grid: row height equals column width
-  const effRowH = colW;
-  const metrics: GridMetrics = useMemo(() => ({ colW, rowH: effRowH, gap, cols }), [colW, effRowH, gap, cols]);
+  const gapPx = gap * zoomFactor;
+  const colPx = logicalColW * zoomFactor;
+  const rowPx = logicalRowH * zoomFactor;
+  const unitX = (logicalColW + gap) * zoomFactor;
+  const unitY = (logicalRowH + gap) * zoomFactor;
 
   // Calculate content height based on items so the grid background extends as needed
   const contentRows = useMemo(() => {
@@ -65,27 +51,21 @@ export default function GridCanvas({ cols, gap, rowH, items, onChange, scrollEl,
   }, [items]);
   const canvasHeight = useMemo(() => {
     const rows = Math.max(1, contentRows);
-    const intrinsic = rows * effRowH + (rows - 1) * gap;
-    const minH = Math.max(0, (viewportHeight ?? 0));
+    const intrinsic = rows * rowPx + (rows - 1) * gapPx;
+    const minH = Math.max(0, (viewportHeight ?? 0) * zoomFactor);
     return Math.max(intrinsic, minH);
-  }, [contentRows, effRowH, gap, viewportHeight]);
+  }, [contentRows, rowPx, gapPx, viewportHeight, zoomFactor]);
 
   // Optional grid background for alignment (based on gap and rowH)
   const bg = useMemo(() => {
     if (!showGrid) return undefined as string | undefined;
-    const baseX = Math.max(1, colW + gap);
-    const baseY = Math.max(1, effRowH + gap);
+    const baseX = Math.max(1, unitX || 0);
+    const baseY = Math.max(1, unitY || 0);
     const line = 'rgba(0,0,0,0.08)';
     const vLine = `repeating-linear-gradient(to right, transparent 0, transparent ${baseX - 1}px, ${line} ${baseX - 1}px, ${line} ${baseX}px)`;
     const hLine = `repeating-linear-gradient(to bottom, transparent 0, transparent ${baseY - 1}px, ${line} ${baseY - 1}px, ${line} ${baseY}px)`;
     return `${vLine}, ${hLine}`;
-  }, [showGrid, colW, effRowH, gap]);
-
-  const assignRef = (el: HTMLDivElement | null) => {
-    // Merge local ref used for size with droppable ref for DnD-kit
-    ref.current = el;
-    setNodeRef(el);
-  };
+  }, [showGrid, unitX, unitY]);
 
   // Stable sort by z, falling back to original order for items without z
   const sorted = useMemo(() => items.map((it, i) => ({ it, i }))
@@ -98,12 +78,12 @@ export default function GridCanvas({ cols, gap, rowH, items, onChange, scrollEl,
 
   return (
     <div
-      ref={assignRef}
+      ref={setNodeRef}
       className="relative bg-transparent"
       role="region"
       aria-label="Canvas editor"
       data-testid="grid-canvas"
-      style={{ minHeight: 384, height: canvasHeight, backgroundImage: bg }}
+      style={{ minHeight: 384, height: canvasHeight, width: pageWidth * zoomFactor, backgroundImage: bg }}
       onMouseDown={(e) => {
         // clicking on empty space clears selection
         if (e.target === e.currentTarget) onSelect?.(null);
@@ -115,6 +95,7 @@ export default function GridCanvas({ cols, gap, rowH, items, onChange, scrollEl,
           item={it}
           metrics={metrics}
           scrollEl={scrollEl}
+          zoom={zoomFactor}
           onMove={(next) => onChange(items.map(x => x.id === it.id ? next : x))}
           onDelete={onDelete}
           onDuplicate={onDuplicate}

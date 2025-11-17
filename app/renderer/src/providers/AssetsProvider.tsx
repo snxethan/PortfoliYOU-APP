@@ -1,10 +1,12 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { onAuthStateChanged } from 'firebase/auth';
+import { ref as storageRef, getDownloadURL, uploadBytes } from 'firebase/storage';
+
+import { AssetMeta, computeHash, getImageSize, idbAllMeta, idbDelete, idbGet, idbPut, stores } from '../lib/assetsStore';
+import { auth, storage } from '../lib/firebase';
+
 import { useNotifications } from './NotificationsProvider';
 import { useProjects } from './ProjectsProvider';
-import { auth, storage } from '../lib/firebase';
-import { ref as storageRef, getDownloadURL, uploadBytes } from 'firebase/storage';
-import { onAuthStateChanged } from 'firebase/auth';
-import { AssetMeta, computeHash, getImageSize, idbAllMeta, idbDelete, idbGet, idbPut, stores } from '../lib/assetsStore';
 
 export type AssetsCtx = {
     list: AssetMeta[];

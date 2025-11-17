@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { CheckCircle2, Cloud, Edit3, FolderOpen, FolderUp, Trash2, UploadCloud, Wrench } from "lucide-react";
+import { CheckCircle2, Cloud, Edit3, FolderDown, FolderOpen, FolderUp, Trash2, UploadCloud, Wrench } from "lucide-react";
 
 export type LocalProject = {
     id: string;
@@ -81,6 +81,7 @@ export default function ProjectsList({
                                 ) : (
                                     <button className="btn btn-ghost text-xs" title="Open file location" onClick={async (e) => { e.stopPropagation(); if (p._filePath) await onOpenFileLocation(p._filePath); }}><FolderOpen size={14} /></button>
                                 )}
+                                <button className="btn btn-ghost text-xs" title="Export project" onClick={(e) => { e.stopPropagation(); onExport(p.id); }}><FolderDown size={14} /></button>
                                 <button className="btn btn-ghost text-xs bg-[color:var(--muted)]/60 hover:bg-[color:var(--muted)]" title="Editor" onClick={(e) => { e.stopPropagation(); onOpenEditor(p.id); }}><Wrench size={14} /></button>
                                 <button className="btn btn-ghost text-xs bg-[color:var(--muted)]/60 hover:bg-[color:var(--muted)]" title="Deploy" onClick={(e) => { e.stopPropagation(); onOpenDeploy(p.id); }}><UploadCloud size={14} /></button>
                                 {userSignedIn && (
@@ -92,7 +93,7 @@ export default function ProjectsList({
                                         <Cloud size={14} className={p._synced ? 'cloud-linked-icon' : ''} />
                                     </button>
                                 )}
-                                <button className="btn btn-ghost text-xs" title="Delete" onClick={async (e) => {
+                                <button className="btn btn-ghost text-xs text-red-500 border border-red-500/40 hover:bg-red-500/10" title="Delete" onClick={async (e) => {
                                     e.stopPropagation();
                                     const confirmDelete = window.confirm(`Delete "${p.name}" from the list${p._filePath ? ' (file can optionally be removed next)' : ''}?`);
                                     if (!confirmDelete) return;

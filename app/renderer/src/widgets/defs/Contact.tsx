@@ -1,7 +1,7 @@
 import React, { useMemo, useRef, useState } from 'react';
-import { useWidget } from '../sdk';
 import { z } from 'zod';
 
+import { useWidget } from '../sdk';
 import type { WidgetDefinition } from '../types';
 
 type LiveMode = 'off' | 'polite' | 'assertive';

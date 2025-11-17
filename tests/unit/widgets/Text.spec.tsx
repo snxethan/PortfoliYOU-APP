@@ -2,8 +2,10 @@ import React from 'react';
 import { render, screen } from '@testing-library/react';
 import { describe, it, expect } from 'vitest';
 
-import TextDef from '../defs/Text';
-import { WidgetContext } from '../sdk';
+import TextDef from '../../../app/renderer/src/widgets/defs/Text';
+import { WidgetContext } from '../../../app/renderer/src/widgets/sdk';
+
+const schema = TextDef.zodSchema!;
 
 function renderWithContext(node: React.ReactNode, ctx?: Partial<React.ContextType<typeof WidgetContext>>) {
     const value = {
@@ -39,13 +41,13 @@ describe('Text widget', () => {
             ariaLabel: 'Heading',
             ariaDescription: 'Desc',
         } as const;
-        const res = TextDef.zodSchema.safeParse(valid);
+        const res = schema.safeParse(valid);
         expect(res.success).toBe(true);
     });
 
     it('rejects empty text via schema', () => {
         const invalid = { text: '' };
-        const res = TextDef.zodSchema.safeParse(invalid);
+        const res = schema.safeParse(invalid);
         expect(res.success).toBe(false);
     });
 

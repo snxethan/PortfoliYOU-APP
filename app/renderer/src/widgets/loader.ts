@@ -25,3 +25,9 @@ WidgetsRegistry.register(
   { type: 'nav-link', label: 'Nav Link', grid: { w: 3, h: 2 }, category: 'Navigation' },
   () => import('./defs/NavLink').then(m => m.default as import('./types').WidgetDefinition<unknown>)
 );
+
+// Media - Carousel
+WidgetsRegistry.register(
+  { type: 'carousel', label: 'Carousel', grid: { w: 6, h: 4 }, category: 'Media' },
+  () => import('./defs/Carousel').then(m => m.default as import('./types').WidgetDefinition<unknown>)
+);

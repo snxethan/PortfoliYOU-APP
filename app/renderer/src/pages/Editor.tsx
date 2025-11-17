@@ -1,4 +1,4 @@
-import { useEffect, useState, lazy, Suspense } from "react";
+import { useCallback, useEffect, useState, lazy, Suspense } from "react";
 import { useNavigate } from "react-router-dom";
 import { ChevronsLeft, ChevronsRight, ChevronDown, ChevronRight } from "lucide-react";
 import { DndContext, PointerSensor, useSensor, useSensors, DragEndEvent, DragStartEvent, rectIntersection, DragOverlay } from "@dnd-kit/core";
@@ -16,9 +16,12 @@ import DragOverlayPreview from "../components/editor/DragOverlayPreview";
 import AssetsPanel from "../components/editor/widgets/AssetsPanel";
 import PreviewPopup from "../components/editor/PreviewPopup";
 import PagePreview from "../components/editor/PagePreview";
+import { usePersistentFlag } from "../hooks/usePersistentFlag";
 
 const COLS = 12;
 const DEFAULT_ROW_H = 32; // px height per row (content area)
+const MIN_ZOOM = 0.5;
+const MAX_ZOOM = 1.75;
 
 export default function EditorPage() {
   const { selectedProject, createPage, deletePage, renamePage, getPageItems, setPageItems, setPageStarter } = useProjects();
@@ -31,11 +34,11 @@ export default function EditorPage() {
     if (!selectedProject) { setCurrentPageId(null); return; }
     try {
       const stored = localStorage.getItem(`py_current_page_${selectedProject.id}`);
-      const first = selectedProject.pageOrder?.[0] || null;
-      setCurrentPageId(stored || first || null);
+      const fallback = selectedProject.pageOrder?.[0] || null;
+      setCurrentPageId(stored || fallback || null);
     } catch {
-      const first = selectedProject.pageOrder?.[0] || null;
-      setCurrentPageId(first || null);
+      const fallback = selectedProject.pageOrder?.[0] || null;
+      setCurrentPageId(fallback || null);
     }
   }, [selectedProject?.id]);
 
@@ -69,7 +72,7 @@ export default function EditorPage() {
     if (!selectedProject || !currentPageId) { setItems([]); return; }
     const loaded = getPageItems(selectedProject.id, currentPageId) as GridItem[];
     setItems(loaded);
-  }, [selectedProject?.id, currentPageId]);
+  }, [selectedProject?.id, currentPageId, getPageItems]);
 
   // Simple undo/redo stacks (keep last 50 operations)
   type ItemsUpdater = (prev: GridItem[]) => GridItem[];
@@ -78,7 +81,7 @@ export default function EditorPage() {
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [redoStack, setRedoStack] = useState<HistoryEntry[]>([]);
 
-  function commitUpdate(label: string, makeNext: ItemsUpdater) {
+  const commitUpdate = useCallback((label: string, makeNext: ItemsUpdater) => {
     setItems(prev => {
       const next = makeNext(prev);
       setHistory(h => {
@@ -102,7 +105,7 @@ export default function EditorPage() {
       }
       return next;
     });
-  }
+  }, [currentPageId, selectedProject?.id, setPageItems]);
 
   function undo() {
     setItems(prev => {
@@ -114,7 +117,7 @@ export default function EditorPage() {
       // Run side-effect for page-level actions (create/delete/rename)
       entry.onUndo?.();
       // notify user of successful undo
-      try { notify({ type: 'info', message: `Undid: ${entry.label}`, title: selectedProject?.name, persistent: false }); } catch { }
+      try { notify({ type: 'info', message: `Undid: ${entry.label}`, title: selectedProject?.name, persistent: false }); } catch { /* noop */ }
       return undone;
     });
   }
@@ -127,7 +130,7 @@ export default function EditorPage() {
       setRedoStack(r => r.slice(0, -1));
       setHistory(h => [...h, entry]);
       entry.onRedo?.();
-      try { notify({ type: 'info', message: `Redid: ${entry.label}`, title: selectedProject?.name, persistent: false }); } catch { }
+      try { notify({ type: 'info', message: `Redid: ${entry.label}`, title: selectedProject?.name, persistent: false }); } catch { /* noop */ }
       return redone;
     });
   }
@@ -139,6 +142,49 @@ export default function EditorPage() {
   const [popupOpen, setPopupOpen] = useState<boolean>(false);
   function openWebpage() { setPopupOpen(true); }
   function closeWebpage() { setPopupOpen(false); }
+
+  const [zoom, setZoom] = useState<number>(() => {
+    try {
+      const stored = Number(localStorage.getItem('py_editor_zoom'));
+      if (!Number.isFinite(stored) || stored <= 0) return 1;
+      return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, stored));
+    } catch {
+      return 1;
+    }
+  });
+  const applyZoom = useCallback((value: number | ((prev: number) => number)) => {
+    setZoom((prev) => {
+      const target = typeof value === 'function' ? value(prev) : value;
+      const clamped = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, Number.isFinite(target) ? target : prev));
+      try { localStorage.setItem('py_editor_zoom', String(clamped)); } catch { /* ignore */ }
+      return clamped;
+    });
+  }, []);
+  const zoomIn = useCallback(() => applyZoom((prev) => prev + 0.1), [applyZoom]);
+  const zoomOut = useCallback(() => applyZoom((prev) => prev - 0.1), [applyZoom]);
+  const resetZoom = useCallback(() => applyZoom(1), [applyZoom]);
+  useEffect(() => {
+    function handleZoomHotkeys(e: KeyboardEvent) {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      if (e.shiftKey) return; // allow Ctrl+Shift combos to control global/app zoom
+      const key = e.key;
+      if (key === '=' || key === '+') {
+        e.preventDefault();
+        e.stopPropagation();
+        zoomIn();
+      } else if (key === '-' || key === '_') {
+        e.preventDefault();
+        e.stopPropagation();
+        zoomOut();
+      } else if (key === '0' || key === ')') {
+        e.preventDefault();
+        e.stopPropagation();
+        resetZoom();
+      }
+    }
+    window.addEventListener('keydown', handleZoomHotkeys, true);
+    return () => window.removeEventListener('keydown', handleZoomHotkeys, true);
+  }, [zoomIn, zoomOut, resetZoom]);
 
   const [pageWidth, setPageWidth] = useState<number>(() => {
     try { return Number(localStorage.getItem('py_editor_page_w')) || 1300; } catch { return 1300; }
@@ -162,52 +208,30 @@ export default function EditorPage() {
     applyPageWidth(390);
   }
   // Collapsible widgets palette
-  const [paletteCollapsed, setPaletteCollapsed] = useState<boolean>(() => {
-    try { return localStorage.getItem('py_palette_collapsed') === '1'; } catch { return false; }
-  });
+  const [paletteCollapsed, setPaletteCollapsed] = usePersistentFlag('py_palette_collapsed');
   function togglePalette() {
-    setPaletteCollapsed(prev => {
-      const next = !prev;
-      try { localStorage.setItem('py_palette_collapsed', next ? '1' : '0'); } catch { /* ignore */ }
-      return next;
-    });
+    setPaletteCollapsed(prev => !prev);
   }
   // Grid overlay toggle
-  const [showGrid, setShowGrid] = useState<boolean>(() => {
-    try { return localStorage.getItem('py_show_grid') === '1'; } catch { return false; }
-  });
+  const [showGrid, setShowGrid] = usePersistentFlag('py_show_grid');
   function toggleGrid() {
-    setShowGrid(prev => {
-      const next = !prev;
-      try { localStorage.setItem('py_show_grid', next ? '1' : '0'); } catch { /* ignore */ }
-      return next;
-    });
+    setShowGrid(prev => !prev);
   }
 
   // Preview mode toggle
-  const [previewMode, setPreviewMode] = useState<boolean>(() => {
-    try { return localStorage.getItem('py_preview_mode') === '1'; } catch { return false; }
-  });
+  const [previewMode, setPreviewMode] = usePersistentFlag('py_preview_mode');
   function togglePreviewMode() {
-    setPreviewMode(prev => {
-      const next = !prev;
-      try { localStorage.setItem('py_preview_mode', next ? '1' : '0'); } catch { /* ignore */ }
-      return next;
-    });
+    setPreviewMode(prev => !prev);
   }
 
   // Collapsible sections inside the sidebar
-  const [widgetsOpen, setWidgetsOpen] = useState<boolean>(() => {
-    try { return (localStorage.getItem('py_widgets_section_open') ?? '1') === '1'; } catch { return true; }
-  });
-  const [assetsOpen, setAssetsOpen] = useState<boolean>(() => {
-    try { return (localStorage.getItem('py_assets_section_open') ?? '1') === '1'; } catch { return true; }
-  });
+  const [widgetsOpen, setWidgetsOpen] = usePersistentFlag('py_widgets_section_open', true);
+  const [assetsOpen, setAssetsOpen] = usePersistentFlag('py_assets_section_open', true);
   function toggleWidgetsOpen() {
-    setWidgetsOpen(prev => { const n = !prev; try { localStorage.setItem('py_widgets_section_open', n ? '1' : '0'); } catch { } return n; });
+    setWidgetsOpen(prev => !prev);
   }
   function toggleAssetsOpen() {
-    setAssetsOpen(prev => { const n = !prev; try { localStorage.setItem('py_assets_section_open', n ? '1' : '0'); } catch { } return n; });
+    setAssetsOpen(prev => !prev);
   }
 
   // Page viewport height (applies to canvas and preview)
@@ -328,6 +352,21 @@ export default function EditorPage() {
     setEditingId(null);
   }
 
+  useEffect(() => {
+    setHistory([]);
+    setRedoStack([]);
+    setSelectedId(null);
+    setClipboard(null);
+    setEditingId(null);
+  }, [selectedProject?.id, currentPageId]);
+
+  useEffect(() => {
+    if (!editingId) return;
+    if (!items.some(it => it.id === editingId)) {
+      setEditingId(null);
+    }
+  }, [items, editingId]);
+
   // Keyboard add fallback from palette tiles
   useEffect(() => {
     function onAddWidget(e: Event) {
@@ -345,7 +384,7 @@ export default function EditorPage() {
     }
     window.addEventListener('py:addWidget', onAddWidget as EventListener);
     return () => window.removeEventListener('py:addWidget', onAddWidget as EventListener);
-  }, []);
+  }, [commitUpdate]);
 
   // Helper to normalize layering to 0..n-1 in ascending z order
   function normalizeZ(list: GridItem[]): GridItem[] {
@@ -434,6 +473,10 @@ export default function EditorPage() {
           pageHeight={pageHeight}
           heightMode={heightMode}
           setHeightMode={applyHeightMode}
+          zoom={zoom}
+          onZoomIn={zoomIn}
+          onZoomOut={zoomOut}
+          onResetZoom={resetZoom}
           canUndo={canUndo}
           canRedo={canRedo}
           undo={undo}
@@ -492,14 +535,6 @@ export default function EditorPage() {
                 setRedoStack([]);
               }
             }}
-            onRenameCurrentPage={() => {
-              if (!selectedProject || !currentPageId) return;
-              try { notify({ type: 'info', message: 'Rename handler invoked', title: selectedProject?.name, persistent: false }); } catch { /* ignore */ }
-              const oldTitle = selectedProject.pages[currentPageId]?.title || 'Untitled';
-              setRenameOldTitle(oldTitle);
-              setRenameInitialStarter(Boolean(selectedProject.pages[currentPageId]?.starter));
-              setRenameModalOpen(true);
-            }}
             onRenameInline={(newName: string) => {
               if (!selectedProject || !currentPageId) return;
               const oldTitle = selectedProject.pages[currentPageId]?.title || 'Untitled';
@@ -518,8 +553,8 @@ export default function EditorPage() {
               });
               setRedoStack([]);
               renamePage(selectedProject.id, currentPageId, trimmed);
-              try { localStorage.setItem(`py_current_page_${selectedProject.id}`, currentPageId); } catch { }
-              try { setItems(getPageItems(selectedProject.id, currentPageId) as GridItem[]); } catch { }
+              try { localStorage.setItem(`py_current_page_${selectedProject.id}`, currentPageId); } catch { /* ignore */ }
+              try { setItems(getPageItems(selectedProject.id, currentPageId) as GridItem[]); } catch { /* ignore */ }
             }}
             onOpenSettings={() => {
               if (!selectedProject || !currentPageId) return;
@@ -599,13 +634,17 @@ export default function EditorPage() {
               const relY = centerY - overRect.top;
 
               // Compute grid coordinates using same math, then quantize to micro-step based on gap
-              const colW = Math.floor(overRect.width / COLS);
-              const baseX = colW + gap;
-              const baseY = colW + gap; // square grid: row unit equals column unit
+              const effectiveZoom = zoom || 1;
+              const colW = Math.floor(pageWidth / COLS);
+              const baseUnit = Math.max(1, colW + gap);
+              const baseX = baseUnit;
+              const baseY = baseUnit; // square grid: row unit equals column unit
               const w = data.w ?? 4;
               const h = data.h ?? 4;
-              let x = Math.floor(relX / baseX);
-              let y = Math.floor(relY / baseY);
+              const adjX = relX / effectiveZoom;
+              const adjY = relY / effectiveZoom;
+              let x = Math.floor(adjX / baseX);
+              let y = Math.floor(adjY / baseY);
               x = Math.max(0, Math.min(x, COLS - w));
               y = Math.max(0, y);
               const id = typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : Math.random().toString(36).slice(2, 9);
@@ -689,6 +728,10 @@ export default function EditorPage() {
                 try { localStorage.setItem(`py_current_page_${selectedProject.id}`, pid); } catch { /* ignore */ }
               }}
               currentPageId={currentPageId || undefined}
+              zoom={zoom}
+              minZoom={MIN_ZOOM}
+              maxZoom={MAX_ZOOM}
+              onZoomChange={applyZoom}
             />
 
             {/* Widget Sidebar (collapsible) */}
