@@ -1,6 +1,6 @@
 import { useDraggable } from '@dnd-kit/core';
 import type { LucideIcon } from 'lucide-react';
-import { Boxes, Search, ChevronDown, ChevronRight, Image as ImageIcon, Mail, Type as TypeIcon, Compass, GalleryHorizontalEnd, Layers, Frame, LayoutGrid, AppWindow, Play, Link2 } from 'lucide-react';
+import { Boxes, Search, ChevronDown, ChevronRight, Image as ImageIcon, Mail, Type as TypeIcon, Compass, GalleryHorizontalEnd, Layers, Frame, LayoutGrid, AppWindow, Play, Link2, Github } from 'lucide-react';
 import React, { memo, useEffect, useMemo, useState } from 'react';
 
 import { WidgetsRegistry } from '../../../widgets/registry';
@@ -28,12 +28,13 @@ const previewConfigs: Record<string, PreviewConfig> = {
   video: { icon: Play, label: 'Video' },
   link: { icon: Link2, label: 'Link' },
   contact: { icon: Mail, label: 'Contact' },
-  'nav-link': { icon: Compass, label: 'Nav Link' },
+  'nav-link': { icon: Compass, label: 'Page Navigation' },
   project: { icon: LayoutGrid, label: 'Project' },
   carousel: { icon: GalleryHorizontalEnd, label: 'Carousel' },
   'portfolio-island': { icon: Layers, label: 'Island' },
   embed: { icon: Frame, label: 'Embed' },
   'preview-popup': { icon: AppWindow, label: 'Popup' },
+  'github-repos': { icon: Github, label: 'GitHub Repos' },
 };
 
 function renderPreview(type: string) {
@@ -99,7 +100,14 @@ function WidgetsPalette() {
     const q = query.trim().toLowerCase();
     const items = metas.filter(m => {
       if (!q) return true;
-      return m.label.toLowerCase().includes(q) || m.type.toLowerCase().includes(q) || (m.category?.toLowerCase().includes(q) ?? false);
+      const tokens = [
+        m.label,
+        m.type,
+        m.category ?? '',
+        ...(m.tags ?? []),
+        ...(m.keywords ?? []),
+      ].join(' ').toLowerCase();
+      return tokens.includes(q);
     });
     const map = new Map<string, typeof items>();
     for (const m of items) {

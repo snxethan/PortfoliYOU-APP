@@ -37,7 +37,9 @@ export type WidgetMeta = {
   type: string;
   label: string;
   grid?: { w: number; h: number };
-  category?: string; // optional grouping for palette UI
+  category?: string; // optional primary grouping for palette UI
+  tags?: string[]; // additional category tags to improve filtering
+  keywords?: string[]; // search keywords surfaced by the palette search
 };
 
 export type WidgetLoader = () => Promise<WidgetDefinition<unknown> | { default: WidgetDefinition<unknown> }>;

@@ -2,6 +2,7 @@ import React from 'react';
 import { z } from 'zod';
 
 import type { WidgetDefinition } from '../types';
+import { normalizeExternalLinkUrl } from '../utils/linkUrl';
 
 type LinkVariant = 'text' | 'button' | 'card';
 type FontChoice = 'system' | 'serif' | 'mono';
@@ -36,20 +37,7 @@ const FONT_STACKS: Record<FontChoice, string> = {
 };
 
 function sanitizeUrl(value?: string): string {
-    const trimmed = (value || '').trim();
-    if (!trimmed) return '';
-    try {
-        const parsed = new URL(trimmed);
-        if (parsed.protocol === 'http:' || parsed.protocol === 'https:') return parsed.toString();
-    } catch {
-        try {
-            const attempt = new URL(`https://${trimmed}`);
-            if (attempt.protocol === 'http:' || attempt.protocol === 'https:') return attempt.toString();
-        } catch {
-            return '';
-        }
-    }
-    return '';
+    return normalizeExternalLinkUrl(value);
 }
 
 function sanitizeIcon(value?: string): string | undefined {
@@ -224,7 +212,7 @@ const def: WidgetDefinition<LinkWidgetProps> = {
     render: (props) => <LinkView {...props} />,
     zodSchema: z.object({
         url: z.string().min(1, 'URL is required').transform((value) => sanitizeUrl(value)).refine((value) => Boolean(value), {
-            message: 'Enter a valid https:// link',
+            message: 'Enter a valid http(s) link',
         }),
         label: z.string().min(1, 'Label is required').max(80, 'Label is too long'),
         variant: z.enum(['text', 'button', 'card']).optional(),

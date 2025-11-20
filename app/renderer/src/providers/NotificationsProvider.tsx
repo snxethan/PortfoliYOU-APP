@@ -19,6 +19,7 @@ export type NotificationItem = {
   createdAt: string; // ISO
   persistent: boolean; // true => stays until dismissed
   count?: number; // dedupe counter
+  bootstrap?: boolean; // true when restored from storage on launch
 };
 
 export type NotifyEventDetail = {
@@ -32,11 +33,22 @@ export type NotifyEventDetail = {
 
 const STORAGE_KEY = "py.notifications";
 
+type StoredNotification = Omit<NotificationItem, "bootstrap">;
+
 function loadStored(): NotificationItem[] {
-  try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]"); } catch { return []; }
+  try {
+    const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]") as StoredNotification[];
+    if (!Array.isArray(stored)) return [];
+    return stored.map(item => ({ ...item, bootstrap: true }));
+  } catch { return []; }
 }
 function saveStored(list: NotificationItem[]) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
+  const serialized: StoredNotification[] = list.map(item => {
+    const { bootstrap, ...rest } = item;
+    void bootstrap;
+    return rest;
+  });
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(serialized));
 }
 
 export type NotificationsCtx = {
@@ -81,6 +93,7 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
       ctaLabel: n.ctaLabel,
       persistent,
       createdAt: now,
+      bootstrap: false,
     };
     setItems((curr) => [item, ...curr].slice(0, 50));
 

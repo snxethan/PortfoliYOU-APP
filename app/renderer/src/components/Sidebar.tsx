@@ -37,44 +37,46 @@ export default function Sidebar() {
     window.addEventListener('py:highlight-account', onPulse);
     return () => window.removeEventListener('py:highlight-account', onPulse);
   }, []);
+  const zoomViewport = 'calc(100vh / var(--py-app-zoom, 1))';
   return (
-    <aside className="h-screen sticky top-0 p-3 space-y-2 border-r border-[color:var(--border)] bg-[color:var(--muted)] flex flex-col overflow-hidden"
-      style={{ width: 'var(--sidebar-w,15rem)' }}
+    <aside
+      className="self-stretch border-r border-[color:var(--border)] bg-[color:var(--muted)] flex flex-col"
+      style={{ width: 'var(--sidebar-w,15rem)', minHeight: zoomViewport }}
     >
-      <div className="flex items-center justify-between">
-        {!collapsed && (
-          <div className="px-2 py-1 text-xs uppercase tracking-wide text-[color:var(--fg-muted)]">DASHBOARD</div>
-        )}
-        <div className="flex items-center gap-1">
-          {!collapsed && (
-            <button
-              className="btn btn-ghost btn-xs p-1"
-              onClick={() => setTheme(t => t === 'dark' ? 'light' : 'dark')}
-              title={theme === 'dark' ? 'Switch to Light mode' : 'Switch to Dark mode'}
-              aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
-            >
-              {theme === 'dark' ? <Sun size={14} /> : <Moon size={14} />}
-            </button>
-          )}
-          <button
-            className="btn btn-ghost btn-xs p-1"
-            onClick={() => setCollapsed(v => !v)}
-            title={collapsed ? 'Expand' : 'Collapse'}
-            aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-          >
-            {collapsed ? <ChevronRight size={14} /> : <ChevronLeft size={14} />}
-          </button>
-        </div>
-      </div>
+      <div className="sticky top-0 flex flex-col" style={{ minHeight: zoomViewport }}>
+        <div className="flex-1 flex flex-col gap-2 overflow-y-auto p-3 pr-4" style={{ minHeight: 0 }}>
+          <div className="flex items-center justify-between">
+            {!collapsed && (
+              <div className="px-2 py-1 text-xs uppercase tracking-wide text-[color:var(--fg-muted)]">DASHBOARD</div>
+            )}
+            <div className="flex items-center gap-1">
+              {!collapsed && (
+                <button
+                  className="btn btn-ghost btn-xs p-1"
+                  onClick={() => setTheme(t => t === 'dark' ? 'light' : 'dark')}
+                  title={theme === 'dark' ? 'Switch to Light mode' : 'Switch to Dark mode'}
+                  aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+                >
+                  {theme === 'dark' ? <Sun size={14} /> : <Moon size={14} />}
+                </button>
+              )}
+              <button
+                className="btn btn-ghost btn-xs p-1"
+                onClick={() => setCollapsed(v => !v)}
+                title={collapsed ? 'Expand' : 'Collapse'}
+                aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+              >
+                {collapsed ? <ChevronRight size={14} /> : <ChevronLeft size={14} />}
+              </button>
+            </div>
+          </div>
 
-      {!collapsed && (
-        <NavLink to="/" end className={({ isActive }) => `${base} ${isActive ? 'nav-active' : ''}`}>
-          <Home size={16} /> Home
-        </NavLink>
-      )}
-      {selectedProjectId && (
-        <>
           {!collapsed && (
+            <NavLink to="/" end className={({ isActive }) => `${base} ${isActive ? 'nav-active' : ''}`}>
+              <Home size={16} /> Home
+            </NavLink>
+          )}
+          {selectedProjectId && !collapsed && (
             <>
               <NavLink to="/editor" className={({ isActive }) => `${base} ${isActive ? 'nav-active' : ''}`} data-testid="nav-editor">
                 <Wrench size={16} /> Editor
@@ -84,11 +86,11 @@ export default function Sidebar() {
               </NavLink>
             </>
           )}
-        </>
-      )}
+        </div>
 
-      <div className={`mt-auto pt-4 border-t border-[color:var(--border)] ${pulseAccount ? 'highlight-pulse' : ''}`}>
-        {!collapsed && <SignInCard />}
+        <div className={`flex-shrink-0 p-3 pt-4 border-t border-[color:var(--border)] ${pulseAccount ? 'highlight-pulse' : ''}`}>
+          {!collapsed && <SignInCard />}
+        </div>
       </div>
     </aside>
   );

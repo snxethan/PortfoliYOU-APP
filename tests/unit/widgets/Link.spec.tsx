@@ -17,10 +17,15 @@ describe('Link widget', () => {
         expect(result.success).toBe(false);
     });
 
+    it('rejects javascript protocol attempts', () => {
+        const result = schema.safeParse({ url: 'javascript:alert(1)', label: 'Unsafe' });
+        expect(result.success).toBe(false);
+    });
+
     it('accepts a trimmed url and renders anchor with target blank', () => {
         const parsed = schema.parse({ url: 'example.com', label: 'Docs' });
         expect(parsed.url).toBe('https://example.com/');
-        const vnode = LinkDef.render({ ...parsed, variant: 'text' });
+        const vnode = LinkDef.render({ url: parsed.url, label: parsed.label, variant: 'text' });
         const { container } = render(<>{vnode}</>);
         const anchor = container.querySelector('a');
         expect(anchor).toBeTruthy();

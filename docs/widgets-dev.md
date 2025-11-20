@@ -66,7 +66,14 @@ Edit `app/renderer/src/widgets/loader.ts`:
 import { WidgetsRegistry } from './registry';
 
 WidgetsRegistry.register(
-  { type: 'badge', label: 'Badge', grid: { w: 2, h: 2 }, category: 'Content' },
+  {
+    type: 'badge',
+    label: 'Badge',
+    grid: { w: 2, h: 2 },
+    category: 'Content',
+    tags: ['content', 'badge'],
+    keywords: ['label', 'chip'],
+  },
   () => import('./defs/Badge').then(m => m.default)
 );
 ```
@@ -105,7 +112,8 @@ npm run dev
 
 - `WidgetsRegistry.register(meta, loader)` stores lightweight metadata for the palette, and a lazy loader for the full definition.
 - Metadata shape:
-  - `type`, `label`, optional `grid`, optional `category`.
+  - `type`, `label`, optional `grid`, optional `category`, optional `tags`, optional `keywords`.
+- Palette search matches all provided metadata, so include short, human-readable tags and keywords.
 
 ## Using SDK Helpers (Optional)
 

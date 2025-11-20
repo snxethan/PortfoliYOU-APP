@@ -13,11 +13,20 @@ This folder provides a small SDK to define and develop widgets for the editor.
 
 ```ts
 WidgetsRegistry.register(
-  { type: 'text', label: 'Text Block', grid: { w: 4, h: 3 } },
+  {
+    type: 'text',
+    label: 'Text Block',
+    grid: { w: 4, h: 3 },
+    category: 'Content',
+    tags: ['content', 'copy'],
+    keywords: ['paragraph', 'body'],
+  },
   () => import('./defs/Text').then(m => m.default)
 );
 ```
 
+- Metadata shape: `type`, `label`, optional `grid`, optional `category`, optional `tags`, optional `keywords`.
+- Palette search considers all of the above metadata, so keep tags/keywords human-readable.
 - The palette lists `WidgetsRegistry.list()` metadata and does not load components until rendering.
 
 ## SDK utilities

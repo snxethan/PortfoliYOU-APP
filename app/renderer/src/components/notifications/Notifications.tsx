@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { AlertTriangle, CheckCircle2, Info, X, XCircle, AlertOctagon, ArrowUpCircle } from "lucide-react";
 
@@ -34,10 +34,29 @@ export function NotificationStack() {
   const { notifications, dismiss } = useNotifications();
   const [hidden, setHidden] = useState<Record<string, boolean>>({});
   const timers = useRef<Record<string, number>>({});
+  const summaryTimer = useRef<number | null>(null);
+  const summaryShownRef = useRef(false);
+  const [summary, setSummary] = useState<{ count: number; visible: boolean }>({ count: 0, visible: false });
+
+  const dismissSummary = useCallback(() => {
+    setSummary(prev => (prev.visible ? { ...prev, visible: false } : prev));
+    if (summaryTimer.current) {
+      window.clearTimeout(summaryTimer.current);
+      summaryTimer.current = null;
+    }
+  }, []);
+
+  useEffect(() => () => {
+    if (summaryTimer.current) {
+      window.clearTimeout(summaryTimer.current);
+      summaryTimer.current = null;
+    }
+  }, []);
 
   // Auto-hide toasts after a short duration without removing them from storage.
   useEffect(() => {
-    for (const n of notifications) {
+    const toastable = notifications.filter(n => !n.bootstrap);
+    for (const n of toastable) {
       if (hidden[n.id]) continue; // already hidden
       if (timers.current[n.id]) continue; // timer already set
       const t = window.setTimeout(() => {
@@ -49,17 +68,47 @@ export function NotificationStack() {
     }
     // Clean up timers for removed notifications
     for (const id of Object.keys(timers.current)) {
-      if (!notifications.find(n => n.id === id)) {
+      if (!toastable.find(n => n.id === id)) {
         window.clearTimeout(timers.current[id]);
         delete timers.current[id];
       }
     }
   }, [notifications, hidden]);
 
-  const visible = useMemo(() => notifications.filter(n => !hidden[n.id]), [notifications, hidden]);
-  if (!visible.length) return null;
+  const bootstrapCount = useMemo(() => notifications.filter(n => n.bootstrap).length, [notifications]);
+  useEffect(() => {
+    if (summaryShownRef.current) return;
+    if (!bootstrapCount) return;
+    summaryShownRef.current = true;
+    setSummary({ count: bootstrapCount, visible: true });
+    if (summaryTimer.current) window.clearTimeout(summaryTimer.current);
+    summaryTimer.current = window.setTimeout(() => dismissSummary(), 6000);
+  }, [bootstrapCount, dismissSummary]);
+
+  const visible = useMemo(
+    () => notifications.filter(n => !n.bootstrap && !hidden[n.id]),
+    [notifications, hidden]
+  );
+
+  if (!visible.length && !summary.visible) return null;
   return (
     <div className="fixed bottom-2 right-2 z-[40000] flex flex-col gap-2 max-w-sm pointer-events-none">
+      {summary.visible && summary.count > 0 ? (
+        <div className="surface py-fade-in border border-[color:var(--primary)] pointer-events-auto shadow-lg">
+          <div className="p-3 flex items-start gap-3">
+            <div className="mt-0.5">
+              <Info size={16} className="text-sky-400" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="font-semibold text-sm mb-0.5">Unread notifications</div>
+              <div className="text-sm whitespace-pre-wrap break-words">You have {summary.count} unread {summary.count === 1 ? 'notification' : 'notifications'}.</div>
+            </div>
+            <button className="btn btn-ghost btn-xs" aria-label="Dismiss unread summary" onClick={dismissSummary}>
+              <X size={14} />
+            </button>
+          </div>
+        </div>
+      ) : null}
       {visible.map(n => {
         const Wrapper: React.FC<{ children: React.ReactNode }> = ({ children }) => {
           if (n.href) {

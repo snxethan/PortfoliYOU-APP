@@ -21,6 +21,16 @@ import "./widgets/loader";
 export default function App() {
   const { loading } = useAuth();
 
+  useEffect(() => {
+    if (loading) return;
+    document.body?.classList.remove('py-preload');
+    const splash = document.getElementById('py-loader');
+    if (!splash) return;
+    splash.classList.add('py-loader--hidden');
+    const timer = window.setTimeout(() => splash.remove(), 450);
+    return () => window.clearTimeout(timer);
+  }, [loading]);
+
   // Show spinner while checking initial auth state
   if (loading) {
     return (

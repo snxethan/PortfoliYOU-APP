@@ -94,7 +94,7 @@ type NavLinkProps = {
 
 const def: WidgetDefinition<NavLinkProps> = {
     type: 'nav-link',
-    label: 'Nav Link',
+    label: 'Page Navigation',
     defaultProps: {
         label: 'Go to page',
         targetPageId: 'page_home',

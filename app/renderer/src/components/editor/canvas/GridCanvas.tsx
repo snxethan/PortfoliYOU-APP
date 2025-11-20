@@ -39,7 +39,6 @@ export default function GridCanvas({ pageWidth, zoom, cols, gap, rowH, items, on
   const metrics: GridMetrics = useMemo(() => ({ colW: logicalColW, rowH: logicalRowH, gap, cols }), [logicalColW, logicalRowH, gap, cols]);
 
   const gapPx = gap * zoomFactor;
-  const colPx = logicalColW * zoomFactor;
   const rowPx = logicalRowH * zoomFactor;
   const unitX = (logicalColW + gap) * zoomFactor;
   const unitY = (logicalRowH + gap) * zoomFactor;

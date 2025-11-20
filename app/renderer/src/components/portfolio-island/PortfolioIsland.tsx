@@ -1,10 +1,12 @@
 import { useNavigate } from "react-router-dom";
 import { useState } from "react";
-import { Cloud, UploadCloud, Wrench, X, Save, FolderUp, FolderOpen, Edit3, Pin, PinOff } from "lucide-react";
+import { Cloud, UploadCloud, Wrench, X, Save, FolderOpen, Edit3, Pin, PinOff } from "lucide-react";
 
+import { useAuth } from "../../providers/AuthProvider";
 import { useProjects } from "../../providers/ProjectsProvider";
 
 export default function PortfolioIsland() {
+  const { user } = useAuth();
   const { selectedProject, selectedProjectId, saving, lastSavedAt, saveProject, clearSelection, renameProject, autosaveEnabled, setAutosaveEnabled } = useProjects();
   const navigate = useNavigate();
   const [editingTitle, setEditingTitle] = useState(false);
@@ -110,23 +112,6 @@ export default function PortfolioIsland() {
                 <span className="ml-1 hidden sm:inline">{pinned ? 'Pinned' : 'Pin'}</span>
               </button>
               <button
-                className={`btn btn-ghost ${autosaveEnabled ? 'active' : ''}`}
-                title={autosaveEnabled ? 'Autosave enabled' : 'Autosave disabled'}
-                aria-pressed={!!autosaveEnabled}
-                aria-label={autosaveEnabled ? 'Autosave enabled' : 'Autosave disabled'}
-                onClick={() => setAutosaveEnabled(!autosaveEnabled)}
-              >
-                <span className="relative inline-flex items-center">
-                  <Save size={16} />
-                  {!autosaveEnabled && (
-                    <span className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                      <span className="w-4/5 h-[2px] bg-current rotate-45 origin-center"></span>
-                    </span>
-                  )}
-                </span>
-                <span className="ml-1 hidden sm:inline">Autosave</span>
-              </button>
-              <button
                 className="btn btn-ghost"
                 disabled={!selectedProjectId}
                 title="Close current portfolio"
@@ -157,17 +142,19 @@ export default function PortfolioIsland() {
             >
               <UploadCloud size={16} className="mr-1" /> Deploy
             </button>
-            <button
-              className={`btn btn-ghost ${selectedProject?._synced ? 'cloud-linked' : ''}`}
-              disabled={!selectedProjectId}
-              onClick={() => {
-                if (!selectedProjectId) return;
-                window.dispatchEvent(new CustomEvent('py:openCloudSettings', { detail: { projectId: selectedProjectId } }));
-              }}
-              title="Manage Cloud settings"
-            >
-              <Cloud size={16} className="mr-1" /> Cloud
-            </button>
+            {user && (
+              <button
+                className={`btn btn-ghost ${selectedProject?._synced ? 'cloud-linked' : ''}`}
+                disabled={!selectedProjectId}
+                onClick={() => {
+                  if (!selectedProjectId) return;
+                  window.dispatchEvent(new CustomEvent('py:openCloudSettings', { detail: { projectId: selectedProjectId } }));
+                }}
+                title="Manage Cloud settings"
+              >
+                <Cloud size={16} className="mr-1" /> Cloud
+              </button>
+            )}
           </div>
 
           {/* Right quick actions (Open / Save / Save As) */}
@@ -193,11 +180,21 @@ export default function PortfolioIsland() {
                 <Save size={16} className="mr-1" /> Save
               </button>
               <button
-                className="btn btn-ghost"
-                onClick={() => selectedProjectId && saveProject(selectedProjectId, { saveAs: true })}
-                title="Save As… (Ctrl+Shift+S)"
+                className={`btn btn-ghost ${autosaveEnabled ? 'active' : ''}`}
+                title={autosaveEnabled ? 'Autosave enabled' : 'Autosave disabled'}
+                aria-pressed={!!autosaveEnabled}
+                aria-label={autosaveEnabled ? 'Autosave enabled' : 'Autosave disabled'}
+                onClick={() => setAutosaveEnabled(!autosaveEnabled)}
               >
-                <FolderUp size={16} className="mr-1" /> Save As
+                <span className="relative inline-flex items-center">
+                  <Save size={16} className="mr-1" />
+                  {!autosaveEnabled && (
+                    <span className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                      <span className="w-4/5 h-[2px] bg-current rotate-45 origin-center"></span>
+                    </span>
+                  )}
+                </span>
+                <span className="hidden sm:inline">Autosave</span>
               </button>
             </div>
           ) : <div />}

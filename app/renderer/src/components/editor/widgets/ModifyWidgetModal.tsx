@@ -2,12 +2,16 @@ import React, { useEffect, useMemo, useState } from "react";
 import { Layers, Pin, PinOff, Lock, Unlock, ChevronsUp, ChevronsDown, ChevronUp, ChevronDown, X, Trash2 } from "lucide-react";
 import { z } from "zod";
 
-import { WidgetsRegistry } from "../../../widgets/registry";
-import type { GridItem } from "../canvas/DraggableItem";
 import { useAssets } from "../../../providers/AssetsProvider";
+import type { AssetsCtx } from "../../../providers/AssetsProvider";
 import { useNotifications } from "../../../providers/NotificationsProvider";
 import { useProjects } from "../../../providers/ProjectsProvider";
+import { WidgetsRegistry } from "../../../widgets/registry";
 import type { CarouselItem } from "../../../widgets/defs/Carousel";
+import { ALLOWED_HTTP_SCHEME_LABEL } from "../../../widgets/utils/linkUrl";
+import type { GridItem } from "../canvas/DraggableItem";
+
+import LinkPreviewPanel from "./LinkPreviewPanel";
 
 type CarouselEditorItem = {
     id: string;
@@ -69,6 +73,77 @@ function serializeCarouselEditorItems(items: CarouselEditorItem[]): CarouselItem
 
 const ENTER_SUBMIT_BLOCKED_TYPES = new Set(['checkbox', 'radio', 'range', 'color', 'date', 'datetime-local', 'month', 'week', 'time', 'file']);
 const VIDEO_APPEARANCE_FIELDS = new Set(['shape', 'borderWidth', 'borderRadius', 'borderColor', 'borderStyle']);
+const URL_FIELD_HINTS = ['url', 'link', 'href', 'website'];
+const TEXTAREA_FIELD_HINTS = ['description', 'content', 'body', 'text', 'bio', 'summary'];
+const IMAGE_FIELD_HINTS = ['image', 'img', 'photo', 'poster', 'thumb', 'thumbnail', 'cover', 'logo', 'avatar'];
+const VIDEO_FIELD_HINTS = ['video', 'clip', 'movie', 'reel', 'media'];
+const GENERIC_ASSET_HINTS = ['asset', 'src', 'source', 'file'];
+const URL_PROTOCOL_SUGGESTIONS = ['https://', 'http://', 'mailto:', 'tel:'] as const;
+
+type AssetKind = 'image' | 'video' | 'media';
+
+function hasUrlValidation(field: z.ZodTypeAny) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const def: any = (field as unknown as { _def?: unknown })._def;
+    const checks: Array<{ kind?: string }> = def?.checks ?? [];
+    return checks.some(check => check.kind === 'url');
+}
+
+function isLikelyUrlField(key: string, field: z.ZodTypeAny) {
+    const lower = key.toLowerCase();
+    if (!(field instanceof z.ZodString)) return false;
+    if (hasUrlValidation(field)) return true;
+    return URL_FIELD_HINTS.some(hint => lower.includes(hint));
+}
+
+function inferAssetKind(defType: string | null, key: string): AssetKind | null {
+    const lower = key.toLowerCase();
+    const matches = (hint: string) => lower === hint || lower.endsWith(hint) || lower.includes(`${hint}url`) || lower.includes(`${hint}src`);
+    if (IMAGE_FIELD_HINTS.some(matches)) return 'image';
+    if (VIDEO_FIELD_HINTS.some(matches)) return 'video';
+    if (GENERIC_ASSET_HINTS.some(matches)) return 'media';
+    if (lower === 'poster' || lower.endsWith('poster')) return 'image';
+    if (lower === 'thumbnail' || lower.endsWith('thumbnail')) return 'image';
+    if (lower === 'src') {
+        if (defType === 'image' || defType === 'project' || defType === 'carousel') return 'image';
+        if (defType === 'video') return 'video';
+    }
+    return null;
+}
+
+function deriveNumberBounds(field: z.ZodNumber) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const def: any = (field as unknown as { _def?: unknown })._def;
+    const checks: Array<{ kind: string; value?: number }> = def?.checks ?? [];
+    let min: number | undefined;
+    let max: number | undefined;
+    let step: number | undefined;
+    let isInt = false;
+    for (const check of checks) {
+        if (check.kind === 'min' && typeof check.value === 'number') min = check.value;
+        if (check.kind === 'max' && typeof check.value === 'number') max = check.value;
+        if (check.kind === 'int') isInt = true;
+    }
+    if (isInt) step = 1;
+    return { min, max, step };
+}
+
+function shouldUseTextareaField(defType: string | null, key: string) {
+    const lower = key.toLowerCase();
+    if (TEXTAREA_FIELD_HINTS.some(h => lower.includes(h))) return true;
+    if (defType === 'text' && lower === 'text') return true;
+    return false;
+}
+
+function inferStringInputType(field: z.ZodTypeAny): 'text' | 'email' | 'url' {
+    if (!(field instanceof z.ZodString)) return 'text';
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const def: any = (field as unknown as { _def?: unknown })._def;
+    const checks: Array<{ kind?: string }> = def?.checks ?? [];
+    if (checks.some(check => check.kind === 'email')) return 'email';
+    if (checks.some(check => check.kind === 'url')) return 'url';
+    return 'text';
+}
 
 export default function ModifyWidgetModal({
     item,
@@ -322,6 +397,8 @@ export default function ModifyWidgetModal({
 
     const locked = !!item.locked;
     const pinned = !!item.pinned;
+    const linkRawUrl = defType === 'link' ? (typeof formValues.url === 'string' ? formValues.url : '') : '';
+    const linkFieldError = defType === 'link' ? (formErrors.url || null) : null;
 
     function validateField(key: string, value: unknown) {
         if (!zodSchema) {
@@ -833,12 +910,19 @@ export default function ModifyWidgetModal({
                                                 const field = schema as z.ZodTypeAny;
                                                 if (isVideo && (key === 'src' || key === 'poster' || VIDEO_APPEARANCE_FIELDS.has(key))) return null;
                                                 const isOptional = field instanceof z.ZodOptional;
-                                                // Unwrap optional
                                                 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                                                const baseField = isOptional ? (field._def as any).innerType as z.ZodTypeAny : field;
-                                                const value = (formValues[key] as string | number | boolean | undefined) ?? '';
+                                                let baseField: z.ZodTypeAny = isOptional ? (field._def as any).innerType as z.ZodTypeAny : field;
+                                                if (baseField instanceof z.ZodDefault) {
+                                                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                                                    baseField = (baseField._def as any).innerType as z.ZodTypeAny;
+                                                }
+                                                if (baseField instanceof z.ZodNullable) {
+                                                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                                                    baseField = (baseField._def as any).innerType as z.ZodTypeAny;
+                                                }
+                                                const rawValue = formValues[key];
+                                                const stringValue = typeof rawValue === 'string' ? rawValue : '';
                                                 const error = formErrors[key];
-                                                // NavLink-specific dynamic labeling/visibility for color fields
                                                 const navStyle = (defType === 'nav-link') ? String((formValues['style'] as string) || 'link') : undefined;
                                                 const hideForNavLink = (
                                                     (defType === 'nav-link' && key === 'textColor' && navStyle === 'link') ||
@@ -852,64 +936,76 @@ export default function ModifyWidgetModal({
                                                     if (key === 'textColor') label = 'Text color';
                                                 }
                                                 if (defType === 'link') {
-                                                    if (key === 'iconLeft') {
+                                                    if (key === 'url') {
+                                                        helperText = `Supports ${ALLOWED_HTTP_SCHEME_LABEL} links. Missing protocol defaults to https://.`;
+                                                    } else if (key === 'iconLeft') {
                                                         label = 'Prefix icon/text';
                                                         helperText = 'Optional emoji or short text shown before the link label.';
                                                     } else if (key === 'iconRight') {
                                                         label = 'Suffix icon/text';
                                                         helperText = 'Optional emoji or short text shown after the link label.';
                                                     }
+                                                } else if (defType === 'project') {
+                                                    if (key === 'link') {
+                                                        label = 'Project link';
+                                                        helperText = 'Optional external URL opened when the card is clicked.';
+                                                    } else if (key === 'image') {
+                                                        label = 'Image URL or asset://';
+                                                        helperText = 'Paste a hosted image URL or asset:// identifier to show a cover.';
+                                                    }
                                                 }
                                                 const disabled = locked;
+                                                const isTargetPage = (defType === 'nav-link') && key === 'targetPageId' && (baseField instanceof z.ZodString);
+                                                const isTextContent = (defType === 'text') && key === 'text' && (baseField instanceof z.ZodString);
                                                 const isCarouselIntervalField = isCarousel && key === 'interval';
+                                                const multiline = (baseField instanceof z.ZodString) && (isTextContent || shouldUseTextareaField(defType, key));
                                                 // eslint-disable-next-line @typescript-eslint/no-explicit-any
                                                 const anyZ: any = z;
                                                 const isEnum = baseField instanceof anyZ.ZodEnum;
                                                 const isNativeEnum = baseField instanceof anyZ.ZodNativeEnum;
-                                                const isColorField = typeof value === 'string' && key.toLowerCase().includes('color');
-                                                const isTargetPage = (defType === 'nav-link') && key === 'targetPageId' && (baseField instanceof anyZ.ZodString);
-                                                const isTextContent = (defType === 'text') && key === 'text' && (baseField instanceof anyZ.ZodString);
-                                                const common = {
-                                                    value, onChange: (e: React.ChangeEvent<HTMLInputElement>) => {
-                                                        const tgt = e.target;
-                                                        const v: unknown = tgt.type === 'checkbox' ? tgt.checked : tgt.value;
-                                                        const next: Record<string, unknown> = { ...formValues, [key]: baseField instanceof z.ZodNumber ? ((v as string) === '' ? undefined : Number(v)) : v };
-                                                        setFormValues(next);
-                                                        // run live validation per key
-                                                        if (zodSchema) {
-                                                            const single = z.object({ [key]: (schema as z.ZodTypeAny) });
-                                                            const res = single.safeParse({ [key]: next[key] });
-                                                            setFormErrors({ ...formErrors, [key]: res.success ? '' : (res.error.issues[0]?.message || 'Invalid value') });
-                                                        }
-                                                    }, disabled
-                                                };
+                                                const assetKind = (baseField instanceof z.ZodString) ? inferAssetKind(defType, key) : null;
+                                                const isUrlField = (baseField instanceof z.ZodString) && !assetKind && isLikelyUrlField(key, baseField);
+                                                const isColorField = key.toLowerCase().includes('color');
+                                                const stringInputType = inferStringInputType(baseField);
+                                                const numberMeta = baseField instanceof z.ZodNumber ? deriveNumberBounds(baseField) : undefined;
+                                                const assetPlaceholder = assetKind === 'image'
+                                                    ? 'asset://hash or https://example.com/image.jpg'
+                                                    : assetKind === 'video'
+                                                        ? 'asset://hash or https://example.com/video.mp4'
+                                                        : 'asset://hash or https://example.com/resource';
                                                 if (isCarouselIntervalField) {
-                                                    const secondsValue = typeof value === 'number' && Number.isFinite(value) ? (value / 1000) : '';
+                                                    const secondsValue = typeof rawValue === 'number' && Number.isFinite(rawValue) ? (rawValue / 1000) : '';
+                                                    const adjustSeconds = (delta: number) => {
+                                                        const current = typeof secondsValue === 'number' ? secondsValue : 0;
+                                                        const next = Math.min(60, Math.max(0.5, Number((current + delta).toFixed(2))));
+                                                        const ms = Math.round(next * 1000);
+                                                        setFieldValue(key, ms);
+                                                    };
                                                     return (
                                                         <div key={key}>
                                                             <label className="block text-[color:var(--fg-muted)] mb-1">Slide interval (seconds)</label>
-                                                            <input
-                                                                className="input w-full"
-                                                                type="number"
-                                                                min={0.5}
-                                                                max={60}
-                                                                step={0.5}
-                                                                value={secondsValue === '' ? '' : secondsValue}
-                                                                onChange={(e) => {
-                                                                    const raw = e.target.value;
-                                                                    const num = raw === '' ? undefined : Number(raw);
-                                                                    const ms = typeof num === 'number' && !Number.isNaN(num) ? Math.round(num * 1000) : undefined;
-                                                                    const next: Record<string, unknown> = { ...formValues, [key]: ms };
-                                                                    setFormValues(next);
-                                                                    if (zodSchema) {
-                                                                        const single = z.object({ [key]: (schema as z.ZodTypeAny) });
-                                                                        const res = single.safeParse({ [key]: next[key] });
-                                                                        setFormErrors({ ...formErrors, [key]: res.success ? '' : (res.error.issues[0]?.message || 'Invalid value') });
-                                                                    }
-                                                                }}
-                                                                onKeyDown={handleEnterSubmitComp}
-                                                                disabled={disabled}
-                                                            />
+                                                            <div className="flex gap-2">
+                                                                <input
+                                                                    className="input w-full"
+                                                                    type="number"
+                                                                    min={0.5}
+                                                                    max={60}
+                                                                    step={0.5}
+                                                                    value={secondsValue === '' ? '' : secondsValue}
+                                                                    onChange={(e) => {
+                                                                        const raw = e.target.value;
+                                                                        const num = raw === '' ? undefined : Number(raw);
+                                                                        const ms = typeof num === 'number' && !Number.isNaN(num) ? Math.round(num * 1000) : undefined;
+                                                                        setFieldValue(key, ms);
+                                                                    }}
+                                                                    onKeyDown={handleEnterSubmitComp}
+                                                                    disabled={disabled}
+                                                                />
+                                                                <div className="flex flex-col gap-1">
+                                                                    <button className="px-2 py-1 rounded border border-[color:var(--border)] text-[10px] font-semibold" type="button" onClick={() => adjustSeconds(0.5)} disabled={disabled}>+0.5s</button>
+                                                                    <button className="px-2 py-1 rounded border border-[color:var(--border)] text-[10px] font-semibold" type="button" onClick={() => adjustSeconds(-0.5)} disabled={disabled}>-0.5s</button>
+                                                                </div>
+                                                            </div>
                                                             <div className="text-[10px] text-[color:var(--fg-muted)] mt-1">0.5s – 60s, half-second steps.</div>
                                                             {error && <div className="text-red-500 text-xs mt-1">{error}</div>}
                                                         </div>
@@ -921,17 +1017,8 @@ export default function ModifyWidgetModal({
                                                         {isTargetPage ? (
                                                             <select
                                                                 className="input w-full"
-                                                                value={String(value || '')}
-                                                                onChange={(e) => {
-                                                                    const v = e.target.value;
-                                                                    const next: Record<string, unknown> = { ...formValues, [key]: v };
-                                                                    setFormValues(next);
-                                                                    if (zodSchema) {
-                                                                        const single = z.object({ [key]: (schema as z.ZodTypeAny) });
-                                                                        const res = single.safeParse({ [key]: next[key] });
-                                                                        setFormErrors({ ...formErrors, [key]: res.success ? '' : (res.error.issues[0]?.message || 'Invalid value') });
-                                                                    }
-                                                                }}
+                                                                value={String(stringValue || '')}
+                                                                onChange={(e) => setFieldValue(key, e.target.value)}
                                                                 disabled={disabled}
                                                             >
                                                                 <option value="" disabled>Select page…</option>
@@ -944,46 +1031,52 @@ export default function ModifyWidgetModal({
                                                                     ));
                                                                 })()}
                                                             </select>
-                                                        ) : isTextContent ? (
+                                                        ) : multiline ? (
                                                             <div>
                                                                 <textarea
                                                                     className="input w-full min-h-[6rem]"
-                                                                    value={String(value ?? '')}
-                                                                    onChange={(e) => {
-                                                                        const v = e.target.value;
-                                                                        const next: Record<string, unknown> = { ...formValues, [key]: v };
-                                                                        setFormValues(next);
-                                                                        if (zodSchema) {
-                                                                            const single = z.object({ [key]: (schema as z.ZodTypeAny) });
-                                                                            const res = single.safeParse({ [key]: next[key] });
-                                                                            setFormErrors({ ...formErrors, [key]: res.success ? '' : (res.error.issues[0]?.message || 'Invalid value') });
-                                                                        }
-                                                                    }}
+                                                                    value={stringValue}
+                                                                    onChange={(e) => setFieldValue(key, e.target.value)}
                                                                     disabled={disabled}
                                                                 />
-                                                                <div className="mt-1 text-[10px] text-[color:var(--fg-muted)]">{String(value ?? '').length} characters</div>
+                                                                <div className="mt-1 text-[10px] text-[color:var(--fg-muted)]">{stringValue.length} characters</div>
                                                             </div>
+                                                        ) : assetKind && baseField instanceof z.ZodString ? (
+                                                            <SchemaAssetField
+                                                                value={stringValue}
+                                                                placeholder={assetPlaceholder}
+                                                                disabled={disabled}
+                                                                assets={assets}
+                                                                assetKind={assetKind}
+                                                                onChange={(next) => setFieldValue(key, next && next.length ? next : undefined)}
+                                                            />
+                                                        ) : isUrlField ? (
+                                                            <SchemaUrlField
+                                                                value={stringValue}
+                                                                disabled={disabled}
+                                                                onChange={(next) => setFieldValue(key, next && next.length ? next : undefined)}
+                                                                onKeyDown={handleEnterSubmitComp}
+                                                            />
                                                         ) : baseField instanceof z.ZodBoolean ? (
                                                             <div className="flex items-center gap-2">
-                                                                <input type="checkbox" className="checkbox" checked={!!formValues[key]} onChange={common.onChange} disabled={disabled} />
+                                                                <input type="checkbox" className="checkbox" checked={!!formValues[key]} onChange={(e) => setFieldValue(key, e.target.checked)} disabled={disabled} />
                                                                 <span className="text-xs">{label}</span>
                                                             </div>
                                                         ) : baseField instanceof z.ZodNumber ? (
-                                                            <input className="input w-full" type="number" value={String(value ?? '')} onChange={common.onChange} onKeyDown={handleEnterSubmitComp} disabled={disabled} />
+                                                            <SchemaNumberField
+                                                                value={typeof rawValue === 'number' ? rawValue : undefined}
+                                                                min={numberMeta?.min}
+                                                                max={numberMeta?.max}
+                                                                step={numberMeta?.step}
+                                                                disabled={disabled}
+                                                                onChange={(next) => setFieldValue(key, next)}
+                                                                onKeyDown={handleEnterSubmitComp}
+                                                            />
                                                         ) : (isEnum || isNativeEnum) ? (
                                                             <select
                                                                 className="input w-full"
-                                                                value={String(value || '')}
-                                                                onChange={(e) => {
-                                                                    const v = e.target.value;
-                                                                    const next: Record<string, unknown> = { ...formValues, [key]: v };
-                                                                    setFormValues(next);
-                                                                    if (zodSchema) {
-                                                                        const single = z.object({ [key]: (schema as z.ZodTypeAny) });
-                                                                        const res = single.safeParse({ [key]: next[key] });
-                                                                        setFormErrors({ ...formErrors, [key]: res.success ? '' : (res.error.issues[0]?.message || 'Invalid value') });
-                                                                    }
-                                                                }}
+                                                                value={String(stringValue || '')}
+                                                                onChange={(e) => setFieldValue(key, e.target.value)}
                                                                 disabled={disabled}
                                                             >
                                                                 <option value="" disabled>Select…</option>
@@ -1004,23 +1097,20 @@ export default function ModifyWidgetModal({
                                                                 <input
                                                                     className="rounded border border-[color:var(--border)] bg-[color:var(--muted)]/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[color:var(--surface)]"
                                                                     type="color"
-                                                                    value={String((value as string) || '#2563eb')}
-                                                                    onChange={common.onChange}
+                                                                    value={stringValue || '#2563eb'}
+                                                                    onChange={(e) => setFieldValue(key, e.target.value)}
                                                                     disabled={disabled}
                                                                     style={{ width: 36, height: 24, padding: 0, minWidth: 36 }}
                                                                     aria-label={`${label} color`}
                                                                 />
-                                                                <span className="font-mono text-xs text-[color:var(--fg-muted)]">{String(value || '')}</span>
+                                                                <span className="font-mono text-xs text-[color:var(--fg-muted)]">{stringValue || '#2563eb'}</span>
                                                             </div>
                                                         ) : (
                                                             <input
                                                                 className="input w-full"
-                                                                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                                                                type={isColorField ? 'color' : (baseField as any)._def?.checks?.some?.((c: any) => c?.kind === 'email') ? 'email' :
-                                                                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                                                                    (baseField as any)._def?.checks?.some?.((c: any) => c?.kind === 'url') ? 'url' : 'text'}
-                                                                value={String(value ?? '')}
-                                                                onChange={common.onChange}
+                                                                type={stringInputType}
+                                                                value={stringValue}
+                                                                onChange={(e) => setFieldValue(key, e.target.value)}
                                                                 onKeyDown={handleEnterSubmitComp}
                                                                 disabled={disabled}
                                                             />
@@ -1034,6 +1124,9 @@ export default function ModifyWidgetModal({
                                         <div className="mt-3 flex items-center justify-end gap-2">
                                             <button className="btn btn-outline btn-xs" onClick={() => { applyForm(); }} disabled={locked}>Apply</button>
                                         </div>
+                                        {defType === 'link' && (
+                                            <LinkPreviewPanel rawUrl={linkRawUrl} fieldError={linkFieldError} disabled={locked} />
+                                        )}
                                     </div>
                                 )}
                             </div>
@@ -1179,6 +1272,169 @@ export default function ModifyWidgetModal({
                         </button>
                     </div>
                 )}
+            </div>
+        </div>
+    );
+}
+
+type SchemaAssetFieldProps = {
+    value: string;
+    placeholder: string;
+    disabled: boolean;
+    assets: AssetsCtx;
+    assetKind: AssetKind;
+    onChange: (value?: string) => void;
+};
+
+function SchemaAssetField({ value, placeholder, disabled, assets, assetKind, onChange }: SchemaAssetFieldProps) {
+    const filteredAssets = useMemo(() => {
+        return assets.list.filter((asset) => {
+            if (assetKind === 'image') return asset.type?.startsWith('image/');
+            if (assetKind === 'video') return asset.type?.startsWith('video/');
+            return true;
+        });
+    }, [assets.list, assetKind]);
+    const assetHash = value.startsWith('asset://') ? value.slice('asset://'.length) : '';
+    const currentAsset = assetHash ? assets.list.find((a) => a.hash === assetHash) : null;
+    const accept = assetKind === 'image' ? 'image/*' : assetKind === 'video' ? 'video/*' : '*/*';
+    return (
+        <div className="space-y-2">
+            <div className={`flex flex-wrap items-center gap-2 text-xs`}>
+                <label className={`inline-flex items-center justify-center px-3 py-1.5 rounded border border-dashed border-[color:var(--border)] bg-[color:var(--muted)]/40 ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}>
+                    <span className="font-semibold">Upload</span>
+                    <input
+                        type="file"
+                        accept={accept}
+                        className="sr-only"
+                        disabled={disabled}
+                        onChange={async (e) => {
+                            const file = e.target.files?.[0];
+                            e.target.value = '';
+                            if (!file) return;
+                            try {
+                                const metas = await assets.addFiles([file]);
+                                const meta = metas[0];
+                                if (meta?.hash) onChange(`asset://${meta.hash}`);
+                            } catch { /* ignore upload errors */ }
+                        }}
+                    />
+                </label>
+                <span className="px-2 py-1 rounded border border-[color:var(--border)] bg-[color:var(--muted)]/20 text-[color:var(--fg-muted)]">
+                    {currentAsset?.name ?? (assetHash ? `asset://${assetHash}` : 'No asset selected')}
+                </span>
+            </div>
+            {filteredAssets.length > 0 && (
+                <select
+                    className="input w-full"
+                    value={assetHash}
+                    disabled={disabled}
+                    onChange={(e) => onChange(e.target.value ? `asset://${e.target.value}` : undefined)}
+                >
+                    <option value="">Select asset…</option>
+                    {filteredAssets.map((asset) => (
+                        <option key={asset.hash} value={asset.hash}>{asset.name}</option>
+                    ))}
+                </select>
+            )}
+            <input
+                className="input w-full font-mono text-xs"
+                placeholder={placeholder}
+                value={value}
+                onChange={(e) => onChange(e.target.value)}
+                disabled={disabled}
+            />
+        </div>
+    );
+}
+
+type SchemaUrlFieldProps = {
+    value: string;
+    disabled: boolean;
+    onChange: (value?: string) => void;
+    onKeyDown?: (event: React.KeyboardEvent<HTMLInputElement>) => void;
+};
+
+function SchemaUrlField({ value, disabled, onChange, onKeyDown }: SchemaUrlFieldProps) {
+    return (
+        <div className="space-y-1">
+            <input
+                className="input w-full"
+                type="url"
+                placeholder="https://example.com"
+                value={value}
+                onChange={(e) => onChange(e.target.value)}
+                disabled={disabled}
+                onKeyDown={onKeyDown}
+            />
+            <div className="flex flex-wrap gap-1">
+                {URL_PROTOCOL_SUGGESTIONS.map((proto) => (
+                    <button
+                        key={proto}
+                        type="button"
+                        className="px-2 py-1 rounded border border-[color:var(--border)] text-[10px] font-semibold text-[color:var(--fg-muted)] hover:text-[color:var(--fg)]"
+                        onClick={() => onChange(proto)}
+                        disabled={disabled}
+                    >
+                        {proto}
+                    </button>
+                ))}
+                {value && (
+                    <button
+                        type="button"
+                        className="px-2 py-1 rounded border border-[color:var(--border)] text-[10px] font-semibold text-[color:var(--fg-muted)] hover:text-[color:var(--fg)]"
+                        onClick={() => onChange(undefined)}
+                        disabled={disabled}
+                    >
+                        Clear
+                    </button>
+                )}
+            </div>
+        </div>
+    );
+}
+
+type SchemaNumberFieldProps = {
+    value?: number;
+    min?: number;
+    max?: number;
+    step?: number;
+    disabled: boolean;
+    onChange: (value: number | undefined) => void;
+    onKeyDown?: (event: React.KeyboardEvent<HTMLInputElement>) => void;
+};
+
+function SchemaNumberField({ value, min, max, step, disabled, onChange, onKeyDown }: SchemaNumberFieldProps) {
+    const stepValue = step ?? 1;
+    const formattedStep = Number.isInteger(stepValue) ? stepValue.toFixed(0) : stepValue.toString();
+    const handleChange = (raw: string) => {
+        if (raw === '') { onChange(undefined); return; }
+        const num = Number(raw);
+        if (Number.isNaN(num)) { onChange(undefined); return; }
+        onChange(num);
+    };
+    const adjust = (delta: number) => {
+        const current = typeof value === 'number' ? value : (typeof min === 'number' ? min : 0);
+        let next = current + delta;
+        if (typeof min === 'number') next = Math.max(min, next);
+        if (typeof max === 'number') next = Math.min(max, next);
+        onChange(Number(next.toFixed(4)));
+    };
+    return (
+        <div className="flex items-stretch gap-2">
+            <input
+                className="input w-full"
+                type="number"
+                value={value === undefined ? '' : value}
+                min={min}
+                max={max}
+                step={stepValue}
+                onChange={(e) => handleChange(e.target.value)}
+                disabled={disabled}
+                onKeyDown={onKeyDown}
+            />
+            <div className="flex flex-col gap-1">
+                <button className="px-2 py-1 rounded border border-[color:var(--border)] text-[10px] font-semibold" type="button" onClick={() => adjust(stepValue)} disabled={disabled}>+{formattedStep}</button>
+                <button className="px-2 py-1 rounded border border-[color:var(--border)] text-[10px] font-semibold" type="button" onClick={() => adjust(-stepValue)} disabled={disabled}>-{formattedStep}</button>
             </div>
         </div>
     );

@@ -41,4 +41,21 @@ describe('Project widget', () => {
         const json = JSON.stringify(ProjectDef.defaultProps);
         expect(JSON.parse(json)).toEqual(ProjectDef.defaultProps);
     });
+
+    it('sanitizes link URLs and wraps the card in an anchor', () => {
+        const parsed = schema.parse({ title: 'Linked', link: 'example.com' });
+        const vnode = ProjectDef.render(parsed);
+        const { container } = withCtx(vnode);
+        const anchor = container.querySelector('a');
+        expect(anchor).toBeTruthy();
+        expect(anchor?.getAttribute('href')).toBe('https://example.com/');
+    });
+
+    it('renders an optional image when provided', () => {
+        const vnode = ProjectDef.render({ ...ProjectDef.defaultProps, title: 'Visual', image: 'https://example.com/cover.png' });
+        const { container } = withCtx(vnode);
+        const img = container.querySelector('img');
+        expect(img).toBeTruthy();
+        expect(img?.getAttribute('src')).toBe('https://example.com/cover.png');
+    });
 });

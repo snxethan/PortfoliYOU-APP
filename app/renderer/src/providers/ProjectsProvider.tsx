@@ -8,10 +8,10 @@ import JSZip from "jszip";
 
 import { idbGet, idbPut, computeHash, stores, AssetMeta } from "../lib/assetsStore";
 import { auth, db, storage } from "../lib/firebase";
+import { sanitizeVideoProps } from "../widgets/videoProps";
+import type { VideoWidgetProps } from "../widgets/videoProps";
 
-import { useNotifications } from './NotificationsProvider';
-import { sanitizeVideoProps } from '../widgets/videoProps';
-import type { VideoWidgetProps } from '../widgets/videoProps';
+import { useNotifications } from "./NotificationsProvider";
 
 type ZipEntry = {
 	async(type: 'arraybuffer'): Promise<ArrayBuffer>;
