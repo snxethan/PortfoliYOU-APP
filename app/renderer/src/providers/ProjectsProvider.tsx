@@ -48,11 +48,23 @@ export type Widget = {
 	updatedAt: string;
 };
 
+export type PortfolioMeta = {
+	siteTitle: string;
+	tagline?: string | null;
+	description?: string | null;
+	author?: string | null;
+	websiteUrl?: string | null;
+	iconEmoji?: string | null;
+	iconImageUrl?: string | null;
+	socialImageUrl?: string | null;
+};
+
 export type Project = {
 	id: string;
 	ownerUid?: string;
 	name: string;
 	description?: string;
+	portfolioMeta?: PortfolioMeta;
 	activeThemeId: string;
 	pageOrder: string[];
 	limits: { maxPages: number; maxAssetsMB: number };
@@ -132,8 +144,15 @@ function ensureProjectThemes(project: LocalProject): LocalProject {
 	return { ...project, themes: nextThemes, activeThemeId: activeId } as LocalProject;
 }
 
+function ensurePortfolioMeta(project: LocalProject): LocalProject {
+	const name = normalizeProjectName(project?.name);
+	const metaSource = project.portfolioMeta || ({ siteTitle: name } as PortfolioMeta);
+	const hydrated = hydratePortfolioMeta(metaSource, name);
+	return { ...project, name: hydrated.siteTitle, portfolioMeta: hydrated, description: hydrated.description || '' } as LocalProject;
+}
+
 function sanitizeProjectsList(projects: LocalProject[]): LocalProject[] {
-	return projects.map((proj) => ensureProjectThemes(sanitizeProjectVideoWidgets(proj)));
+	return projects.map((proj) => ensurePortfolioMeta(ensureProjectThemes(sanitizeProjectVideoWidgets(proj))));
 }
 
 type ProjectsCtx = {
@@ -145,7 +164,8 @@ type ProjectsCtx = {
 	cloudProjectsCount: number;
 	addProject: (name?: string) => Project;
 	importProject: (file?: File) => Promise<Project>;
-	createProjectWithSave: (name: string) => Promise<LocalProject | null>;
+	createProjectWithSave: (input: string | { name: string; metadata?: Partial<PortfolioMeta> }) => Promise<LocalProject | null>;
+	updateProjectMetadata: (projectId: string, payload: { name?: string; metadata?: Partial<PortfolioMeta> }) => Promise<void>;
 	selectProject: (projectId: string) => void;
 	selectedProjectId: string | null;
 	selectedProject: LocalProject | null;
@@ -335,6 +355,12 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 
 		// Collect referenced asset hashes from widgets (props.src can be asset://hash or assets/...)
 		const hashes = new Set<string>();
+		const collectAssetHash = (value?: string | null) => {
+			if (!value || typeof value !== 'string') return;
+			if (!value.startsWith('asset://')) return;
+			const h = value.slice('asset://'.length);
+			if (h) hashes.add(h);
+		};
 		for (const w of Object.values(sanitizedProject.widgets || {})) {
 			try {
 				const p = (w.props || {}) as Record<string, unknown>;
@@ -342,6 +368,8 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 				if (src.startsWith('asset://')) hashes.add(src.slice('asset://'.length));
 			} catch { /* ignore */ }
 		}
+		collectAssetHash(sanitizedProject.portfolioMeta?.iconImageUrl || null);
+		collectAssetHash(sanitizedProject.portfolioMeta?.socialImageUrl || null);
 		// Emit project.json with src rewritten to relative assets path for portability
 		const projectForArchive: LocalProject = JSON.parse(JSON.stringify(payload.project));
 		for (const w of Object.values(projectForArchive.widgets || {})) {
@@ -353,6 +381,17 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 					(p as Record<string, unknown>)['src'] = `assets/${h}`;
 				}
 			} catch { /* ignore */ }
+		}
+		if (projectForArchive.portfolioMeta) {
+			const meta = projectForArchive.portfolioMeta as PortfolioMeta;
+			if (typeof meta.iconImageUrl === 'string' && meta.iconImageUrl.startsWith('asset://')) {
+				const h = meta.iconImageUrl.slice('asset://'.length);
+				meta.iconImageUrl = h ? `assets/${h}` : meta.iconImageUrl;
+			}
+			if (typeof meta.socialImageUrl === 'string' && meta.socialImageUrl.startsWith('asset://')) {
+				const h = meta.socialImageUrl.slice('asset://'.length);
+				meta.socialImageUrl = h ? `assets/${h}` : meta.socialImageUrl;
+			}
 		}
 		const wrapper = { ...payload, project: projectForArchive };
 		zip.file("project.json", JSON.stringify(wrapper, null, 2));
@@ -444,6 +483,29 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 				}
 			} catch { /* ignore */ }
 		}
+		if (out.portfolioMeta) {
+			const meta = { ...out.portfolioMeta } as PortfolioMeta;
+			let changed = false;
+			if (typeof meta.iconImageUrl === 'string' && meta.iconImageUrl.startsWith('assets/')) {
+				const name = meta.iconImageUrl.slice('assets/'.length);
+				const h = nameToHash.get(name) || nameToHash.get(meta.iconImageUrl);
+				if (h) {
+					meta.iconImageUrl = `asset://${h}`;
+					changed = true;
+				}
+			}
+			if (typeof meta.socialImageUrl === 'string' && meta.socialImageUrl.startsWith('assets/')) {
+				const name = meta.socialImageUrl.slice('assets/'.length);
+				const h = nameToHash.get(name) || nameToHash.get(meta.socialImageUrl);
+				if (h) {
+					meta.socialImageUrl = `asset://${h}`;
+					changed = true;
+				}
+			}
+			if (changed) {
+				out.portfolioMeta = meta;
+			}
+		}
 		return out;
 	};
 
@@ -468,6 +530,50 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 			updatedAt: now(),
 		};
 
+		const saveMetadata = async (projectId: string, payload: { name?: string; metadata?: Partial<PortfolioMeta> }) => {
+			const idx = projects.findIndex(p => p.id === projectId); if (idx < 0) return;
+			const existing = projects[idx];
+			const requestedName = payload.name ?? payload.metadata?.siteTitle ?? existing.name;
+			const normalizedName = normalizeProjectName(requestedName || existing.name, existing.name);
+			const mergedSource: Partial<PortfolioMeta> = { ...(existing.portfolioMeta || { siteTitle: existing.name }), ...(payload.metadata || {}) };
+			mergedSource.siteTitle = mergedSource.siteTitle ?? normalizedName;
+			const hydrated = hydratePortfolioMeta(mergedSource, normalizedName);
+			const updated: LocalProject = {
+				...existing,
+				name: hydrated.siteTitle,
+				description: hydrated.description || existing.description || "",
+				portfolioMeta: hydrated,
+				updatedAt: now(),
+			} as LocalProject;
+			let nextList = [...projects];
+			nextList[idx] = updated;
+			setProjects(nextList); writeStore(nextList);
+			const nameChanged = existing.name !== updated.name;
+			if (nameChanged && existing._filePath && window.api?.renameFile) {
+				const sanitize = (s: string) => s.replace(/[\\/:*?"<>|]/g, "_").trim() || "project";
+				const from = existing._filePath;
+				const sepIndex = Math.max(from.lastIndexOf('\\'), from.lastIndexOf('/'));
+				const dir = sepIndex >= 0 ? from.slice(0, sepIndex) : '';
+				const sep = sepIndex >= 0 ? from[sepIndex] : (from.includes('/') ? '/' : '\\');
+				const desiredBase = `${sanitize(updated.name)}.portfoliyou`;
+				const to = dir ? `${dir}${sep}${desiredBase}` : desiredBase;
+				try {
+					const res = await window.api.renameFile({ fromPath: from, toPath: to });
+					if (res.ok) {
+						const withPath = { ...updated, _filePath: to } as LocalProject;
+						nextList = [...nextList];
+						nextList[idx] = withPath;
+						setProjects(nextList); writeStore(nextList);
+						return withPath;
+					} else {
+						window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'warn', message: 'File rename failed; name changed only.' } }));
+					}
+				} catch {
+					window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'warn', message: 'File rename failed; name changed only.' } }));
+				}
+			}
+			return updated;
+		};
 
 
 		return {
@@ -602,10 +708,12 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 			},
 			addProject: (name = "Untitled Portfolio") => {
 				const id = crypto.randomUUID();
+				const meta = hydratePortfolioMeta({ siteTitle: name }, name);
 				const p: LocalProject = {
 					id,
-					name,
-					description: "",
+					name: meta.siteTitle,
+					description: meta.description || "",
+					portfolioMeta: meta,
 					activeThemeId: defaultTheme.themeId,
 					pageOrder: [defaultPage.pageId],
 					limits: { maxPages: 10, maxAssetsMB: 500 },
@@ -622,14 +730,18 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 				localStorage.setItem("py.hasAnyProject", "1");
 				return p;
 			},
-			createProjectWithSave: async (name: string) => {
-				const base = (name || "Untitled Portfolio").trim();
+			createProjectWithSave: async (input: string | { name: string; metadata?: Partial<PortfolioMeta> }) => {
+				const rawName = typeof input === 'string' ? input : input?.name;
+				const base = normalizeProjectName(rawName, "Untitled Portfolio");
+				const metadata = hydratePortfolioMeta((typeof input === 'string' ? { siteTitle: base } : (input?.metadata || { siteTitle: base })) as Partial<PortfolioMeta>, base);
+				const safeStem = (metadata.siteTitle || base || "Portfolio").replace(/[\\/:*?"<>|]/g, "_") || "Portfolio";
 				// Construct project object
 				const id = crypto.randomUUID();
 				const p: LocalProject = {
 					id,
-					name: base,
-					description: "",
+					name: metadata.siteTitle,
+					description: metadata.description || "",
+					portfolioMeta: metadata,
 					activeThemeId: defaultTheme.themeId,
 					pageOrder: [defaultPage.pageId],
 					limits: { maxPages: 10, maxAssetsMB: 500 },
@@ -644,7 +756,7 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 				const base64 = await buildArchiveBase64(p);
 				if (window.api?.saveFile) {
 					// Prefer binary save for archive
-					const res = await (window.api.saveFileBytes ? window.api.saveFileBytes({ defaultPath: `${base}.portfoliyou`, dataBase64: base64 }) : window.api.saveFile({ defaultPath: `${base}.portfoliyou`, data: base64, encoding: 'base64' }));
+					const res = await (window.api.saveFileBytes ? window.api.saveFileBytes({ defaultPath: `${safeStem}.portfoliyou`, dataBase64: base64 }) : window.api.saveFile({ defaultPath: `${safeStem}.portfoliyou`, data: base64, encoding: 'base64' }));
 					if (res.canceled || !res.filePath) return null;
 					p._filePath = res.filePath;
 					const next = [p, ...projects];
@@ -657,13 +769,16 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 					const u8 = Uint8Array.from(atob(base64), c => c.charCodeAt(0));
 					const blob = new Blob([u8], { type: "application/zip" });
 					const url = URL.createObjectURL(blob);
-					const a = document.createElement("a"); a.href = url; a.download = `${base}.portfoliyou`;
+					const a = document.createElement("a"); a.href = url; a.download = `${safeStem}.portfoliyou`;
 					document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
 					const next = [p, ...projects];
 					setProjects(next); writeStore(next);
 					setSelectedProjectId(p.id); writeSelected(p.id);
 					return p;
 				}
+			},
+			updateProjectMetadata: async (projectId: string, payload: { name?: string; metadata?: Partial<PortfolioMeta> }) => {
+				await saveMetadata(projectId, payload);
 			},
 			importProject: async (file) => {
 				// Read file, validate, migrate if needed
@@ -713,6 +828,7 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 
 				// If we got a valid import, deduplicate by file path and by id
 				if (imported) {
+					imported = ensurePortfolioMeta(imported as LocalProject);
 					// Prefer dedupe by path when available
 					if (importedFilePath) {
 						const existingByPath = projects.find(p => p._filePath === importedFilePath);
@@ -1459,35 +1575,9 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 				}
 			},
 			renameProject: async (projectId: string, newName: string) => {
-				const idx = projects.findIndex(p => p.id === projectId); if (idx < 0) return;
-				let proj = projects[idx];
-				// Update name in memory first
-				proj = { ...proj, name: newName, updatedAt: now() } as LocalProject;
-				let next = [...projects]; next[idx] = proj; setProjects(next); writeStore(next);
-				try { notify({ type: 'success', message: `Project renamed to "${newName}"`, title: proj.name, persistent: false }); } catch { /* noop */ }
-				// If there is a bound file, try to rename it to match newName
-				if (proj._filePath && window.api?.renameFile) {
-					// sanitize filename
-					const sanitize = (s: string) => s.replace(/[\\/:*?"<>|]/g, "_").trim() || "project";
-					const from = proj._filePath;
-					const sepIndex = Math.max(from.lastIndexOf('\\'), from.lastIndexOf('/'));
-					const dir = sepIndex >= 0 ? from.slice(0, sepIndex) : '';
-					const sep = sepIndex >= 0 ? from[sepIndex] : (from.includes('/') ? '/' : '\\');
-					const desiredBase = `${sanitize(newName)}.portfoliyou`;
-					const to = dir ? `${dir}${sep}${desiredBase}` : desiredBase;
-					try {
-						const res = await window.api.renameFile({ fromPath: from, toPath: to });
-						if (res.ok) {
-							const updatedPath = { ...proj, _filePath: to } as LocalProject;
-							next = [...projects]; next[idx] = updatedPath; setProjects(next); writeStore(next);
-						} else {
-							// Surface a small notification if rename fails
-							window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'warn', message: 'File rename failed; name changed only.' } }));
-						}
-					} catch {
-						window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'warn', message: 'File rename failed; name changed only.' } }));
-					}
-				}
+				const finalName = normalizeProjectName(newName, "Portfolio");
+				await saveMetadata(projectId, { name: finalName, metadata: { siteTitle: finalName } });
+				try { notify({ type: 'success', message: `Project renamed to "${finalName}"`, title: finalName, persistent: false }); } catch { /* noop */ }
 			},
 			deleteProject: async (projectId: string, opts?: { deleteFile?: boolean }) => {
 				// Do not delete cloud copies when removing a local project
@@ -1619,7 +1709,7 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 			}
 			obj['widgets'] = nextWidgets;
 		}
-		const migrated = sanitizeProjectVideoWidgets(obj as LocalProject);
+		const migrated = ensurePortfolioMeta(sanitizeProjectVideoWidgets(obj as LocalProject));
 		migrated.updatedAt = now();
 		return migrated;
 	}
@@ -1630,4 +1720,34 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 
 export function useProjects() {
 	const v = useContext(Ctx); if (!v) throw new Error("useProjects outside provider"); return v;
+}
+
+const MAX_NAME_LENGTH = 80;
+const MAX_SHORT_FIELD = 160;
+const MAX_LONG_FIELD = 600;
+
+const trimField = (value?: string | null, max = MAX_SHORT_FIELD) => {
+	if (typeof value !== 'string') return undefined;
+	const trimmed = value.trim();
+	if (!trimmed) return undefined;
+	return trimmed.slice(0, max);
+};
+
+const normalizeProjectName = (value?: string, fallback = "Untitled Portfolio") => {
+	const trimmed = typeof value === 'string' ? value.trim() : '';
+	const next = trimmed ? trimmed.slice(0, MAX_NAME_LENGTH) : fallback;
+	return next || fallback;
+};
+
+function hydratePortfolioMeta(raw: Partial<PortfolioMeta> | undefined, fallbackName: string): PortfolioMeta {
+	return {
+		siteTitle: normalizeProjectName(raw?.siteTitle, fallbackName),
+		tagline: trimField(raw?.tagline, MAX_SHORT_FIELD) || null,
+		description: trimField(raw?.description, MAX_LONG_FIELD) || null,
+		author: trimField(raw?.author, MAX_SHORT_FIELD) || null,
+		websiteUrl: trimField(raw?.websiteUrl, 200) || null,
+		iconEmoji: trimField(raw?.iconEmoji, 16) || null,
+		iconImageUrl: trimField(raw?.iconImageUrl, 400) || null,
+		socialImageUrl: trimField(raw?.socialImageUrl, 400) || null,
+	};
 }

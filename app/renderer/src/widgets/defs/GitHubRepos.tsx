@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useEffect, useRef } from 'react';
+import React, { useMemo, useState, useEffect, useRef, useId } from 'react';
 import { z } from 'zod';
 import { GitBranch, RefreshCw, Star } from 'lucide-react';
 
@@ -18,6 +18,7 @@ import {
     writeLocalCache,
     normalizeUsername,
 } from '../utils/githubRepos';
+import { FOCUS_RING, SR_ONLY } from '../utils/a11y';
 
 const LAYOUTS = ['cards', 'list'] as const;
 type Layout = (typeof LAYOUTS)[number];
@@ -46,10 +47,15 @@ type GitHubReposProps = {
     cachedRepos?: RepoPreview[];
     cachedFetchedAt?: number;
     cachedMaxItems?: number;
+    ariaLabel?: string;
+    ariaDescription?: string;
+    announceMode?: 'off' | 'polite' | 'assertive';
+    refreshLabel?: string;
 };
 
 function GitHubReposView(props: GitHubReposProps) {
     const { editing, updateProps } = useWidget();
+    const sectionId = useId();
     const providedUsername = normalizeUsername(props.username);
     const isSampleUser = !providedUsername;
     const username = providedUsername || FALLBACK_USERNAME;
@@ -171,30 +177,51 @@ function GitHubReposView(props: GitHubReposProps) {
     })();
 
     const cacheMinutes = Math.round(GITHUB_CACHE_TTL_MS / 60000);
+    const headingId = `${sectionId}-heading`;
+    const descriptionId = props.ariaDescription ? `${sectionId}-desc` : undefined;
+    const regionLabel = props.ariaLabel || 'GitHub repositories';
+    const announceMode = props.announceMode || 'polite';
+    const shouldAnnounce = announceMode !== 'off';
+    const refreshLabel = props.refreshLabel || 'Refresh repositories';
 
     return (
-        <div className="h-full w-full flex flex-col gap-3 p-3" data-widget-role="github-repos">
+        <section
+            aria-labelledby={headingId}
+            aria-describedby={descriptionId}
+            aria-label={regionLabel}
+            role="region"
+            className="h-full w-full flex flex-col gap-3 p-3"
+            data-widget-role="github-repos"
+        >
             <header className="flex items-center justify-between gap-2">
                 <div>
-                    <div className="text-sm font-semibold text-[color:var(--fg)] flex items-center gap-2">
-                        <GitBranch size={16} />
+                    <div id={headingId} className="text-sm font-semibold text-[color:var(--fg)] flex items-center gap-2">
+                        <GitBranch size={16} aria-hidden="true" />
                         @{username}
                     </div>
                     <p className="text-xs text-[color:var(--fg-muted)]">
                         {isSampleUser ? 'Sample profile shown until you set a username' : `Latest public repositories (cached for ${cacheMinutes} min)`}
                     </p>
+                    {props.ariaDescription && (
+                        <p id={descriptionId} className={SR_ONLY}>{props.ariaDescription}</p>
+                    )}
                 </div>
                 <button
                     type="button"
-                    className="btn btn-outline btn-xs"
+                    className={`btn btn-outline btn-xs ${FOCUS_RING}`}
                     onClick={() => setRefreshToken((prev) => prev + 1)}
                     disabled={loading}
+                    aria-label={refreshLabel}
                 >
-                    <RefreshCw size={12} className={loading ? 'animate-spin' : ''} />
+                    <RefreshCw size={12} className={loading ? 'animate-spin' : ''} aria-hidden="true" />
                     <span className="ml-1">Refresh</span>
                 </button>
             </header>
-            <section className={`flex-1 overflow-auto ${layout === 'cards' ? 'grid grid-cols-1 gap-3 md:grid-cols-2' : 'flex flex-col gap-2'}`}>
+            <div
+                role="list"
+                aria-label="Repository list"
+                className={`flex-1 overflow-auto ${layout === 'cards' ? 'grid grid-cols-1 gap-3 md:grid-cols-2' : 'flex flex-col gap-2'}`}
+            >
                 {loading && repos.length === 0 ? (
                     <SkeletonList layout={layout} count={maxItems} />
                 ) : showPlaceholder ? (
@@ -204,14 +231,16 @@ function GitHubReposView(props: GitHubReposProps) {
                         <RepoCard key={repo.id} repo={repo} layout={layout} />
                     ))
                 )}
-            </section>
+            </div>
             <footer className="text-[10px] text-[color:var(--fg-muted)] flex items-center justify-between gap-2">
-                <span>{statusText}</span>
+                <span role="status" aria-live={shouldAnnounce ? announceMode : undefined}>
+                    {statusText}
+                </span>
                 {lastUpdated && (
                     <span>Last updated {timeAgo(lastUpdated)}</span>
                 )}
             </footer>
-        </div>
+        </section>
     );
 }
 
@@ -229,12 +258,13 @@ function RepoCard({ repo, layout }: { repo: RepoPreview; layout: Layout }) {
             href={repo.url}
             target="_blank"
             rel="noreferrer"
-            className="flex flex-col gap-2 rounded-lg border border-[color:var(--border)] bg-[color:var(--surface)] p-4 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
+            role="listitem"
+            className={`flex flex-col gap-2 rounded-lg border border-[color:var(--border)] bg-[color:var(--surface)] p-4 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md ${FOCUS_RING}`}
         >
             <div className="flex items-center justify-between gap-2">
                 <h3 className="text-base font-semibold text-[color:var(--fg)]">{repo.name}</h3>
                 <span className="inline-flex items-center gap-1 rounded-full border border-[color:var(--border)] px-2 py-0.5 text-[10px] uppercase tracking-wide text-[color:var(--fg-muted)]">
-                    <Star size={10} /> {repo.stars}
+                    <Star size={10} aria-hidden="true" /> {repo.stars}
                 </span>
             </div>
             {repo.description && <p className="text-sm text-[color:var(--fg-muted)]">{repo.description}</p>}
@@ -248,14 +278,15 @@ function RepoCard({ repo, layout }: { repo: RepoPreview; layout: Layout }) {
             href={repo.url}
             target="_blank"
             rel="noreferrer"
-            className="flex items-center justify-between gap-3 rounded border border-[color:var(--border)] bg-[color:var(--surface)] px-3 py-2 text-sm"
+            role="listitem"
+            className={`flex items-center justify-between gap-3 rounded border border-[color:var(--border)] bg-[color:var(--surface)] px-3 py-2 text-sm ${FOCUS_RING}`}
         >
             <div>
                 <div className="font-medium text-[color:var(--fg)]">{repo.name}</div>
                 <div className="text-[11px] text-[color:var(--fg-muted)]">Updated {timeAgo(new Date(repo.updatedAt))}</div>
             </div>
             <div className="inline-flex items-center gap-1 text-xs text-[color:var(--fg-muted)]">
-                <Star size={12} /> {repo.stars}
+                <Star size={12} aria-hidden="true" /> {repo.stars}
             </div>
         </a>
     );
@@ -316,6 +347,10 @@ const schema = z
         username: z.string().min(1, 'Username is required').max(39, 'GitHub usernames are up to 39 characters'),
         maxItems: z.number().min(1).max(30).optional(),
         layout: z.enum(['cards', 'list']).optional(),
+        ariaLabel: z.string().max(160).optional(),
+        ariaDescription: z.string().max(400).optional(),
+        announceMode: z.enum(['off', 'polite', 'assertive']).optional(),
+        refreshLabel: z.string().max(80).optional(),
     })
     .passthrough();
 
@@ -327,6 +362,10 @@ const def: WidgetDefinition<GitHubReposProps> = {
         username: FALLBACK_USERNAME,
         maxItems: DEFAULT_MAX_ITEMS,
         layout: 'cards',
+        ariaLabel: 'GitHub repositories',
+        ariaDescription: 'Repository list fetched from GitHub. Use Enter to open a repo in a new tab.',
+        announceMode: 'polite',
+        refreshLabel: 'Refresh repositories',
     },
     grid: { w: 6, h: 6 },
     render: (props) => <GitHubReposView {...props} />,

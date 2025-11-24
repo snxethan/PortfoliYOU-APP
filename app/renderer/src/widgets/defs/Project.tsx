@@ -12,10 +12,13 @@ type ProjectWidgetProps = {
     description?: string;
     headingLevel?: HeadingLevel;
     ariaLabel?: string;
+    ariaDescription?: string;
     font?: FontChoice;
     fontSize?: number;
     link?: string;
     image?: string;
+    imageAlt?: string;
+    linkLabel?: string;
 };
 
 function ProjectView(props: ProjectWidgetProps) {
@@ -27,16 +30,27 @@ function ProjectView(props: ProjectWidgetProps) {
     const safeLink = normalizeExternalLinkUrl(props.link);
     const imageSrc = (props.image || '').trim();
     const accessibleLabel = props.ariaLabel || props.title;
+    const descriptionId = props.ariaDescription ? `${id}-desc` : undefined;
+    const imageAlt = props.imageAlt ?? props.title;
 
     const content = (
-        <article className="p-3 rounded border border-[color:var(--border)] bg-[color:var(--bg)] space-y-2" aria-label={props.ariaLabel} aria-labelledby={props.ariaLabel ? undefined : id} style={{ fontFamily: ff, fontSize: props.fontSize ? `${props.fontSize}px` : undefined }}>
+        <article
+            className="p-3 rounded border border-[color:var(--border)] bg-[color:var(--bg)] space-y-2"
+            aria-label={props.ariaLabel}
+            aria-labelledby={props.ariaLabel ? undefined : id}
+            aria-describedby={descriptionId}
+            style={{ fontFamily: ff, fontSize: props.fontSize ? `${props.fontSize}px` : undefined }}
+        >
             {imageSrc && (
                 <div className="w-full overflow-hidden rounded-md border border-[color:var(--border)] bg-[color:var(--surface)]">
-                    <img src={imageSrc} alt={props.title} className="w-full h-40 object-cover" loading="lazy" referrerPolicy="no-referrer" />
+                    <img src={imageSrc} alt={imageAlt} className="w-full h-40 object-cover" loading="lazy" referrerPolicy="no-referrer" />
                 </div>
             )}
             <H id={id} className="font-medium mb-1">{props.title}</H>
             {props.description && <p className="text-xs">{props.description}</p>}
+            {props.ariaDescription && (
+                <p id={descriptionId} className="sr-only">{props.ariaDescription}</p>
+            )}
         </article>
     );
 
@@ -47,7 +61,7 @@ function ProjectView(props: ProjectWidgetProps) {
                 target="_blank"
                 rel="noreferrer"
                 className="block no-underline text-current"
-                aria-label={accessibleLabel}
+                aria-label={props.linkLabel || accessibleLabel}
                 title={accessibleLabel}
             >
                 {content}
@@ -70,6 +84,7 @@ const def: WidgetDefinition<ProjectWidgetProps> = {
         description: z.string().optional(),
         headingLevel: z.enum(['h2', 'h3']).optional(),
         ariaLabel: z.string().optional(),
+        ariaDescription: z.string().optional(),
         font: z.enum(['system', 'serif', 'mono']).optional(),
         fontSize: z.number().min(8).max(128).optional(),
         link: z
@@ -81,6 +96,8 @@ const def: WidgetDefinition<ProjectWidgetProps> = {
             .string()
             .max(1024, 'Image URL is too long')
             .optional(),
+        imageAlt: z.string().max(200, 'Alt text is too long').optional(),
+        linkLabel: z.string().max(160).optional(),
     }),
 };
 

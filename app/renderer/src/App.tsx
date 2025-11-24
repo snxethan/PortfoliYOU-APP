@@ -10,7 +10,7 @@ import ProtectedRoute from "./components/auth/ProtectedRoute";
 import { ProjectsProvider, useProjects } from "./providers/ProjectsProvider";
 import { AssetsProvider } from "./providers/AssetsProvider";
 import { NotificationsProvider } from "./providers/NotificationsProvider";
-import { CloudSettingsProvider } from "./providers/CloudSettingsProvider";
+import { PortfolioSettingsProvider } from "./providers/PortfolioSettingsProvider";
 import NotificationsUI from "./components/notifications/Notifications";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { useAuth } from "./providers/AuthProvider";
@@ -49,7 +49,7 @@ export default function App() {
         <NotificationsProvider>
           <ProjectsProvider>
             <AssetsProvider>
-              <CloudSettingsProvider>
+              <PortfolioSettingsProvider>
                 <SaveHotkeys />
                 <GlobalZoomControls />
                 <NotificationsUI />
@@ -88,7 +88,7 @@ export default function App() {
                     </main>
                   </div>
                 </div>
-              </CloudSettingsProvider>
+              </PortfolioSettingsProvider>
             </AssetsProvider>
           </ProjectsProvider>
         </NotificationsProvider>

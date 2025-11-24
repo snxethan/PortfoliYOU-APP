@@ -1,8 +1,9 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState, useId } from 'react';
 import { z } from 'zod';
 
 import type { WidgetDefinition } from '../types';
 import { useAssets } from '../../providers/AssetsProvider';
+import { FOCUS_RING, SR_ONLY } from '../utils/a11y';
 
 type CarouselMedia = 'image' | 'video';
 
@@ -35,6 +36,12 @@ type Props = {
     borderWidth?: number;
     borderColor?: string;
     borderStyle?: 'solid' | 'dashed' | 'dotted';
+    ariaLabel?: string;
+    ariaDescription?: string;
+    announceSlides?: boolean;
+    previousLabel?: string;
+    nextLabel?: string;
+    statusLabel?: string;
 };
 
 type DotControl =
@@ -172,6 +179,12 @@ const def: WidgetDefinition<Props> = {
         borderWidth: 0,
         borderColor: '#000000',
         borderStyle: 'solid',
+        ariaLabel: 'Media carousel',
+        ariaDescription: 'Use left and right arrow keys or the navigation buttons to change slides.',
+        announceSlides: true,
+        previousLabel: 'Previous slide',
+        nextLabel: 'Next slide',
+        statusLabel: 'Slide {current} of {total}',
     },
     grid: { w: 6, h: 4 },
     render: (props) => {
@@ -180,6 +193,8 @@ const def: WidgetDefinition<Props> = {
         const [index, setIndex] = useState(0);
         const startX = useRef<number | null>(null);
         const [isHovering, setIsHovering] = useState(false);
+        const regionId = useId();
+        const descriptionId = props.ariaDescription ? `${regionId}-desc` : undefined;
 
         useEffect(() => {
             if (n === 0) { setIndex(0); return; }
@@ -230,10 +245,18 @@ const def: WidgetDefinition<Props> = {
         const frameBackground = props.backgroundColor || 'var(--surface)';
 
         const dotControls = useMemo(() => buildDotControls(slides, index), [slides, index]);
+        const statusLabel = props.statusLabel || 'Slide {current} of {total}';
+        const statusMessage = n > 0
+            ? statusLabel.replace('{current}', String(index + 1)).replace('{total}', String(n))
+            : 'No slides available';
+        const announceSlides = props.announceSlides !== false;
+        const previousAria = props.previousLabel || 'Previous slide';
+        const nextAria = props.nextLabel || 'Next slide';
+        const regionLabel = props.ariaLabel || 'Media carousel';
 
         return (
             <div
-                className="w-full h-full relative"
+                className={`w-full h-full relative ${FOCUS_RING}`}
                 tabIndex={0}
                 onKeyDown={onKeyDown}
                 onPointerDown={onPointerDown}
@@ -243,8 +266,14 @@ const def: WidgetDefinition<Props> = {
                 onPointerLeave={onPointerLeave}
                 role="region"
                 aria-roledescription="carousel"
-                aria-label="Media carousel"
+                aria-label={regionLabel}
+                aria-describedby={descriptionId}
             >
+                {props.ariaDescription && (
+                    <p id={descriptionId} className={SR_ONLY}>
+                        {props.ariaDescription}
+                    </p>
+                )}
                 <div
                     className="w-full h-full overflow-hidden relative"
                     style={{
@@ -281,22 +310,22 @@ const def: WidgetDefinition<Props> = {
                         <button
                             type="button"
                             data-nodrag="true"
-                            className="absolute left-2 top-1/2 -translate-y-1/2 btn btn-ghost btn-xs text-[color:var(--fg)] bg-[color:var(--surface)]/80 border border-[color:var(--border)] hover:bg-[color:var(--surface)]"
-                            aria-label="Previous slide"
+                            className={`absolute left-2 top-1/2 -translate-y-1/2 btn btn-ghost btn-xs text-[color:var(--fg)] bg-[color:var(--surface)]/80 border border-[color:var(--border)] hover:bg-[color:var(--surface)] ${FOCUS_RING}`}
+                            aria-label={previousAria}
                             onPointerDownCapture={stopDragPropagation}
                             onClick={(e) => { e.stopPropagation(); prev(); }}
                         >
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6" /></svg>
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6" /></svg>
                         </button>
                         <button
                             type="button"
                             data-nodrag="true"
-                            className="absolute right-2 top-1/2 -translate-y-1/2 btn btn-ghost btn-xs text-[color:var(--fg)] bg-[color:var(--surface)]/80 border border-[color:var(--border)] hover:bg-[color:var(--surface)]"
-                            aria-label="Next slide"
+                            className={`absolute right-2 top-1/2 -translate-y-1/2 btn btn-ghost btn-xs text-[color:var(--fg)] bg-[color:var(--surface)]/80 border border-[color:var(--border)] hover:bg-[color:var(--surface)] ${FOCUS_RING}`}
+                            aria-label={nextAria}
                             onPointerDownCapture={stopDragPropagation}
                             onClick={(e) => { e.stopPropagation(); next(); }}
                         >
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6" /></svg>
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6" /></svg>
                         </button>
                     </>
                 )}
@@ -318,7 +347,7 @@ const def: WidgetDefinition<Props> = {
                                     key={slide?.id || targetIndex}
                                     type="button"
                                     data-nodrag="true"
-                                    className={`rounded-full border ${targetIndex === index ? 'bg-[color:var(--fg)] border-[color:var(--fg)]' : 'bg-[color:var(--fg)]/40 border-[color:var(--fg)]/40'}`}
+                                    className={`rounded-full border ${targetIndex === index ? 'bg-[color:var(--fg)] border-[color:var(--fg)]' : 'bg-[color:var(--fg)]/40 border-[color:var(--fg)]/40'} ${FOCUS_RING}`}
                                     style={{ width: 8, height: 8 }}
                                     aria-label={`Go to slide ${targetIndex + 1}`}
                                     aria-current={targetIndex === index}
@@ -327,6 +356,11 @@ const def: WidgetDefinition<Props> = {
                                 />
                             );
                         })}
+                    </div>
+                )}
+                {announceSlides && (
+                    <div className={SR_ONLY} role="status" aria-live="polite">
+                        {statusMessage}
                     </div>
                 )}
             </div>
@@ -341,6 +375,12 @@ const def: WidgetDefinition<Props> = {
         borderWidth: z.number().min(0).max(48).optional(),
         borderColor: z.string().regex(/^#([0-9a-fA-F]{3}){1,2}$/).optional(),
         borderStyle: z.enum(['solid', 'dashed', 'dotted']).optional(),
+        ariaLabel: z.string().max(160).optional(),
+        ariaDescription: z.string().max(400).optional(),
+        announceSlides: z.boolean().optional(),
+        previousLabel: z.string().max(80).optional(),
+        nextLabel: z.string().max(80).optional(),
+        statusLabel: z.string().max(120).optional(),
     }),
 };
 

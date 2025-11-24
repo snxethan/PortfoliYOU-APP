@@ -13,7 +13,7 @@ export default function CloudProjectsList({
     setHoverLinkedId,
     onRefresh,
     onSelectLocal,
-    onOpenCloud,
+    onOpenSettings,
 }: {
     userSignedIn: boolean;
     cloudProjects: CloudProject[];
@@ -24,11 +24,11 @@ export default function CloudProjectsList({
     setHoverLinkedId?: (id: string | null) => void;
     onRefresh: () => Promise<void>;
     onSelectLocal: (id: string) => void;
-    onOpenCloud: (projectIdOrCloudId: { projectId?: string; cloudId?: string }) => void;
+    onOpenSettings: (target: { projectId?: string; cloudId?: string }) => void;
 }) {
     if (!userSignedIn) return null;
     return (
-        <div className="mt-6 surface p-3 border border-[color:var(--border)] rounded-md bg-[color:var(--muted)]/40">
+        <div className="mt-6 surface p-3 border border-[color:var(--border)] rounded-md">
             <div className="flex items-center justify-between mb-2">
                 <div className="text-xs font-semibold uppercase tracking-wide">YOUR CLOUD PORTFOLIOS</div>
                 <button className="btn btn-ghost btn-xs" title="Refresh cloud" onClick={onRefresh}><RefreshCcw size={14} /></button>
@@ -60,11 +60,11 @@ export default function CloudProjectsList({
                                 <div className="flex items-center gap-2 text-xs">
                                     <button
                                         className={`btn btn-ghost btn-xs ${linked ? 'cloud-linked' : ''}`}
-                                        title="Cloud settings"
+                                        title="Portfolio settings"
                                         onClick={(e) => {
                                             e.stopPropagation();
-                                            if (linked) { onOpenCloud({ projectId: linked.id }); }
-                                            else { onOpenCloud({ cloudId: cp.id }); }
+                                            if (linked) { onOpenSettings({ projectId: linked.id, cloudId: cp.id }); }
+                                            else { onOpenSettings({ cloudId: cp.id }); }
                                         }}
                                     >
                                         <Cloud size={14} className={linked ? 'cloud-linked-icon' : ''} />

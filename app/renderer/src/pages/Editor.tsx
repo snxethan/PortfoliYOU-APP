@@ -5,11 +5,11 @@ import { DndContext, PointerSensor, useSensor, useSensors, DragEndEvent, DragSta
 
 import { useProjects } from "../providers/ProjectsProvider";
 import { useNotifications } from '../providers/NotificationsProvider';
+import { usePortfolioSettings } from "../providers/PortfolioSettingsProvider";
 import type { GridItem } from "../components/editor/canvas/GridCanvas";
 const ModifyWidgetModal = lazy(() => import("../components/editor/widgets/ModifyWidgetModal"));
 const WidgetsPalette = lazy(() => import("../components/editor/widgets/WidgetsPalette"));
 import PageSettingsModal from "../components/modals/PageSettingsModal";
-import ThemeSettingsModal from "../components/modals/ThemeSettingsModal";
 import EditorTopBar from "../components/editor/EditorTopBar";
 import PageControls from "../components/editor/PageControls";
 import ViewportSurface from "../components/editor/ViewportSurface";
@@ -27,6 +27,7 @@ const MAX_ZOOM = 1.75;
 export default function EditorPage() {
   const { selectedProject, createPage, deletePage, renamePage, getPageItems, setPageItems, setPageStarter, setPageBackground, activeTheme } = useProjects();
   const { add: notify } = useNotifications();
+  const { openSettings } = usePortfolioSettings();
   const navigate = useNavigate();
 
   const notifyWidgetChange = useCallback((action: 'create' | 'delete', label?: string) => {
@@ -48,10 +49,6 @@ export default function EditorPage() {
       const fallback = selectedProject.pageOrder?.[0] || null;
       setCurrentPageId(fallback || null);
     }
-  }, [selectedProject?.id]);
-
-  useEffect(() => {
-    if (!selectedProject) setThemeModalOpen(false);
   }, [selectedProject?.id]);
 
   // If project is cloud-linked, ensure the selected page is within the first 10
@@ -77,7 +74,6 @@ export default function EditorPage() {
   const [renameModalOpen, setRenameModalOpen] = useState<boolean>(false);
   const [renameOldTitle, setRenameOldTitle] = useState<string>("");
   const [renameInitialStarter, setRenameInitialStarter] = useState<boolean>(false);
-  const [themeModalOpen, setThemeModalOpen] = useState<boolean>(false);
 
   // Gap between cells (both x and y), in pixels
   const [gap, setGap] = useState<number>(12);
@@ -508,7 +504,6 @@ export default function EditorPage() {
       <section className="surface p-0 overflow-hidden">
         {/* Top bar */}
         <EditorTopBar
-          onOpenTheme={selectedProject ? () => setThemeModalOpen(true) : undefined}
           previewMode={previewMode}
           togglePreviewMode={togglePreviewMode}
           gap={gap}
@@ -546,6 +541,7 @@ export default function EditorPage() {
               if (!selectedProject || !currentPageId) return;
               setPageBackground(selectedProject.id, currentPageId, color);
             }}
+            onOpenThemeSettings={selectedProject ? () => openSettings({ projectId: selectedProject.id, section: "theme" }) : undefined}
             onSelectPage={(id) => {
               setCurrentPageId(id);
               if (selectedProject && id) {
@@ -958,11 +954,6 @@ export default function EditorPage() {
           }}
         />
       )}
-
-      {themeModalOpen && (
-        <ThemeSettingsModal open onClose={() => setThemeModalOpen(false)} />
-      )}
-
       {editingItem && (
         <Suspense fallback={null}>
           <ModifyWidgetModal

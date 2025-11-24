@@ -19,6 +19,8 @@ type LinkWidgetProps = {
     fontSize?: number;
     weight?: TextWeight;
     italic?: boolean;
+    ariaLabel?: string;
+    ariaDescription?: string;
 };
 
 const defaultLinkProps: LinkWidgetProps = {
@@ -29,6 +31,8 @@ const defaultLinkProps: LinkWidgetProps = {
     fontSize: 16,
     weight: 'bold',
     italic: false,
+    ariaLabel: undefined,
+    ariaDescription: undefined,
 };
 
 const FONT_STACKS: Record<FontChoice, string> = {
@@ -83,7 +87,9 @@ function sanitizeProps(raw: LinkWidgetProps): LinkWidgetProps {
     const fontSize = sanitizeFontSize(raw.fontSize);
     const weight = sanitizeWeight(raw.weight);
     const italic = sanitizeBool(raw.italic, defaultLinkProps.italic);
-    return { url, label, variant, iconLeft, iconRight, font, fontSize, weight, italic };
+    const ariaLabel = (raw.ariaLabel || '').trim() || undefined;
+    const ariaDescription = (raw.ariaDescription || '').trim() || undefined;
+    return { url, label, variant, iconLeft, iconRight, font, fontSize, weight, italic, ariaLabel, ariaDescription };
 }
 
 function Placeholder() {
@@ -124,7 +130,8 @@ function LinkView(props: LinkWidgetProps) {
         target: '_blank',
         rel: 'noopener noreferrer',
         title: safe.label,
-        'aria-label': safe.label,
+        'aria-label': safe.ariaLabel || safe.label,
+        'aria-description': safe.ariaDescription,
     };
 
     if (safe.variant === 'text') {
@@ -237,6 +244,8 @@ const def: WidgetDefinition<LinkWidgetProps> = {
         fontSize: z.number().min(8).max(128).optional(),
         weight: z.enum(['normal', 'bold']).optional(),
         italic: z.boolean().optional(),
+        ariaLabel: z.string().max(120).optional(),
+        ariaDescription: z.string().max(300).optional(),
     }),
 };
 

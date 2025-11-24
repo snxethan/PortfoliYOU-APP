@@ -1,5 +1,5 @@
-import React, { useState } from "react";
-import { CheckCircle2, Cloud, Edit3, FolderDown, FolderOpen, FolderUp, Trash2, UploadCloud, Wrench } from "lucide-react";
+import React from "react";
+import { Cloud, FolderDown, FolderOpen, FolderUp, Settings2, Trash2, UploadCloud, Wrench } from "lucide-react";
 
 export type LocalProject = {
     id: string;
@@ -15,31 +15,27 @@ export default function ProjectsList({
     hoverLinkedId,
     userSignedIn,
     onSelect,
-    onRename,
     onDelete,
     onExport,
     onSaveAs,
     onOpenFileLocation,
     onOpenEditor,
     onOpenDeploy,
-    onOpenCloud,
+    onOpenSettings,
 }: {
     projects: LocalProject[];
     selectedProjectId?: string | null;
     hoverLinkedId?: string | null;
     userSignedIn: boolean;
     onSelect: (id: string) => void;
-    onRename: (id: string, name: string) => Promise<void>;
     onDelete: (id: string, opts: { deleteFile?: boolean }) => Promise<void>;
     onExport: (id: string) => void;
     onSaveAs: (id: string) => Promise<void>;
     onOpenFileLocation: (filePath: string) => Promise<void> | void;
     onOpenEditor: (id: string) => void;
     onOpenDeploy: (id: string) => void;
-    onOpenCloud: (id: string) => void;
+    onOpenSettings: (id: string, section?: 'portfolio' | 'cloud') => void;
 }) {
-    const [editingId, setEditingId] = useState<string | null>(null);
-    const [editDraft, setEditDraft] = useState('');
     return (
         <div className="surface p-3 border border-[color:var(--border)] rounded-md">
             <div className="text-xs font-semibold uppercase tracking-wide mb-2">YOUR LOCAL PORTFOLIOS</div>
@@ -55,25 +51,14 @@ export default function ProjectsList({
                             title={p._filePath || ''}
                         >
                             <div className="min-w-0">
-                                {editingId === p.id ? (
-                                    <form className="flex items-center gap-2" onSubmit={async (e) => { e.preventDefault(); const v = editDraft.trim(); if (v) await onRename(p.id, v); setEditingId(null); }}>
-                                        <input className="input w-64" value={editDraft} onChange={e => setEditDraft(e.target.value)} onClick={(e) => e.stopPropagation()} onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); setEditingId(null); } }} />
-                                        <button type="submit" className="btn btn-primary btn-xs"><CheckCircle2 size={14} /></button>
-                                        <button type="button" className="btn btn-outline btn-xs" onClick={(e) => { e.stopPropagation(); setEditingId(null); }}>Cancel</button>
-                                    </form>
-                                ) : (
-                                    <>
-                                        <div className="text-sm font-medium truncate flex items-center gap-1" title={p.name}>
-                                            <span className="truncate">{p.name}</span>
-                                            {p._synced && <span className="inline-flex" aria-label="Cloud project"><Cloud size={12} className="text-[color:var(--accent)]" /></span>}
-                                            <button className="btn btn-ghost text-xs px-1" title="Rename" onClick={(e) => { e.stopPropagation(); setEditingId(p.id); setEditDraft(p.name); }}><Edit3 size={12} /></button>
-                                            {selectedProjectId === p.id && (
-                                                <span className="ml-2 inline-flex items-center text-[10px] px-1.5 py-0.5 rounded-full bg-[color:var(--accent)] text-black border border-[color:var(--accent-700)]">Selected</span>
-                                            )}
-                                        </div>
-                                        <div className="text-xs text-[color:var(--fg-muted)]">Updated {new Date(p.updatedAt).toLocaleString()}</div>
-                                    </>
-                                )}
+                                <div className="text-sm font-medium truncate flex items-center gap-1" title={p.name}>
+                                    <span className="truncate">{p.name}</span>
+                                    {p._synced && <span className="inline-flex" aria-label="Cloud project"><Cloud size={12} className="text-[color:var(--accent)]" /></span>}
+                                    {selectedProjectId === p.id && (
+                                        <span className="ml-2 inline-flex items-center text-[10px] px-1.5 py-0.5 rounded-full bg-[color:var(--accent)] text-black border border-[color:var(--accent-700)]">Selected</span>
+                                    )}
+                                </div>
+                                <div className="text-xs text-[color:var(--fg-muted)]">Updated {new Date(p.updatedAt).toLocaleString()}</div>
                             </div>
                             <div className="flex gap-1">
                                 {!p._filePath ? (
@@ -84,15 +69,13 @@ export default function ProjectsList({
                                 <button className="btn btn-ghost text-xs" title="Export project" onClick={(e) => { e.stopPropagation(); onExport(p.id); }}><FolderDown size={14} /></button>
                                 <button className="btn btn-ghost text-xs bg-[color:var(--muted)]/60 hover:bg-[color:var(--muted)]" title="Editor" onClick={(e) => { e.stopPropagation(); onOpenEditor(p.id); }}><Wrench size={14} /></button>
                                 <button className="btn btn-ghost text-xs bg-[color:var(--muted)]/60 hover:bg-[color:var(--muted)]" title="Deploy" onClick={(e) => { e.stopPropagation(); onOpenDeploy(p.id); }}><UploadCloud size={14} /></button>
-                                {userSignedIn && (
-                                    <button
-                                        className={`btn btn-ghost text-xs ${p._synced ? 'cloud-linked' : ''}`}
-                                        title="Cloud settings"
-                                        onClick={(e) => { e.stopPropagation(); onOpenCloud(p.id); }}
-                                    >
-                                        <Cloud size={14} className={p._synced ? 'cloud-linked-icon' : ''} />
-                                    </button>
-                                )}
+                                <button
+                                    className="btn btn-ghost text-xs"
+                                    title="Portfolio settings"
+                                    onClick={(e) => { e.stopPropagation(); onOpenSettings(p.id, userSignedIn ? 'portfolio' : undefined); }}
+                                >
+                                    <Settings2 size={14} />
+                                </button>
                                 <button className="btn btn-ghost text-xs text-red-500 border border-red-500/40 hover:bg-red-500/10" title="Delete" onClick={async (e) => {
                                     e.stopPropagation();
                                     const confirmDelete = window.confirm(`Delete "${p.name}" from the list${p._filePath ? ' (file can optionally be removed next)' : ''}?`);

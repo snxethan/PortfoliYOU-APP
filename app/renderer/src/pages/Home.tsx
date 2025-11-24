@@ -15,14 +15,14 @@ import { useProjects } from "../providers/ProjectsProvider";
 // CTA is now shown via a popup from the sidebar Account section when not signed in
 import { useNotifications } from "../providers/NotificationsProvider";
 import type { NotificationType } from "../providers/NotificationsProvider";
-import { useCloudSettings } from "../providers/CloudSettingsProvider";
+import { usePortfolioSettings } from "../providers/PortfolioSettingsProvider";
 
 
 export default function HomePage() {
 	const { user } = useAuth();
-	const { projects, hasAny, importProject, exportProject, createProjectWithSave, selectProject, renameProject, deleteProject, saveProject, selectedProjectId, cloudMaxProjects, cloudMaxStorageMB, cloudBytesUsed, cloudProjectsCount, listCloudProjects, getCloudObjectInfoByCloudId, reconcileCloudLinks } = useProjects();
+	const { projects, hasAny, importProject, exportProject, selectProject, deleteProject, saveProject, selectedProjectId, cloudMaxProjects, cloudMaxStorageMB, cloudBytesUsed, cloudProjectsCount, listCloudProjects, getCloudObjectInfoByCloudId, reconcileCloudLinks } = useProjects();
 	const { notifications, dismiss, clearAll } = useNotifications();
-	const { openCloud } = useCloudSettings();
+	const { openSettings, openCreate } = usePortfolioSettings();
 	const navigate = useNavigate();
 	const [cloudProjects, setCloudProjects] = useState<Array<{ id: string; name: string; updatedAt: string; storagePath: string }>>([]);
 	const [cloudInfo, setCloudInfo] = useState<Record<string, { storagePath: string; sizeBytes: number; updatedAt: string }>>({});
@@ -125,7 +125,7 @@ export default function HomePage() {
 					{/* Inline create/import sub-section */}
 					<div id="py-quickstart" ref={quickstartRef} className={`${pulseQuickstart ? 'highlight-pulse' : ''}`}>
 						<QuickstartPanel
-							onCreate={createProjectWithSave}
+							onOpenCreate={() => openCreate()}
 							onImport={importProject}
 							onSelectProject={(id) => selectProject(id)}
 						/>
@@ -138,14 +138,13 @@ export default function HomePage() {
 						hoverLinkedId={hoverLinkedId}
 						userSignedIn={!!user}
 						onSelect={(id) => selectProject(id)}
-						onRename={(id, name) => renameProject(id, name)}
 						onDelete={(id, opts) => deleteProject(id, opts)}
 						onExport={(id) => exportProject(id)}
 						onSaveAs={(id) => saveProject(id, { saveAs: true })}
 						onOpenFileLocation={async (filePath) => { if (window.api?.showItemInFolder) await window.api.showItemInFolder({ filePath }); }}
 						onOpenEditor={(id) => { selectProject(id); navigate('/editor'); }}
 						onOpenDeploy={(id) => { selectProject(id); navigate('/deploy'); }}
-						onOpenCloud={(id) => openCloud({ projectId: id })}
+						onOpenSettings={(id, section) => openSettings({ projectId: id, section })}
 					/>
 
 					{/* Cloud portfolios list */}
@@ -172,7 +171,7 @@ export default function HomePage() {
 								} catch { /* ignore */ }
 							}}
 							onSelectLocal={(id) => selectProject(id)}
-							onOpenCloud={(t) => openCloud(t)}
+							onOpenSettings={(target) => openSettings({ projectId: target.projectId, cloudId: target.cloudId, section: 'cloud' })}
 						/>
 					)}
 				</div>
@@ -201,7 +200,7 @@ export default function HomePage() {
 				</section>
 			)}
 
-			{/* Cloud settings managed globally by CloudSettingsProvider */}
+			{/* Portfolio settings modal mounted globally */}
 
 			{/* Account settings modal */}
 			{user && accountOpen && (
