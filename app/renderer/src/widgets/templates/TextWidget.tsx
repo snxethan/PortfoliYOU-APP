@@ -14,6 +14,7 @@ export const TextWidgetDef: WidgetDefinition<{ text: string; align?: 'left' | 'c
     type: 'text',
     label: 'Text Block',
     defaultProps: { text: 'Edit me', align: 'left' },
+    version: 1,
     grid: { w: 4, h: 3 },
     schema,
     render: (props) => {

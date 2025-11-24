@@ -11,6 +11,7 @@ const widgetEntries: WidgetEntry[] = [
     meta: {
       type: 'text',
       label: 'Text Block',
+      version: 1,
       grid: { w: 4, h: 3 },
       category: 'Content',
       tags: ['content', 'copy', 'text', 'paragraph'],
@@ -22,6 +23,7 @@ const widgetEntries: WidgetEntry[] = [
     meta: {
       type: 'image',
       label: 'Image',
+      version: 1,
       grid: { w: 2, h: 2 },
       category: 'Media',
       tags: ['media', 'image', 'photo', 'gallery'],
@@ -33,6 +35,7 @@ const widgetEntries: WidgetEntry[] = [
     meta: {
       type: 'video',
       label: 'Video',
+      version: 1,
       grid: { w: 6, h: 4 },
       category: 'Media',
       tags: ['media', 'video', 'youtube', 'embed'],
@@ -44,6 +47,7 @@ const widgetEntries: WidgetEntry[] = [
     meta: {
       type: 'project',
       label: 'Project Card',
+      version: 1,
       grid: { w: 6, h: 4 },
       category: 'Projects',
       tags: ['portfolio', 'project', 'card', 'case-study'],
@@ -55,6 +59,7 @@ const widgetEntries: WidgetEntry[] = [
     meta: {
       type: 'contact',
       label: 'Email Contact',
+      version: 1,
       grid: { w: 6, h: 4 },
       category: 'Contact',
       tags: ['contact', 'form', 'email', 'cta'],
@@ -66,6 +71,7 @@ const widgetEntries: WidgetEntry[] = [
     meta: {
       type: 'link',
       label: 'Link',
+      version: 1,
       grid: { w: 3, h: 2 },
       category: 'Content',
       tags: ['content', 'link', 'cta', 'button'],
@@ -77,6 +83,7 @@ const widgetEntries: WidgetEntry[] = [
     meta: {
       type: 'nav-link',
       label: 'Page Navigation',
+      version: 1,
       grid: { w: 3, h: 2 },
       category: 'Content',
       tags: ['navigation', 'menu', 'section', 'page'],
@@ -88,6 +95,7 @@ const widgetEntries: WidgetEntry[] = [
     meta: {
       type: 'carousel',
       label: 'Carousel',
+      version: 1,
       grid: { w: 6, h: 4 },
       category: 'Media',
       tags: ['media', 'gallery', 'slider', 'carousel', 'image', 'video'],
@@ -99,6 +107,7 @@ const widgetEntries: WidgetEntry[] = [
     meta: {
       type: 'github-repos',
       label: 'GitHub Repos',
+      version: 1,
       grid: { w: 6, h: 6 },
       category: 'Projects',
       tags: ['api', 'integration', 'github', 'feed', 'portfolio'],

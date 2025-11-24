@@ -3,6 +3,7 @@ import { z } from 'zod';
 
 import type { WidgetDefinition } from '../types';
 import { normalizeExternalLinkUrl } from '../utils/linkUrl';
+import { useWidgetTheme } from '../sdk';
 
 type LinkVariant = 'text' | 'button' | 'card';
 type FontChoice = 'system' | 'serif' | 'mono';
@@ -94,11 +95,16 @@ function Placeholder() {
 }
 
 function LinkView(props: LinkWidgetProps) {
+    const theme = useWidgetTheme();
     const safe = sanitizeProps(props);
     if (!safe.url) {
         return <Placeholder />;
     }
-    const fontFamily = FONT_STACKS[safe.font || 'system'];
+    const fontFamily = safe.font === 'serif'
+        ? FONT_STACKS.serif
+        : safe.font === 'mono'
+            ? FONT_STACKS.mono
+            : theme.bodyFont || FONT_STACKS.system;
     const fontWeight = safe.weight === 'bold' ? 700 : 400;
     const fontStyle = safe.italic ? 'italic' : 'normal';
     const fontSize = safe.fontSize || 16;
@@ -122,12 +128,13 @@ function LinkView(props: LinkWidgetProps) {
     };
 
     if (safe.variant === 'text') {
+        const linkColor = theme.accent || 'var(--accent, #2563eb)';
         return (
             <div className="w-full h-full flex items-center justify-center">
                 <a
                     {...baseLinkProps}
                     style={{
-                        color: 'var(--accent, #2563eb)',
+                        color: linkColor,
                         fontWeight,
                         textDecoration: 'underline',
                         fontSize,
@@ -146,6 +153,10 @@ function LinkView(props: LinkWidgetProps) {
     }
 
     if (safe.variant === 'card') {
+        const borderColor = theme.border || 'var(--border, #e5e7eb)';
+        const surface = theme.surface || 'var(--surface, #ffffff)';
+        const textColor = theme.text || 'var(--fg, #0f172a)';
+        const accent = theme.accent || 'var(--accent, #2563eb)';
         return (
             <a
                 {...baseLinkProps}
@@ -158,15 +169,15 @@ function LinkView(props: LinkWidgetProps) {
                     gap: 6,
                     padding: 16,
                     borderRadius: 16,
-                    border: '1px solid var(--border, #e5e7eb)',
-                    background: 'var(--surface, #ffffff)',
-                    boxShadow: '0 8px 20px rgba(15, 23, 42, 0.08)',
+                    border: `1px solid ${borderColor}`,
+                    background: surface,
+                    boxShadow: `0 8px 20px color-mix(in srgb, ${borderColor} 35%, transparent)`,
                     textDecoration: 'none',
-                    color: 'var(--fg, #0f172a)',
+                    color: textColor,
                 }}
             >
-                <span style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: 1, opacity: 0.8 }}>Link</span>
-                <div style={{ display: 'flex', alignItems: 'center', fontSize, fontWeight, fontFamily, fontStyle }}>
+                <span style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: 1, color: accent, opacity: 0.9 }}>Link</span>
+                <div style={{ display: 'flex', alignItems: 'center', fontSize, fontWeight, fontFamily, fontStyle, color: textColor }}>
                     {iconLeft}
                     <span>{safe.label}</span>
                     {iconRight}
@@ -175,6 +186,9 @@ function LinkView(props: LinkWidgetProps) {
         );
     }
 
+    const borderColor = theme.border || '#0f172a';
+    const buttonBg = theme.accent || 'var(--accent, #111827)';
+    const buttonText = theme.widgetText || '#ffffff';
     return (
         <div className="w-full h-full flex items-center justify-center">
             <a
@@ -185,10 +199,10 @@ function LinkView(props: LinkWidgetProps) {
                     gap: 8,
                     padding: '10px 16px',
                     borderRadius: 999,
-                    border: '2px solid #000',
-                    boxShadow: '2px 2px 0 #000',
-                    background: 'var(--accent, #111827)',
-                    color: '#fff',
+                    border: `2px solid ${borderColor}`,
+                    boxShadow: `2px 2px 0 color-mix(in srgb, ${borderColor} 70%, transparent)`,
+                    background: buttonBg,
+                    color: buttonText,
                     textDecoration: 'none',
                     fontWeight,
                     fontFamily,
@@ -207,6 +221,7 @@ function LinkView(props: LinkWidgetProps) {
 const def: WidgetDefinition<LinkWidgetProps> = {
     type: 'link',
     label: 'Link',
+    version: 1,
     defaultProps: defaultLinkProps,
     grid: { w: 3, h: 2 },
     render: (props) => <LinkView {...props} />,

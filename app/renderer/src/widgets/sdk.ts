@@ -1,6 +1,8 @@
 import { createContext, useContext, useMemo, useState } from 'react';
 
 import type { PropSchema, WidgetDefinition } from './types';
+import type { WidgetThemeSnapshot } from './theme';
+import { FALLBACK_WIDGET_THEME } from './theme';
 
 export type ValidationResult<P> = {
     ok: boolean;
@@ -96,10 +98,15 @@ export type WidgetAPI = {
     // Optional: current page id when rendering inside preview/export so widgets
     // can expose a11y affordances like aria-current
     currentPageId?: string;
+    theme: WidgetThemeSnapshot;
 };
 
-export const WidgetContext = createContext<WidgetAPI>({ id: '', editing: false, interactive: true, updateProps: () => { /* noop */ }, currentPageId: undefined });
+export const WidgetContext = createContext<WidgetAPI>({ id: '', editing: false, interactive: true, updateProps: () => { /* noop */ }, currentPageId: undefined, theme: FALLBACK_WIDGET_THEME });
 
 export function useWidget() {
     return useContext(WidgetContext);
+}
+
+export function useWidgetTheme() {
+    return useContext(WidgetContext).theme;
 }

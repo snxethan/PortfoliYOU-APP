@@ -13,6 +13,7 @@ export type GridItem = {
   z?: number; // stacking order (higher is on top)
   type?: string; // widget type key
   props?: unknown; // widget-specific configuration
+  schemaVersion?: number; // persisted widget schema version
   pinned?: boolean; // cannot be moved when true
   locked?: boolean; // cannot be modified or moved when true
 };
@@ -233,7 +234,10 @@ export default function DraggableItem({ item, metrics, onMove, scrollEl, onDelet
         {/* Render actual widget content */}
         <div className="w-full h-full overflow-hidden">
           {item.type ? (
-            <WidgetRenderer instance={{ id: item.id, type: item.type, props: item.props ?? {} }} />
+            <WidgetRenderer
+              instance={{ id: item.id, type: item.type, props: item.props ?? {}, schemaVersion: item.schemaVersion }}
+              onUpgradeInstance={(next) => onMove({ ...item, props: next.props, schemaVersion: next.schemaVersion })}
+            />
           ) : (
             <div className="text-[10px] text-[color:var(--fg-muted)] border border-dashed border-[color:var(--border)] rounded h-full flex items-center justify-center">
               Unknown widget

@@ -1,9 +1,12 @@
 import React, { useCallback, useMemo, useRef } from "react";
 
+import type { Theme } from "../../themes/types";
 import PreviewIframe from "./PreviewIframe";
 import PagePreview from "./PagePreview";
 import GridCanvas from "./canvas/GridCanvas";
 import type { GridItem } from "./canvas/GridCanvas";
+import { themeToCssVars, FALLBACK_THEME } from "../../themes/utils";
+type ThemeVarsStyle = React.CSSProperties & Record<string, string>;
 
 export type ViewportSurfaceProps = {
     pageWidth: number;
@@ -43,6 +46,8 @@ export type ViewportSurfaceProps = {
     minZoom: number;
     maxZoom: number;
     onZoomChange: (value: number) => void;
+    pageBackground: string;
+    theme?: Theme | null;
 };
 
 export default function ViewportSurface(props: ViewportSurfaceProps) {
@@ -78,9 +83,19 @@ export default function ViewportSurface(props: ViewportSurfaceProps) {
         minZoom,
         maxZoom,
         onZoomChange,
+        pageBackground,
+        theme,
     } = props;
 
     const scrollRef = useRef<HTMLDivElement | null>(null);
+    const pageThemeVars = useMemo<ThemeVarsStyle>(() => {
+        const vars = themeToCssVars(theme || FALLBACK_THEME);
+        const style = {} as ThemeVarsStyle;
+        for (const [key, value] of Object.entries(vars)) {
+            style[key] = value;
+        }
+        return style;
+    }, [theme]);
 
     // Compute preview content height (same math as PagePreview) to allow expand mode to grow beyond pageHeight
     const previewContentRows = useMemo(() => {
@@ -110,19 +125,24 @@ export default function ViewportSurface(props: ViewportSurfaceProps) {
     }, [zoom, onZoomChange, clampZoomValue]);
     const scaledWidth = pageWidth * zoom;
     const scaledHeight = logicalHeight * zoom;
+    const canvasBackground = pageBackground || '#ffffff';
 
     return (
         <div ref={scrollRef} className="p-2 min-w-0 overflow-auto" onWheel={handleWheel}>
             <div className="flex justify-center">
                 <div
-                    className={"min-h-[28rem] border border-black bg-white shadow-sm rounded-md relative " + (heightMode === 'fixed' ? 'overflow-y-auto overflow-x-hidden' : 'overflow-visible')}
-                    style={{ width: scaledWidth, minHeight: scaledHeight }}
+                    className={"min-h-[28rem] border border-[color:var(--border)] shadow-sm rounded-md relative " + (heightMode === 'fixed' ? 'overflow-y-auto overflow-x-hidden' : 'overflow-visible')}
+                    style={{ width: scaledWidth, minHeight: scaledHeight, backgroundColor: canvasBackground }}
+                    data-testid="viewport-surface"
+                    data-mode={previewMode ? 'preview' : 'edit'}
                 >
                     {previewMode ? (
                         <div style={{ width: scaledWidth, minHeight: scaledHeight }}>
                             <PreviewIframe
                                 width={pageWidth}
                                 height={effectivePageHeight}
+                                pageBackground={canvasBackground}
+                                theme={theme}
                                 style={{
                                     width: pageWidth,
                                     height: effectivePageHeight,
@@ -138,36 +158,39 @@ export default function ViewportSurface(props: ViewportSurfaceProps) {
                                     rowH={rowH}
                                     items={items}
                                     currentPageId={currentPageId}
+                                    background={canvasBackground}
                                     onNavigatePage={onNavigatePage}
                                 />
                             </PreviewIframe>
                         </div>
                     ) : (
-                        <GridCanvas
-                            pageWidth={pageWidth}
-                            zoom={zoom}
-                            cols={cols}
-                            gap={gap}
-                            rowH={rowH}
-                            items={items}
-                            onChange={onItemsChange}
-                            scrollEl={scrollRef.current}
-                            viewportHeight={pageHeight}
-                            showGrid={showGrid}
-                            selectedId={selectedId}
-                            onSelect={onSelect}
-                            onDelete={onDelete}
-                            onDuplicate={onDuplicate}
-                            onItemMoveStart={onMoveStart}
-                            onItemMoveEnd={onMoveEnd}
-                            onBringToFront={onBringToFront}
-                            onSendToBack={onSendToBack}
-                            onBringForward={onBringForward}
-                            onSendBackward={onSendBackward}
-                            onTogglePin={onTogglePin}
-                            onOpenModify={onOpenModify}
-                            onDropAsset={onDropAsset}
-                        />
+                        <div style={pageThemeVars}>
+                            <GridCanvas
+                                pageWidth={pageWidth}
+                                zoom={zoom}
+                                cols={cols}
+                                gap={gap}
+                                rowH={rowH}
+                                items={items}
+                                onChange={onItemsChange}
+                                scrollEl={scrollRef.current}
+                                viewportHeight={pageHeight}
+                                showGrid={showGrid}
+                                selectedId={selectedId}
+                                onSelect={onSelect}
+                                onDelete={onDelete}
+                                onDuplicate={onDuplicate}
+                                onItemMoveStart={onMoveStart}
+                                onItemMoveEnd={onMoveEnd}
+                                onBringToFront={onBringToFront}
+                                onSendToBack={onSendToBack}
+                                onBringForward={onBringForward}
+                                onSendBackward={onSendBackward}
+                                onTogglePin={onTogglePin}
+                                onOpenModify={onOpenModify}
+                                onDropAsset={onDropAsset}
+                            />
+                        </div>
                     )}
                     {/* Resize handles */}
                     {/* Bottom-center: vertical resize */}

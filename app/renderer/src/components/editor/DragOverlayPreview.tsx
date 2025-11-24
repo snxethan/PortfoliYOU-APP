@@ -1,6 +1,6 @@
 import React, { useLayoutEffect, useRef } from "react";
 
-export type PaletteDrag = { src?: string; label?: string; w?: number; h?: number } | undefined;
+export type PaletteDrag = { src?: string; type?: string; label?: string; w?: number; h?: number; schemaVersion?: number } | undefined;
 
 type OverlaySize = { width: number; height: number };
 

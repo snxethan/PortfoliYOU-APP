@@ -1,11 +1,16 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
+import type { Theme } from '../../themes/types';
+import { applyThemeToElement, FALLBACK_THEME } from '../../themes/utils';
+
 export default function PreviewPopup({
   open,
   title = 'PortfoliYOU – Preview',
   width,
   height,
+  pageBackground,
+  theme,
   children,
   onClose,
 }: {
@@ -13,6 +18,8 @@ export default function PreviewPopup({
   title?: string;
   width: number;
   height?: number; // optional; popup will be scrollable vertically regardless
+  pageBackground?: string;
+  theme?: Theme | null;
   children?: React.ReactNode;
   onClose?: () => void;
 }) {
@@ -25,6 +32,21 @@ export default function PreviewPopup({
     const h = Math.min(Math.max(420, Math.round((height ?? 800) + 128)), 1400);
     return `width=${w},height=${h},resizable=yes,scrollbars=yes`;
   }, [width, height]);
+
+  const syncPopupTheme = (target?: Window | null) => {
+    if (!target || target.closed) return;
+    const doc = target.document;
+    if (!doc) return;
+    const root = doc.documentElement;
+    const body = doc.body;
+    const nextTheme = theme || FALLBACK_THEME;
+    applyThemeToElement(root, nextTheme);
+    applyThemeToElement(body, nextTheme);
+    if (pageBackground) {
+      body.style.backgroundColor = pageBackground;
+      root.style.setProperty('--bg', pageBackground);
+    }
+  };
 
   useEffect(() => {
     if (!open) {
@@ -45,10 +67,11 @@ export default function PreviewPopup({
     // Write minimal HTML + base styles and scroll behavior
     const doc = win.document;
     doc.open();
+    const bg = pageBackground || '#ffffff';
     doc.write(`<!doctype html><html><head><meta charset="utf-8" /><title>${title}</title>
 <style>
   html, body { height: 100%; margin: 0; }
-  body { background: #ffffff; color: #111827; font: 14px/1.4 ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, Noto Sans, "Apple Color Emoji", "Segoe UI Emoji"; overflow-x: hidden; overflow-y: auto; }
+  body { background: ${bg}; color: #111827; font: 14px/1.4 ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, Noto Sans, "Apple Color Emoji", "Segoe UI Emoji"; overflow-x: hidden; overflow-y: auto; }
   :root {
     --bg: #ffffff;
     --surface: #ffffff;
@@ -76,6 +99,7 @@ export default function PreviewPopup({
 
     const root = doc.getElementById('__preview_root') as HTMLElement | null;
     setMountNode(root);
+    syncPopupTheme(win);
 
     const onBeforeUnload = () => {
       onClose?.();
@@ -87,6 +111,11 @@ export default function PreviewPopup({
       win.removeEventListener('beforeunload', onBeforeUnload);
     };
   }, [open, title, features]);
+
+  useEffect(() => {
+    if (!open) return;
+    syncPopupTheme(winRef.current);
+  }, [open, theme, pageBackground]);
 
   useEffect(() => {
     return () => {

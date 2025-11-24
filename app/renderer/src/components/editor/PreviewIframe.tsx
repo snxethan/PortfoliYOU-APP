@@ -1,21 +1,29 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
+import type { Theme } from '../../themes/types';
+import { applyThemeToElement, FALLBACK_THEME } from '../../themes/utils';
+
 export default function PreviewIframe({
     width,
     height,
     className,
     style,
     children,
+    pageBackground,
+    theme,
 }: {
     width: number;
     height: number;
     className?: string;
     style?: React.CSSProperties;
     children?: React.ReactNode;
+    pageBackground?: string;
+    theme?: Theme | null;
 }) {
     const iframeRef = useRef<HTMLIFrameElement | null>(null);
     const [mountNode, setMountNode] = useState<HTMLElement | null>(null);
+    const [docReady, setDocReady] = useState(false);
 
     useEffect(() => {
         const iframe = iframeRef.current;
@@ -25,7 +33,7 @@ export default function PreviewIframe({
             if (!doc) return;
             // Minimal blank page styles and CSS variables fallback
             doc.open();
-                        doc.write(`<!doctype html><html><head><meta charset="utf-8" />
+            doc.write(`<!doctype html><html><head><meta charset="utf-8" />
         <style>
                     html, body { height: 100%; overflow-x: hidden; overflow-y: auto; }
           *, *::before, *::after { box-sizing: border-box; }
@@ -54,15 +62,37 @@ export default function PreviewIframe({
             } catch { /* ignore style cloning issues */ }
             const root = doc.getElementById('__preview_root') as HTMLElement | null;
             setMountNode(root);
+            setDocReady(true);
         };
+        let cleanup: (() => void) | undefined;
         // If already loaded, trigger immediately
         if (iframe.contentDocument?.readyState === 'complete') {
             onLoad();
         } else {
             iframe.addEventListener('load', onLoad, { once: true });
-            return () => iframe.removeEventListener('load', onLoad);
+            cleanup = () => iframe.removeEventListener('load', onLoad);
         }
+        return () => {
+            cleanup?.();
+            setDocReady(false);
+        };
     }, []);
+
+    useEffect(() => {
+        if (!docReady) return;
+        const iframe = iframeRef.current;
+        const doc = iframe?.contentDocument;
+        if (!doc) return;
+        const root = doc.documentElement;
+        const body = doc.body;
+        const nextTheme = theme || FALLBACK_THEME;
+        applyThemeToElement(root, nextTheme);
+        applyThemeToElement(body, nextTheme);
+        if (pageBackground) {
+            body.style.backgroundColor = pageBackground;
+            root.style.setProperty('--bg', pageBackground);
+        }
+    }, [docReady, theme, pageBackground]);
 
     return (
         <iframe

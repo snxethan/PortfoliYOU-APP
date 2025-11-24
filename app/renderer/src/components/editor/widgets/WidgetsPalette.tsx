@@ -49,8 +49,8 @@ function renderPreview(type: string) {
   );
 }
 
-function DraggablePaletteTile({ type, label, w, h }: { type: string; label: string; w: number; h: number }) {
-  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: `palette:${type}`, data: { src: 'palette', type, w, h, label } });
+function DraggablePaletteTile({ type, label, w, h, schemaVersion }: { type: string; label: string; w: number; h: number; schemaVersion?: number }) {
+  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: `palette:${type}`, data: { src: 'palette', type, w, h, label, schemaVersion } });
   return (
     <div
       ref={setNodeRef}
@@ -65,7 +65,7 @@ function DraggablePaletteTile({ type, label, w, h }: { type: string; label: stri
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
-          window.dispatchEvent(new CustomEvent('py:addWidget', { detail: { type, label, w, h } }));
+          window.dispatchEvent(new CustomEvent('py:addWidget', { detail: { type, label, w, h, schemaVersion } }));
         }
       }}
     >
@@ -160,6 +160,7 @@ function WidgetsPalette() {
                         label={def.label}
                         w={def.grid?.w ?? 4}
                         h={def.grid?.h ?? 4}
+                        schemaVersion={def.version}
                       />
                     ))}
                   </div>

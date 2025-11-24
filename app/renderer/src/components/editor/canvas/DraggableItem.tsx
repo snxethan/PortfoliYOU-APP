@@ -2,6 +2,7 @@ import { useRef, useState } from "react";
 import { Copy, Settings as SettingsIcon, Pin, PinOff, Trash2 } from "lucide-react";
 
 import WidgetRenderer from "../../../widgets/Renderer";
+import type { Theme } from "../../../themes/types";
 
 export type GridItem = {
   id: string;
@@ -13,6 +14,7 @@ export type GridItem = {
   z?: number; // stacking order (higher is on top)
   type?: string; // widget type key
   props?: unknown; // widget-specific configuration
+  schemaVersion?: number; // persisted widget schema version
   pinned?: boolean; // cannot be moved when true
   locked?: boolean; // cannot be modified or moved when true
 };
@@ -26,7 +28,7 @@ export type GridMetrics = {
 
 
 
-export default function DraggableItem({ item, metrics, onMove, scrollEl, zoom, onDelete, onDuplicate, onMoveStart, onMoveEnd, onBringToFront, onSendToBack, onBringForward, onSendBackward, onTogglePin, onOpenModify, onDropAsset, selected, onSelect }: {
+export default function DraggableItem({ item, metrics, onMove, scrollEl, zoom, onDelete, onDuplicate, onMoveStart, onMoveEnd, onBringToFront, onSendToBack, onBringForward, onSendBackward, onTogglePin, onOpenModify, onDropAsset, selected, onSelect, theme }: {
   item: GridItem;
   metrics: GridMetrics;
   onMove: (next: GridItem) => void;
@@ -45,6 +47,7 @@ export default function DraggableItem({ item, metrics, onMove, scrollEl, zoom, o
   onDropAsset?: (id: string, hash: string) => void;
   selected?: boolean;
   onSelect?: (id: string) => void;
+  theme?: Theme | null;
 }) {
   // Prevent unused param lint when certain actions are intentionally not rendered in toolbar
   void onDelete; void onBringToFront; void onSendToBack; void onBringForward; void onSendBackward;
@@ -268,12 +271,16 @@ export default function DraggableItem({ item, metrics, onMove, scrollEl, zoom, o
         >
           {item.type ? (
             <WidgetRenderer
-              instance={{ id: item.id, type: item.type, props: item.props ?? {} }}
+              instance={{ id: item.id, type: item.type, props: item.props ?? {}, schemaVersion: item.schemaVersion }}
               editing
               interactive={false}
+              theme={theme}
               onChangeProps={(partial) => {
                 const nextProps = { ...((item.props as Record<string, unknown>) ?? {}), ...partial };
                 onMove({ ...item, props: nextProps });
+              }}
+              onUpgradeInstance={(next) => {
+                onMove({ ...item, props: next.props, schemaVersion: next.schemaVersion });
               }}
             />
           ) : (

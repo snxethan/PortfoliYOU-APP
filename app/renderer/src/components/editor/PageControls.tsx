@@ -1,16 +1,22 @@
-import React, { useState } from "react";
-import { Plus, Edit3, Trash2, Settings } from 'lucide-react';
+import React, { useMemo, useState } from "react";
+import { Plus, Edit3, Trash2, Settings, Droplet, RotateCcw } from 'lucide-react';
+
+const HEX_COLOR_RE = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i;
+const DEFAULT_PAGE_BG = '#ffffff';
 
 export type PageControlsProps = {
     isCloud: boolean;
     pageOrder: string[];
-    pages: Record<string, { title?: string } | undefined>;
+    pages: Record<string, { title?: string; backgroundColor?: string | null } | undefined>;
     currentPageId: string | null;
     onSelectPage: (id: string | null) => void;
     onCreatePage: () => void;
     onRenameInline: (newName: string) => void;
     onDeleteCurrentPage: () => void;
     onOpenSettings: () => void;
+    pageBackground?: string | null;
+    themeBackground?: string | null;
+    onQuickBackgroundChange: (color: string | null) => void;
 };
 
 export default function PageControls({
@@ -23,9 +29,22 @@ export default function PageControls({
     onRenameInline,
     onDeleteCurrentPage,
     onOpenSettings,
+    pageBackground,
+    themeBackground,
+    onQuickBackgroundChange,
 }: PageControlsProps) {
     const [editing, setEditing] = useState<boolean>(false);
     const [draft, setDraft] = useState<string>('');
+    const fallbackTheme = useMemo(() => {
+        const raw = (themeBackground || '').trim();
+        return HEX_COLOR_RE.test(raw) ? raw : DEFAULT_PAGE_BG;
+    }, [themeBackground]);
+    const quickSwatch = useMemo(() => {
+        const raw = (pageBackground || '').trim();
+        if (HEX_COLOR_RE.test(raw)) return raw;
+        return fallbackTheme;
+    }, [pageBackground, fallbackTheme]);
+    const hasCustomBackground = Boolean((pageBackground || '').trim());
     return (
         <div className="px-4 py-3 border-b border-[color:var(--border)] bg-[color:var(--bg)]">
             <div className="flex items-center justify-center">
@@ -34,8 +53,31 @@ export default function PageControls({
                     <button className="btn btn-ghost btn-xs" title="Page settings" aria-label="Page settings" onClick={() => onOpenSettings?.()} disabled={!currentPageId}>
                         <Settings size={14} />
                     </button>
-                    {!editing && (
-                        <>
+                    <div className="flex items-center gap-2">
+                        <label className="flex items-center gap-1 text-[10px] uppercase tracking-wide text-[color:var(--fg-muted)]" title="Page background color">
+                            <Droplet size={12} />
+                            <input
+                                type="color"
+                                className="w-8 h-8 rounded border border-[color:var(--border)] bg-[color:var(--surface)]"
+                                value={quickSwatch}
+                                onChange={(e) => onQuickBackgroundChange(e.target.value)}
+                                disabled={!currentPageId}
+                                aria-label="Pick page background color"
+                            />
+                        </label>
+                        {hasCustomBackground && (
+                            <button
+                                className="btn btn-ghost btn-xs"
+                                type="button"
+                                title="Reset to theme"
+                                aria-label="Reset page background to theme"
+                                onClick={() => onQuickBackgroundChange(null)}
+                                disabled={!currentPageId}
+                            >
+                                <RotateCcw size={14} />
+                            </button>
+                        )}
+                        {!editing && (
                             <button className="btn btn-ghost btn-xs" title="Rename page" aria-label="Rename page" onClick={() => {
                                 if (!currentPageId) return;
                                 const title = pages[currentPageId]?.title || 'Untitled';
@@ -44,8 +86,8 @@ export default function PageControls({
                             }} disabled={!currentPageId}>
                                 <Edit3 size={14} />
                             </button>
-                        </>
-                    )}
+                        )}
+                    </div>
 
                     {/* Center: selector or inline rename replaces it when editing */}
                     {!editing ? (

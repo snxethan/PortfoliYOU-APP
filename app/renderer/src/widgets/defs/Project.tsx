@@ -61,6 +61,7 @@ function ProjectView(props: ProjectWidgetProps) {
 const def: WidgetDefinition<ProjectWidgetProps> = {
     type: 'project',
     label: 'Project Card',
+    version: 1,
     defaultProps: { title: 'My Project', description: 'Short description', headingLevel: 'h3', font: 'system', fontSize: undefined, link: undefined, image: undefined },
     grid: { w: 6, h: 4 },
     render: (props) => <ProjectView {...props} />,

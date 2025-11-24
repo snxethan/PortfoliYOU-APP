@@ -31,6 +31,7 @@ type ContactProps = {
 const def: WidgetDefinition<ContactProps> = {
     type: 'contact',
     label: 'Contact Form',
+    version: 1,
     defaultProps: {
         heading: 'Contact me',
         description: '',

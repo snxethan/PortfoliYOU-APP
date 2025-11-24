@@ -84,6 +84,86 @@ WidgetsRegistry.register(
 npm run dev
 ```
 
+## Add a widget in 30 minutes
+
+| Minute mark | What to focus on |
+| --- | --- |
+| 0‑5 | Align on the user story, pick a short `type`, Title‑Case `label`, default grid footprint, and an initial prop shape. Decide whether you need a `zodSchema` (recommended whenever you want to expose fields in the Modify panel).
+| 5‑15 | Scaffold the definition under `widgets/defs/` based on the boilerplate below. Keep the render function pure, add `version: 1`, and wire up `defaultProps`. If you expect future prop changes, stub a `migrate` function that currently returns `payload.props` unchanged so bumps are easy later.
+| 15‑20 | Register the widget in `widgets/loader.ts` with palette metadata (category, tags, keywords, and matching version). Run `npm run dev` (or restart if already running) so the new palette entry hot‑loads.
+| 20‑25 | Open the Editor, drag the widget, and tweak props via the Modify modal. Use the pinned toolbar to rename and confirm undo/redo integrates cleanly. If the widget surfaces assets, drop them onto the canvas to verify `asset://` handling.
+| 25‑30 | Add or update automated coverage: extend `tests/widgets-history.spec.ts` if new behavior needs assertions, capture before/after screenshots, and run `npx playwright test --grep "Widget add"` to ensure add → edit → undo → redo still passes. Finish by updating docs or release notes with any new props the Modify modal exposes.
+
+The key is to keep every step incremental: definition → registration → manual validation → automated coverage. If any stage runs long, capture TODOs before moving on.
+
+## Boilerplate template
+
+Drop this into `app/renderer/src/widgets/defs/MyWidget.tsx` and tweak the TODO sections. It sets up versioned props, optional migration, and a zod schema so the Modify modal auto‑generates a form.
+
+```tsx
+import React from 'react';
+import { z } from 'zod';
+import type { WidgetDefinition } from '../types';
+
+type MyWidgetProps = {
+  title: string;
+  emphasis?: 'primary' | 'muted';
+};
+
+const schema = z.object({
+  title: z.string().min(1, 'Title is required'),
+  emphasis: z.enum(['primary', 'muted']).default('primary'),
+});
+
+const MyWidget: WidgetDefinition<MyWidgetProps> = {
+  type: 'my-widget',
+  label: 'My Widget',
+  version: 1,
+  grid: { w: 4, h: 3 },
+  defaultProps: { title: 'Hello there', emphasis: 'primary' },
+  zodSchema: schema,
+  // Optional: remove when you truly need migrations
+  migrate: ({ props }) => props as MyWidgetProps,
+  render: (props) => (
+    <div style={{ padding: 16, borderRadius: 12, background: props.emphasis === 'primary' ? 'var(--accent)' : 'var(--muted)', color: props.emphasis === 'primary' ? '#000' : 'var(--fg)' }}>
+      <strong>{props.title}</strong>
+    </div>
+  ),
+};
+
+export default MyWidget;
+```
+
+Register the widget by appending to `widgets/loader.ts`:
+
+```ts
+WidgetsRegistry.register(
+  {
+    type: 'my-widget',
+    label: 'My Widget',
+    version: 1,
+    grid: { w: 4, h: 3 },
+    category: 'Content',
+    tags: ['content', 'custom'],
+    keywords: ['cta', 'promo'],
+  },
+  () => import('./defs/MyWidget').then(m => m.default)
+);
+```
+
+When you eventually change `MyWidgetProps`, bump `version`, update `migrate`, and keep the palette metadata in sync. Run `npx playwright test tests/widgets-history.spec.ts --grep "My Widget"` (or add a new describe block) so future edits stay covered.
+
+## Launch checklist
+
+- [ ] Definition file created under `widgets/defs/` with `version`, `defaultProps`, and optional `migrate`.
+- [ ] Palette metadata added to `widgets/loader.ts` with matching `type`, `label`, `grid`, `category/tags/keywords`, and `version`.
+- [ ] Widget renders without errors in the Editor canvas _and_ preview modes (inline + popup). Use the toolbar and preview toggle to sanity‑check.
+- [ ] Modify modal fields validate correctly (zod schema, defaults, error messages) and the undo/redo buttons work after editing props.
+- [ ] `asset://` references (if any) resolve through the Assets panel and survive page reload.
+- [ ] `tests/widgets-history.spec.ts` updated if the widget adds new patterns, plus any bespoke Playwright/Vitest coverage needed.
+- [ ] Documentation (this guide, release notes, or SMOKE_TEST checklist) updated to mention the new widget and any caveats.
+- [ ] Screenshots or recordings captured for QA/demo, especially if the widget introduces new interactions.
+
 ## Naming Conventions
 
 - `type`: lowercase, short, unique; use letters/numbers and optional dashes only (e.g., `text`, `image`, `project-card`).
@@ -112,8 +192,15 @@ npm run dev
 
 - `WidgetsRegistry.register(meta, loader)` stores lightweight metadata for the palette, and a lazy loader for the full definition.
 - Metadata shape:
-  - `type`, `label`, optional `grid`, optional `category`, optional `tags`, optional `keywords`.
+  - `type`, `label`, optional `grid`, optional `category`, optional `tags`, optional `keywords`, **`version`** (number).
 - Palette search matches all provided metadata, so include short, human-readable tags and keywords.
+
+## Versioning & Migrations
+
+- Every `WidgetDefinition` now requires a numeric `version`. Start at `1` and bump when you change the stored props shape.
+- The palette metadata should use the same version so new drag sources tag instances correctly.
+- Optional `migrate({ props, fromVersion, toVersion })` can be provided on the definition to upgrade legacy props. Return the latest props shape; the renderer will persist the result along with the new version.
+- When no `migrate` hook is supplied, older widgets keep their props but still get stamped with the new version once rendered.
 
 ## Using SDK Helpers (Optional)
 

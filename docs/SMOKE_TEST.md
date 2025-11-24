@@ -200,6 +200,37 @@ The packaged app will be in the `dist/` folder.
 
 ---
 
+### ✅ Widgets Palette & Search
+
+> Prerequisite: At least one portfolio exists so the Editor (`/modify`) is accessible.
+
+#### Widget Drag Sources
+1. Open the Editor view and ensure the widgets palette is visible on the right.
+2. Hover any widget tile to reveal the grab cursor.
+3. Drag the tile onto the canvas.
+4. **Expected:**
+   - Drag overlay follows the cursor with the widget label.
+   - Dropping over the grid canvas creates a new widget instance with the default size.
+   - Dropping outside the canvas cancels without creating anything.
+
+#### Draggable Tiles with Preview Thumbnails
+1. Inspect the grid of tiles inside each palette category.
+2. **Expected:** Every tile renders a miniature preview thumbnail (icon + label) that hints at the widget type before dragging.
+3. **Bonus:** Focus a tile via keyboard and press **Enter** to add the widget without dragging.
+
+#### Tooltip Help
+1. Hover the info icon next to the palette header or hover an individual tile.
+2. **Expected:** A tooltip appears describing how to drag widgets and (for tiles) shows `Drag to canvas · {width}x{height}` so testers know the default footprint.
+
+#### Search Filters by Name & Category
+1. Use the search input above the palette.
+2. Type part of a widget name (e.g., `text`).
+3. **Expected:** Only matching widgets remain visible; categories that have no matches collapse automatically.
+4. Clear the input, then type a category label (e.g., `media`).
+5. **Expected:** Widgets whose category, tags, or keywords include that term stay visible, enabling quick category-based filtering.
+
+---
+
 ### ✅ Loading States
 
 **Initial App Load:**

@@ -47,7 +47,7 @@ function CanvasPreviewInner({
                             <div key={item.id} style={{ position: 'absolute', left, top, width: w, height: h, zIndex: z }}>
                                 <div style={{ width: '100%', height: '100%', overflow: 'hidden' }}>
                                     {item.type ? (
-                                        <WidgetRenderer instance={{ id: item.id, type: item.type, props: item.props ?? {} }} />
+                                        <WidgetRenderer instance={{ id: item.id, type: item.type, props: item.props ?? {}, schemaVersion: item.schemaVersion }} />
                                     ) : (
                                         <div style={{ fontSize: 10, color: 'var(--fg-muted)', border: '1px dashed var(--border)', borderRadius: 4, height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                                             Unknown widget

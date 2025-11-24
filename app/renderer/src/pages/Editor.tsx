@@ -9,6 +9,7 @@ import type { GridItem } from "../components/editor/canvas/GridCanvas";
 const ModifyWidgetModal = lazy(() => import("../components/editor/widgets/ModifyWidgetModal"));
 const WidgetsPalette = lazy(() => import("../components/editor/widgets/WidgetsPalette"));
 import PageSettingsModal from "../components/modals/PageSettingsModal";
+import ThemeSettingsModal from "../components/modals/ThemeSettingsModal";
 import EditorTopBar from "../components/editor/EditorTopBar";
 import PageControls from "../components/editor/PageControls";
 import ViewportSurface from "../components/editor/ViewportSurface";
@@ -24,9 +25,16 @@ const MIN_ZOOM = 0.5;
 const MAX_ZOOM = 1.75;
 
 export default function EditorPage() {
-  const { selectedProject, createPage, deletePage, renamePage, getPageItems, setPageItems, setPageStarter } = useProjects();
+  const { selectedProject, createPage, deletePage, renamePage, getPageItems, setPageItems, setPageStarter, setPageBackground, activeTheme } = useProjects();
   const { add: notify } = useNotifications();
   const navigate = useNavigate();
+
+  const notifyWidgetChange = useCallback((action: 'create' | 'delete', label?: string) => {
+    const title = (label && label.trim()) || 'Widget';
+    const message = action === 'create' ? `Widget "${title}" added` : `Widget "${title}" removed`;
+    const type = action === 'create' ? 'success' : 'info';
+    try { notify({ type, message, title: selectedProject?.name, persistent: false }); } catch { /* noop */ }
+  }, [notify, selectedProject?.name]);
 
   // Track current page within the selected project
   const [currentPageId, setCurrentPageId] = useState<string | null>(null);
@@ -40,6 +48,10 @@ export default function EditorPage() {
       const fallback = selectedProject.pageOrder?.[0] || null;
       setCurrentPageId(fallback || null);
     }
+  }, [selectedProject?.id]);
+
+  useEffect(() => {
+    if (!selectedProject) setThemeModalOpen(false);
   }, [selectedProject?.id]);
 
   // If project is cloud-linked, ensure the selected page is within the first 10
@@ -56,10 +68,16 @@ export default function EditorPage() {
     }
   }, [selectedProject?._cloudId, selectedProject?.pageOrder, currentPageId]);
 
+  const currentPage = currentPageId && selectedProject ? selectedProject.pages[currentPageId] : null;
+  const themeBackground = activeTheme?.colors.background || '#ffffff';
+  const pageBackground = currentPage?.backgroundColor && currentPage.backgroundColor.trim() ? currentPage.backgroundColor : null;
+  const effectivePageBackground = pageBackground || themeBackground;
+
   // Page settings modal state
   const [renameModalOpen, setRenameModalOpen] = useState<boolean>(false);
   const [renameOldTitle, setRenameOldTitle] = useState<string>("");
   const [renameInitialStarter, setRenameInitialStarter] = useState<boolean>(false);
+  const [themeModalOpen, setThemeModalOpen] = useState<boolean>(false);
 
   // Gap between cells (both x and y), in pixels
   const [gap, setGap] = useState<number>(12);
@@ -98,6 +116,7 @@ export default function EditorPage() {
             x: it.x, y: it.y, w: it.w, h: it.h,
             z: typeof it.z === 'number' ? it.z : 0,
             title: it.title, type: it.type, props: it.props,
+            schemaVersion: typeof it.schemaVersion === 'number' ? it.schemaVersion : 1,
             pinned: it.pinned, locked: it.locked,
           }));
           setPageItems(selectedProject.id, currentPageId, mapped);
@@ -283,7 +302,14 @@ export default function EditorPage() {
     // Delete
     if (selectedId && (e.key === 'Delete' || e.key === 'Backspace')) {
       e.preventDefault();
-      commitUpdate('Delete item', (prev) => prev.filter(i => i.id !== selectedId));
+      let removedTitle: string | undefined;
+      commitUpdate('Delete item', (prev) => {
+        const target = prev.find(i => i.id === selectedId);
+        if (!target) return prev;
+        removedTitle = target.title;
+        return prev.filter(i => i.id !== selectedId);
+      });
+      if (removedTitle) notifyWidgetChange('delete', removedTitle);
       setSelectedId(null);
       return;
     }
@@ -315,6 +341,7 @@ export default function EditorPage() {
         const maxZ = norm.length;
         return [...norm, { ...dup, z: maxZ }];
       });
+      notifyWidgetChange('create', dup.title);
       setSelectedId(nid);
       return;
     }
@@ -331,13 +358,14 @@ export default function EditorPage() {
         const maxZ = norm.length;
         return [...norm, { ...dup, z: maxZ }];
       });
+      notifyWidgetChange('create', dup.title);
       setSelectedId(nid);
       return;
     }
   }
 
   // Active drag preview for palette items
-  type PaletteDrag = { src?: string; label?: string; w?: number; h?: number } | undefined;
+  type PaletteDrag = { src?: string; type?: string; label?: string; w?: number; h?: number; schemaVersion?: number } | undefined;
   const [activeDrag, setActiveDrag] = useState<PaletteDrag>(undefined);
   const dragPointerStart = useRef<{ x: number; y: number } | null>(null);
   const dragPointerOffset = useRef<{ x: number; y: number } | null>(null);
@@ -390,21 +418,23 @@ export default function EditorPage() {
   // Keyboard add fallback from palette tiles
   useEffect(() => {
     function onAddWidget(e: Event) {
-      const ce = e as CustomEvent<{ type: string; label?: string; w?: number; h?: number }>;
+      const ce = e as CustomEvent<{ type: string; label?: string; w?: number; h?: number; schemaVersion?: number }>;
       const defW = Math.max(1, Math.min(COLS, ce.detail?.w ?? 4));
       const defH = Math.max(1, ce.detail?.h ?? 4);
       const id = typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : Math.random().toString(36).slice(2, 9);
-      const newItem: GridItem = { id, x: 0, y: 0, w: defW, h: defH, z: 0, title: ce.detail?.label || 'Widget', type: ce.detail?.type, props: {}, pinned: false, locked: false };
+      const schemaVersion = typeof ce.detail?.schemaVersion === 'number' ? ce.detail.schemaVersion : 1;
+      const newItem: GridItem = { id, x: 0, y: 0, w: defW, h: defH, z: 0, title: ce.detail?.label || 'Widget', type: ce.detail?.type, props: {}, schemaVersion, pinned: false, locked: false };
       commitUpdate(`Add ${newItem.title}`, (prev) => {
         const norm = normalizeZ(prev);
         const maxZ = norm.length;
         return [...norm, { ...newItem, z: maxZ }];
       });
+      notifyWidgetChange('create', newItem.title);
       setSelectedId(id);
     }
     window.addEventListener('py:addWidget', onAddWidget as EventListener);
     return () => window.removeEventListener('py:addWidget', onAddWidget as EventListener);
-  }, [commitUpdate]);
+  }, [commitUpdate, notifyWidgetChange]);
 
   // Helper to normalize layering to 0..n-1 in ascending z order
   function normalizeZ(list: GridItem[]): GridItem[] {
@@ -478,8 +508,7 @@ export default function EditorPage() {
       <section className="surface p-0 overflow-hidden">
         {/* Top bar */}
         <EditorTopBar
-          selectedProjectName={selectedProject?.name}
-          onTitleClick={() => { navigate('/'); setTimeout(() => { window.dispatchEvent(new CustomEvent('py:highlight-request')); }, 50); }}
+          onOpenTheme={selectedProject ? () => setThemeModalOpen(true) : undefined}
           previewMode={previewMode}
           togglePreviewMode={togglePreviewMode}
           gap={gap}
@@ -511,6 +540,12 @@ export default function EditorPage() {
             pageOrder={selectedProject.pageOrder || []}
             pages={selectedProject.pages}
             currentPageId={currentPageId}
+            pageBackground={pageBackground}
+            themeBackground={themeBackground}
+            onQuickBackgroundChange={(color) => {
+              if (!selectedProject || !currentPageId) return;
+              setPageBackground(selectedProject.id, currentPageId, color);
+            }}
             onSelectPage={(id) => {
               setCurrentPageId(id);
               if (selectedProject && id) {
@@ -608,7 +643,7 @@ export default function EditorPage() {
                     if (nid) {
                       restoredId = nid;
                       renamePage(selectedProject.id, nid, title);
-                      setPageItems(selectedProject.id, nid, snapItems.map(it => ({ id: it.id, x: it.x, y: it.y, w: it.w, h: it.h, z: it.z ?? 0, title: it.title, type: it.type, props: it.props, pinned: it.pinned, locked: it.locked })));
+                      setPageItems(selectedProject.id, nid, snapItems.map(it => ({ id: it.id, x: it.x, y: it.y, w: it.w, h: it.h, z: it.z ?? 0, title: it.title, type: it.type, props: it.props, schemaVersion: typeof it.schemaVersion === 'number' ? it.schemaVersion : 1, pinned: it.pinned, locked: it.locked })));
                       setCurrentPageId(nid);
                       setItems(getPageItems(selectedProject.id, nid) as GridItem[]);
                     }
@@ -659,7 +694,7 @@ export default function EditorPage() {
           onDragEnd={(event: DragEndEvent) => {
             const { active, over } = event;
             if (!over) return;
-            const data = active.data.current as { src?: string; label?: string; w?: number; h?: number } | undefined;
+            const data = active.data.current as { src?: string; type?: string; label?: string; w?: number; h?: number; schemaVersion?: number } | undefined;
             if (data?.src === 'palette' && over.id === 'grid-canvas') {
               const overRect = over.rect;
               const initial = active.rect.current.initial;
@@ -686,12 +721,14 @@ export default function EditorPage() {
               y = Math.max(0, y);
               const id = typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : Math.random().toString(36).slice(2, 9);
               const ad = active.data.current as unknown as { type?: string };
-              const newItem: GridItem = { id, x, y, w, h, title: data.label ?? 'Widget', z: 0, type: ad?.type, props: {}, pinned: false, locked: false };
+              const schemaVersion = typeof data.schemaVersion === 'number' ? data.schemaVersion : 1;
+              const newItem: GridItem = { id, x, y, w, h, title: data.label ?? 'Widget', z: 0, type: ad?.type, props: {}, schemaVersion, pinned: false, locked: false };
               commitUpdate(`Add ${newItem.title}`, (prev) => {
                 const norm = normalizeZ(prev);
                 const maxZ = norm.length; // new item will be top
                 return [...norm, { ...newItem, z: maxZ }];
               });
+              notifyWidgetChange('create', newItem.title);
             }
             // Clear drag overlay when drop completes
             setActiveDrag(undefined);
@@ -727,21 +764,31 @@ export default function EditorPage() {
               showGrid={showGrid}
               selectedId={selectedId}
               onSelect={setSelectedId}
-              onDelete={(id) => commitUpdate("Delete item", (prev) => {
-                const tgt = prev.find(i => i.id === id);
-                if (!tgt) return prev;
-                return prev.filter((it) => it.id !== id);
-              })}
-              onDuplicate={(id) => commitUpdate("Duplicate item", (prev) => {
-                const src = prev.find((it) => it.id === id);
-                if (!src) return prev;
-                const nid = typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : Math.random().toString(36).slice(2, 9);
-                const nx = Math.min(COLS - src.w, src.x + 1);
-                const ny = src.y + 1;
-                const norm = normalizeZ(prev);
-                const maxZ = norm.length; // place duplicate on top
-                return [...norm, { ...src, id: nid, x: nx, y: ny, title: src.title + " copy", z: maxZ }];
-              })}
+              onDelete={(id) => {
+                let removedTitle: string | undefined;
+                commitUpdate("Delete item", (prev) => {
+                  const tgt = prev.find(i => i.id === id);
+                  if (!tgt) return prev;
+                  removedTitle = tgt.title;
+                  return prev.filter((it) => it.id !== id);
+                });
+                if (removedTitle) notifyWidgetChange('delete', removedTitle);
+              }}
+              onDuplicate={(id) => {
+                let duplicateTitle: string | undefined;
+                commitUpdate("Duplicate item", (prev) => {
+                  const src = prev.find((it) => it.id === id);
+                  if (!src) return prev;
+                  duplicateTitle = src.title + " copy";
+                  const nid = typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : Math.random().toString(36).slice(2, 9);
+                  const nx = Math.min(COLS - src.w, src.x + 1);
+                  const ny = src.y + 1;
+                  const norm = normalizeZ(prev);
+                  const maxZ = norm.length; // place duplicate on top
+                  return [...norm, { ...src, id: nid, x: nx, y: ny, title: duplicateTitle, z: maxZ }];
+                });
+                if (duplicateTitle) notifyWidgetChange('create', duplicateTitle);
+              }}
               onMoveStart={() => { /* no-op */ }}
               onMoveEnd={(prevItem, nextItem) => {
                 if (prevItem.x === nextItem.x && prevItem.y === nextItem.y) return;
@@ -777,6 +824,8 @@ export default function EditorPage() {
               minZoom={MIN_ZOOM}
               maxZoom={MAX_ZOOM}
               onZoomChange={applyZoom}
+              pageBackground={effectivePageBackground}
+              theme={activeTheme}
             />
 
             {/* Widget Sidebar (collapsible) */}
@@ -846,9 +895,9 @@ export default function EditorPage() {
       {/* Preview now replaces canvas above when toggled */}
 
       {/* Standalone popup window preview (renders current page) */}
-      <PreviewPopup open={popupOpen} onClose={closeWebpage} title="PortfoliYOU – Preview" width={pageWidth} height={pageHeight}>
-        <div style={{ width: pageWidth }}>
-          <PagePreview width={pageWidth} cols={COLS} gap={gap} rowH={DEFAULT_ROW_H} items={items} currentPageId={currentPageId || undefined} onNavigatePage={(pid) => {
+      <PreviewPopup open={popupOpen} onClose={closeWebpage} title="PortfoliYOU – Preview" width={pageWidth} height={pageHeight} pageBackground={effectivePageBackground} theme={activeTheme}>
+        <div style={{ width: pageWidth, background: effectivePageBackground }}>
+          <PagePreview width={pageWidth} cols={COLS} gap={gap} rowH={DEFAULT_ROW_H} items={items} currentPageId={currentPageId || undefined} background={effectivePageBackground} onNavigatePage={(pid) => {
             if (!selectedProject) return;
             setCurrentPageId(pid);
             try { localStorage.setItem(`py_current_page_${selectedProject.id}`, pid); } catch { /* ignore */ }
@@ -861,8 +910,10 @@ export default function EditorPage() {
           title="Page settings"
           initialName={renameOldTitle}
           initialStarter={renameInitialStarter}
+          initialBackgroundColor={pageBackground}
+          themeBackground={themeBackground}
           onCancel={() => setRenameModalOpen(false)}
-          onSave={({ name, starter }) => {
+          onSave={({ name, starter, backgroundColor }) => {
             const trimmed = (name || '').trim();
             if (!trimmed) { setRenameModalOpen(false); return; }
             const oldTitle = renameOldTitle || 'Untitled';
@@ -879,6 +930,7 @@ export default function EditorPage() {
             });
             setRedoStack([]);
             renamePage(selectedProject.id, currentPageId, trimmed);
+            setPageBackground(selectedProject.id, currentPageId, backgroundColor);
             // Update starter setting
             try { setPageStarter(selectedProject.id, currentPageId, Boolean(starter)); } catch { /* ignore */ }
             try {
@@ -907,6 +959,10 @@ export default function EditorPage() {
         />
       )}
 
+      {themeModalOpen && (
+        <ThemeSettingsModal open onClose={() => setThemeModalOpen(false)} />
+      )}
+
       {editingItem && (
         <Suspense fallback={null}>
           <ModifyWidgetModal
@@ -914,7 +970,9 @@ export default function EditorPage() {
             onClose={closeModify}
             onDelete={() => {
               // Delete the currently editing widget and close modal
+              const removedTitle = editingItem?.title;
               commitUpdate("Delete widget", (prev) => prev.filter(it => it.id === editingItem!.id ? false : true));
+              if (removedTitle) notifyWidgetChange('delete', removedTitle);
               closeModify();
             }}
             onRename={(v) => commitUpdate("Rename widget", (prev) => prev.map(it => it.id === editingItem!.id ? { ...it, title: v } : it))}

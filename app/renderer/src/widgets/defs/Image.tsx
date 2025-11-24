@@ -69,6 +69,7 @@ type Shape = 'rectangle' | 'rounded' | 'circle';
 const def: WidgetDefinition<{ src: string; alt: string; fit?: React.CSSProperties['objectFit']; radius?: number; scale?: number; shape?: Shape; borderWidth?: number; borderColor?: string; borderStyle?: 'solid' | 'dashed' | 'dotted' }> = {
     type: 'image',
     label: 'Image',
+    version: 1,
     defaultProps: { src: '', alt: 'Image', fit: 'contain', radius: 8, scale: 1, shape: 'rectangle', borderWidth: 0, borderColor: '#000000', borderStyle: 'solid' },
     grid: { w: 2, h: 2 },
     render: (props) => {

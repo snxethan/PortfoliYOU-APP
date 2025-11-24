@@ -12,6 +12,7 @@ const schema: PropSchema = {
 export const ImageWidgetDef: WidgetDefinition<{ src: string; alt?: string; fit?: React.CSSProperties['objectFit'] }> = {
     type: 'image',
     label: 'Image',
+    version: 1,
     defaultProps: { src: '', alt: '', fit: 'contain' },
     grid: { w: 4, h: 4 },
     schema,

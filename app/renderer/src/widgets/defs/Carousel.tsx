@@ -162,6 +162,7 @@ function ResolvedVideo({ src, poster, alt }: { src: string; poster?: string; alt
 const def: WidgetDefinition<Props> = {
     type: 'carousel',
     label: 'Carousel',
+    version: 1,
     defaultProps: {
         items: SAMPLE_SLIDES_PROPS,
         autoPlay: true,

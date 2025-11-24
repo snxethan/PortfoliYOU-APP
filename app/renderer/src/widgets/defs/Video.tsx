@@ -221,6 +221,7 @@ function YouTubeEmbed({
 const def: WidgetDefinition<Props> = {
     type: 'video',
     label: 'Video',
+    version: 1,
     defaultProps: defaultVideoProps,
     grid: { w: 6, h: 4 },
     render: (props) => {

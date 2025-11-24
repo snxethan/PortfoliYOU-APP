@@ -1,9 +1,8 @@
 import React from "react";
-import { Eye, Pencil, Grid as GridIcon, MonitorSmartphone, Smartphone, Redo, Undo, Minus, Plus, RefreshCw } from "lucide-react";
+import { Eye, Pencil, Grid as GridIcon, MonitorSmartphone, Smartphone, Redo, Undo, Minus, Plus, RefreshCw, Palette } from "lucide-react";
 
 export type EditorTopBarProps = {
-    selectedProjectName?: string;
-    onTitleClick?: () => void;
+    onOpenTheme?: () => void;
 
     previewMode: boolean;
     togglePreviewMode: () => void;
@@ -35,8 +34,7 @@ export type EditorTopBarProps = {
 
 export default function EditorTopBar(props: EditorTopBarProps) {
     const {
-        selectedProjectName,
-        onTitleClick,
+        onOpenTheme,
         previewMode,
         togglePreviewMode,
         gap,
@@ -74,21 +72,16 @@ export default function EditorTopBar(props: EditorTopBarProps) {
                     <Eye size={16} />
                     Preview Page
                 </button>
-                {selectedProjectName && (
-                    onTitleClick ? (
-                        <button
-                            className="btn btn-ghost text-xs max-w-[12rem] truncate"
-                            type="button"
-                            title="Go back to project overview"
-                            onClick={onTitleClick}
-                        >
-                            {selectedProjectName}
-                        </button>
-                    ) : (
-                        <span className="text-xs text-[color:var(--fg-muted)] truncate max-w-[12rem]" title={selectedProjectName}>
-                            {selectedProjectName}
-                        </span>
-                    )
+                {onOpenTheme && (
+                    <button
+                        className="btn btn-ghost flex items-center gap-2 text-sm"
+                        type="button"
+                        title="Customize theme"
+                        onClick={onOpenTheme}
+                    >
+                        <Palette size={16} />
+                        Theme
+                    </button>
                 )}
             </div>
 

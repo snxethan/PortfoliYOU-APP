@@ -72,7 +72,37 @@ function serializeCarouselEditorItems(items: CarouselEditorItem[]): CarouselItem
 }
 
 const ENTER_SUBMIT_BLOCKED_TYPES = new Set(['checkbox', 'radio', 'range', 'color', 'date', 'datetime-local', 'month', 'week', 'time', 'file']);
-const VIDEO_APPEARANCE_FIELDS = new Set(['shape', 'borderWidth', 'borderRadius', 'borderColor', 'borderStyle']);
+const VIDEO_APPEARANCE_FIELDS = new Set(['shape', 'borderWidth', 'borderRadius', 'borderColor', 'borderStyle', 'backgroundColor']);
+const APPEARANCE_FIELDS_BY_WIDGET: Record<string, ReadonlySet<string>> = {
+    image: new Set(['fit', 'radius', 'scale', 'shape', 'borderWidth', 'borderColor', 'borderStyle']),
+    text: new Set(['variant', 'align', 'font', 'color', 'fontSize', 'weight', 'italic']),
+    link: new Set(['variant', 'font', 'fontSize', 'weight', 'italic']),
+    'nav-link': new Set(['style', 'align', 'color', 'textColor', 'underline', 'font', 'fontSize']),
+    project: new Set(['headingLevel', 'font', 'fontSize']),
+    contact: new Set(['font', 'fontSize']),
+    carousel: new Set(['backgroundColor', 'shape', 'radius', 'borderWidth', 'borderColor', 'borderStyle']),
+    'github-repos': new Set(['layout']),
+};
+const HEX_COLOR_RE = /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/;
+
+function hasAppearanceKeyword(key: string) {
+    const normalized = key.toLowerCase();
+    if (normalized.includes('color') || normalized.includes('background')) return true;
+    if (normalized.includes('border') || normalized.includes('radius')) return true;
+    if (normalized.includes('shape')) return true;
+    if (normalized.includes('font')) return true;
+    if (normalized === 'align' || normalized === 'layout' || normalized === 'weight' || normalized === 'italic') return true;
+    if (normalized === 'style' || normalized === 'variant' || normalized === 'underline') return true;
+    if (normalized === 'headinglevel' || normalized === 'fit') return true;
+    return false;
+}
+
+function isAppearanceField(defType: string | null, key: string) {
+    if (!key) return false;
+    const overrides = defType ? APPEARANCE_FIELDS_BY_WIDGET[defType] : undefined;
+    if (overrides?.has(key)) return true;
+    return hasAppearanceKeyword(key);
+}
 const URL_FIELD_HINTS = ['url', 'link', 'href', 'website'];
 const TEXTAREA_FIELD_HINTS = ['description', 'content', 'body', 'text', 'bio', 'summary'];
 const IMAGE_FIELD_HINTS = ['image', 'img', 'photo', 'poster', 'thumb', 'thumbnail', 'cover', 'logo', 'avatar'];
@@ -201,6 +231,9 @@ export default function ModifyWidgetModal({
     const videoBorderRadiusValue = typeof rawBorderRadius === 'number' && Number.isFinite(rawBorderRadius) ? rawBorderRadius : '';
     const videoBorderColorValue = (typeof formValues.borderColor === 'string' && /^#([0-9a-fA-F]{3}){1,2}$/.test(formValues.borderColor)) ? formValues.borderColor : '#e5e7eb';
     const videoBorderStyleValue = (typeof formValues.borderStyle === 'string' ? formValues.borderStyle : 'solid') as 'solid' | 'dashed' | 'dotted';
+    const navStyle = (defType === 'nav-link') ? String((formValues['style'] as string) || 'link') : undefined;
+    const videoBackgroundColorValue = typeof formValues.backgroundColor === 'string' ? formValues.backgroundColor : '';
+    const videoBackgroundColorSwatch = HEX_COLOR_RE.test(videoBackgroundColorValue) ? videoBackgroundColorValue : '#ffffff';
     // Collapsible sections (persist across openings)
     const [compOpen, setCompOpen] = useState<boolean>(() => {
         try { return localStorage.getItem('py_comp_props_open') === '1'; } catch { return false; }
@@ -421,6 +454,235 @@ export default function ModifyWidgetModal({
         setFormValues(next);
         validateField(key, value);
     }
+
+    const schemaFieldBuckets = {
+        default: [] as Array<[string, z.ZodTypeAny]>,
+        appearance: [] as Array<[string, z.ZodTypeAny]>,
+    };
+    if (zodSchema) {
+        for (const [key, schema] of Object.entries(zodSchema.shape)) {
+            if (isVideo && (key === 'src' || key === 'poster' || VIDEO_APPEARANCE_FIELDS.has(key))) {
+                continue;
+            }
+            const bucket = isAppearanceField(defType, key) ? schemaFieldBuckets.appearance : schemaFieldBuckets.default;
+            bucket.push([key, schema as z.ZodTypeAny]);
+        }
+    }
+
+    const renderSchemaField = (key: string, schema: z.ZodTypeAny): JSX.Element | null => {
+        if (!zodSchema) return null;
+        const field = schema as z.ZodTypeAny;
+        const isOptional = field instanceof z.ZodOptional;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        let baseField: z.ZodTypeAny = isOptional ? (field._def as any).innerType as z.ZodTypeAny : field;
+        if (baseField instanceof z.ZodDefault) {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            baseField = (baseField._def as any).innerType as z.ZodTypeAny;
+        }
+        if (baseField instanceof z.ZodNullable) {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            baseField = (baseField._def as any).innerType as z.ZodTypeAny;
+        }
+        const rawValue = formValues[key];
+        const stringValue = typeof rawValue === 'string' ? rawValue : '';
+        const error = formErrors[key];
+        const hideForNavLink = (
+            (defType === 'nav-link' && key === 'textColor' && navStyle === 'link') ||
+            (defType === 'nav-link' && key === 'underline' && navStyle === 'button')
+        );
+        if (hideForNavLink) return null;
+        let label = key.charAt(0).toUpperCase() + key.slice(1);
+        let helperText: string | null = null;
+        if (defType === 'nav-link') {
+            if (key === 'color') label = navStyle === 'button' ? 'Background color' : 'Text color';
+            if (key === 'textColor') label = 'Text color';
+        }
+        if (defType === 'link') {
+            if (key === 'url') {
+                helperText = `Supports ${ALLOWED_HTTP_SCHEME_LABEL} links. Missing protocol defaults to https://.`;
+            } else if (key === 'iconLeft') {
+                label = 'Prefix icon/text';
+                helperText = 'Optional emoji or short text shown before the link label.';
+            } else if (key === 'iconRight') {
+                label = 'Suffix icon/text';
+                helperText = 'Optional emoji or short text shown after the link label.';
+            }
+        } else if (defType === 'project') {
+            if (key === 'link') {
+                label = 'Project link';
+                helperText = 'Optional external URL opened when the card is clicked.';
+            } else if (key === 'image') {
+                label = 'Image URL or asset://';
+                helperText = 'Paste a hosted image URL or asset:// identifier to show a cover.';
+            }
+        }
+        const disabled = locked;
+        const isTargetPage = (defType === 'nav-link') && key === 'targetPageId' && (baseField instanceof z.ZodString);
+        const isCarouselIntervalField = isCarousel && key === 'interval';
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const anyZ: any = z;
+        const isEnum = baseField instanceof anyZ.ZodEnum;
+        const isNativeEnum = baseField instanceof anyZ.ZodNativeEnum;
+        const assetKind = (baseField instanceof z.ZodString) ? inferAssetKind(defType, key) : null;
+        const isUrlField = (baseField instanceof z.ZodString) && !assetKind && isLikelyUrlField(key, baseField);
+        const isColorField = key.toLowerCase().includes('color');
+        const stringInputType = inferStringInputType(baseField);
+        const numberMeta = baseField instanceof z.ZodNumber ? deriveNumberBounds(baseField) : undefined;
+        const assetPlaceholder = assetKind === 'image'
+            ? 'asset://hash or https://example.com/image.jpg'
+            : assetKind === 'video'
+                ? 'asset://hash or https://example.com/video.mp4'
+                : 'asset://hash or https://example.com/resource';
+        if (isCarouselIntervalField) {
+            const secondsValue = typeof rawValue === 'number' && Number.isFinite(rawValue) ? (rawValue / 1000) : '';
+            const adjustSeconds = (delta: number) => {
+                const current = typeof secondsValue === 'number' ? secondsValue : 0;
+                const next = Math.min(60, Math.max(0.5, Number((current + delta).toFixed(2))));
+                const ms = Math.round(next * 1000);
+                setFieldValue(key, ms);
+            };
+            return (
+                <div key={key}>
+                    <label className="block text-[color:var(--fg-muted)] mb-1">Slide interval (seconds)</label>
+                    <div className="flex gap-2">
+                        <input
+                            className="input w-full"
+                            type="number"
+                            min={0.5}
+                            max={60}
+                            step={0.5}
+                            value={secondsValue === '' ? '' : secondsValue}
+                            onChange={(e) => {
+                                const raw = e.target.value;
+                                const num = raw === '' ? undefined : Number(raw);
+                                const ms = typeof num === 'number' && !Number.isNaN(num) ? Math.round(num * 1000) : undefined;
+                                setFieldValue(key, ms);
+                            }}
+                            onKeyDown={handleEnterSubmitComp}
+                            disabled={disabled}
+                        />
+                        <div className="flex flex-col gap-1">
+                            <button className="px-2 py-1 rounded border border-[color:var(--border)] text-[10px] font-semibold" type="button" onClick={() => adjustSeconds(0.5)} disabled={disabled}>+0.5s</button>
+                            <button className="px-2 py-1 rounded border border-[color:var(--border)] text-[10px] font-semibold" type="button" onClick={() => adjustSeconds(-0.5)} disabled={disabled}>-0.5s</button>
+                        </div>
+                    </div>
+                    <div className="text-[10px] text-[color:var(--fg-muted)] mt-1">0.5s – 60s, half-second steps.</div>
+                    {error && <div className="text-red-500 text-xs mt-1">{error}</div>}
+                </div>
+            );
+        }
+        return (
+            <div key={key}>
+                <label className="block text-[color:var(--fg-muted)] mb-1">{label}{!isOptional ? ' *' : ''}</label>
+                {isTargetPage ? (
+                    <select
+                        className="input w-full"
+                        value={String(stringValue || '')}
+                        onChange={(e) => setFieldValue(key, e.target.value)}
+                        disabled={disabled}
+                    >
+                        <option value="" disabled>Select page…</option>
+                        {(() => {
+                            const p = selectedProject;
+                            const order = p?.pageOrder || [];
+                            const pages = order.map(id => ({ id, title: p?.pages?.[id]?.title || id }));
+                            return pages.map(pg => (
+                                <option key={pg.id} value={pg.id}>{pg.title}</option>
+                            ));
+                        })()}
+                    </select>
+                ) : ((defType === 'text' && key === 'text' && (baseField instanceof z.ZodString)) || shouldUseTextareaField(defType, key)) ? (
+                    <div>
+                        <textarea
+                            className="input w-full min-h-[6rem]"
+                            value={stringValue}
+                            onChange={(e) => setFieldValue(key, e.target.value)}
+                            disabled={disabled}
+                        />
+                        <div className="mt-1 text-[10px] text-[color:var(--fg-muted)]">{stringValue.length} characters</div>
+                    </div>
+                ) : assetKind && baseField instanceof z.ZodString ? (
+                    <SchemaAssetField
+                        value={stringValue}
+                        placeholder={assetPlaceholder}
+                        disabled={disabled}
+                        assets={assets}
+                        assetKind={assetKind}
+                        onChange={(next) => setFieldValue(key, next && next.length ? next : undefined)}
+                    />
+                ) : isUrlField ? (
+                    <SchemaUrlField
+                        value={stringValue}
+                        disabled={disabled}
+                        onChange={(next) => setFieldValue(key, next && next.length ? next : undefined)}
+                        onKeyDown={handleEnterSubmitComp}
+                    />
+                ) : baseField instanceof z.ZodBoolean ? (
+                    <div className="flex items-center gap-2">
+                        <input type="checkbox" className="checkbox" checked={!!formValues[key]} onChange={(e) => setFieldValue(key, e.target.checked)} disabled={disabled} />
+                        <span className="text-xs">{label}</span>
+                    </div>
+                ) : baseField instanceof z.ZodNumber ? (
+                    <SchemaNumberField
+                        value={typeof rawValue === 'number' ? rawValue : undefined}
+                        min={numberMeta?.min}
+                        max={numberMeta?.max}
+                        step={numberMeta?.step}
+                        disabled={disabled}
+                        onChange={(next) => setFieldValue(key, next)}
+                        onKeyDown={handleEnterSubmitComp}
+                    />
+                ) : (isEnum || isNativeEnum) ? (
+                    <select
+                        className="input w-full"
+                        value={String(stringValue || '')}
+                        onChange={(e) => setFieldValue(key, e.target.value)}
+                        disabled={disabled}
+                    >
+                        <option value="" disabled>Select…</option>
+                        {(() => {
+                            // derive options for enum types
+                            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                            const def: any = (baseField as any)._def;
+                            let opts: string[] = [];
+                            if (isEnum && Array.isArray(def?.values)) opts = def.values as string[];
+                            else if (isNativeEnum && def?.values) opts = Object.values(def.values).filter((v: unknown) => typeof v === 'string') as string[];
+                            return opts.map((opt) => (
+                                <option key={opt} value={opt}>{opt}</option>
+                            ));
+                        })()}
+                    </select>
+                ) : isColorField ? (
+                    <div className="flex items-center gap-2">
+                        <input
+                            className="rounded border border-[color:var(--border)] bg-[color:var(--muted)]/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[color:var(--surface)]"
+                            type="color"
+                            value={stringValue || '#2563eb'}
+                            onChange={(e) => setFieldValue(key, e.target.value)}
+                            disabled={disabled}
+                            style={{ width: 36, height: 24, padding: 0, minWidth: 36 }}
+                            aria-label={`${label} color`}
+                        />
+                        <span className="font-mono text-xs text-[color:var(--fg-muted)]">{stringValue || '#2563eb'}</span>
+                    </div>
+                ) : (
+                    <input
+                        className="input w-full"
+                        type={stringInputType}
+                        value={stringValue}
+                        onChange={(e) => setFieldValue(key, e.target.value)}
+                        onKeyDown={handleEnterSubmitComp}
+                        disabled={disabled}
+                    />
+                )}
+                {!!helperText && <div className="mt-1 text-[10px] text-[color:var(--fg-muted)]">{helperText}</div>}
+                {!!error && <div className="mt-1 text-xs text-red-500">{error}</div>}
+            </div>
+        );
+    };
+
+    const defaultFieldNodes = schemaFieldBuckets.default.map(([key, schema]) => renderSchemaField(key, schema)).filter((node): node is JSX.Element => Boolean(node));
+    const appearanceFieldNodes = schemaFieldBuckets.appearance.map(([key, schema]) => renderSchemaField(key, schema)).filter((node): node is JSX.Element => Boolean(node));
 
     function applyProps() {
         if (locked) return;
@@ -706,6 +968,29 @@ export default function ModifyWidgetModal({
                                                 <div className="pt-3 border-t border-[color:var(--border)] space-y-3">
                                                     <div className="text-[color:var(--fg-muted)] font-medium">Appearance</div>
                                                     <div>
+                                                        <label className="block text-[color:var(--fg-muted)] text-xs mb-1">Background color</label>
+                                                        <div className="flex items-center gap-2">
+                                                            <input
+                                                                type="color"
+                                                                className="rounded border border-[color:var(--border)] bg-[color:var(--muted)]/40 h-8 w-12 cursor-pointer"
+                                                                value={videoBackgroundColorSwatch}
+                                                                onChange={(e) => setFieldValue('backgroundColor', e.target.value)}
+                                                                disabled={locked}
+                                                                aria-label="Background color"
+                                                            />
+                                                            <input
+                                                                className="input flex-1 font-mono text-xs"
+                                                                value={videoBackgroundColorValue}
+                                                                onChange={(e) => setFieldValue('backgroundColor', e.target.value)}
+                                                                onKeyDown={handleEnterSubmitComp}
+                                                                placeholder="var(--surface)"
+                                                                disabled={locked}
+                                                            />
+                                                        </div>
+                                                        {formErrors.backgroundColor && <div className="text-red-500 text-xs mt-1">{formErrors.backgroundColor}</div>}
+                                                        <div className="text-[10px] text-[color:var(--fg-muted)] mt-1">Use hex colors or CSS vars like var(--surface).</div>
+                                                    </div>
+                                                    <div>
                                                         <label className="block text-[color:var(--fg-muted)] text-xs mb-1">Shape</label>
                                                         <div className="flex flex-wrap gap-2">
                                                             {(['rectangle', 'rounded', 'circle'] as const).map((shape) => (
@@ -905,222 +1190,17 @@ export default function ModifyWidgetModal({
                                 {zodSchema && (
                                     <div className="border border-[color:var(--border)] rounded-md p-3 bg-[color:var(--muted)]/40">
                                         <div className="text-[color:var(--fg-muted)] mb-2 font-medium">Component Properties</div>
-                                        <div className="space-y-2">
-                                            {Object.entries(zodSchema.shape).map(([key, schema]) => {
-                                                const field = schema as z.ZodTypeAny;
-                                                if (isVideo && (key === 'src' || key === 'poster' || VIDEO_APPEARANCE_FIELDS.has(key))) return null;
-                                                const isOptional = field instanceof z.ZodOptional;
-                                                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                                                let baseField: z.ZodTypeAny = isOptional ? (field._def as any).innerType as z.ZodTypeAny : field;
-                                                if (baseField instanceof z.ZodDefault) {
-                                                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                                                    baseField = (baseField._def as any).innerType as z.ZodTypeAny;
-                                                }
-                                                if (baseField instanceof z.ZodNullable) {
-                                                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                                                    baseField = (baseField._def as any).innerType as z.ZodTypeAny;
-                                                }
-                                                const rawValue = formValues[key];
-                                                const stringValue = typeof rawValue === 'string' ? rawValue : '';
-                                                const error = formErrors[key];
-                                                const navStyle = (defType === 'nav-link') ? String((formValues['style'] as string) || 'link') : undefined;
-                                                const hideForNavLink = (
-                                                    (defType === 'nav-link' && key === 'textColor' && navStyle === 'link') ||
-                                                    (defType === 'nav-link' && key === 'underline' && navStyle === 'button')
-                                                );
-                                                if (hideForNavLink) return null;
-                                                let label = key.charAt(0).toUpperCase() + key.slice(1);
-                                                let helperText: string | null = null;
-                                                if (defType === 'nav-link') {
-                                                    if (key === 'color') label = navStyle === 'button' ? 'Background color' : 'Text color';
-                                                    if (key === 'textColor') label = 'Text color';
-                                                }
-                                                if (defType === 'link') {
-                                                    if (key === 'url') {
-                                                        helperText = `Supports ${ALLOWED_HTTP_SCHEME_LABEL} links. Missing protocol defaults to https://.`;
-                                                    } else if (key === 'iconLeft') {
-                                                        label = 'Prefix icon/text';
-                                                        helperText = 'Optional emoji or short text shown before the link label.';
-                                                    } else if (key === 'iconRight') {
-                                                        label = 'Suffix icon/text';
-                                                        helperText = 'Optional emoji or short text shown after the link label.';
-                                                    }
-                                                } else if (defType === 'project') {
-                                                    if (key === 'link') {
-                                                        label = 'Project link';
-                                                        helperText = 'Optional external URL opened when the card is clicked.';
-                                                    } else if (key === 'image') {
-                                                        label = 'Image URL or asset://';
-                                                        helperText = 'Paste a hosted image URL or asset:// identifier to show a cover.';
-                                                    }
-                                                }
-                                                const disabled = locked;
-                                                const isTargetPage = (defType === 'nav-link') && key === 'targetPageId' && (baseField instanceof z.ZodString);
-                                                const isTextContent = (defType === 'text') && key === 'text' && (baseField instanceof z.ZodString);
-                                                const isCarouselIntervalField = isCarousel && key === 'interval';
-                                                const multiline = (baseField instanceof z.ZodString) && (isTextContent || shouldUseTextareaField(defType, key));
-                                                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                                                const anyZ: any = z;
-                                                const isEnum = baseField instanceof anyZ.ZodEnum;
-                                                const isNativeEnum = baseField instanceof anyZ.ZodNativeEnum;
-                                                const assetKind = (baseField instanceof z.ZodString) ? inferAssetKind(defType, key) : null;
-                                                const isUrlField = (baseField instanceof z.ZodString) && !assetKind && isLikelyUrlField(key, baseField);
-                                                const isColorField = key.toLowerCase().includes('color');
-                                                const stringInputType = inferStringInputType(baseField);
-                                                const numberMeta = baseField instanceof z.ZodNumber ? deriveNumberBounds(baseField) : undefined;
-                                                const assetPlaceholder = assetKind === 'image'
-                                                    ? 'asset://hash or https://example.com/image.jpg'
-                                                    : assetKind === 'video'
-                                                        ? 'asset://hash or https://example.com/video.mp4'
-                                                        : 'asset://hash or https://example.com/resource';
-                                                if (isCarouselIntervalField) {
-                                                    const secondsValue = typeof rawValue === 'number' && Number.isFinite(rawValue) ? (rawValue / 1000) : '';
-                                                    const adjustSeconds = (delta: number) => {
-                                                        const current = typeof secondsValue === 'number' ? secondsValue : 0;
-                                                        const next = Math.min(60, Math.max(0.5, Number((current + delta).toFixed(2))));
-                                                        const ms = Math.round(next * 1000);
-                                                        setFieldValue(key, ms);
-                                                    };
-                                                    return (
-                                                        <div key={key}>
-                                                            <label className="block text-[color:var(--fg-muted)] mb-1">Slide interval (seconds)</label>
-                                                            <div className="flex gap-2">
-                                                                <input
-                                                                    className="input w-full"
-                                                                    type="number"
-                                                                    min={0.5}
-                                                                    max={60}
-                                                                    step={0.5}
-                                                                    value={secondsValue === '' ? '' : secondsValue}
-                                                                    onChange={(e) => {
-                                                                        const raw = e.target.value;
-                                                                        const num = raw === '' ? undefined : Number(raw);
-                                                                        const ms = typeof num === 'number' && !Number.isNaN(num) ? Math.round(num * 1000) : undefined;
-                                                                        setFieldValue(key, ms);
-                                                                    }}
-                                                                    onKeyDown={handleEnterSubmitComp}
-                                                                    disabled={disabled}
-                                                                />
-                                                                <div className="flex flex-col gap-1">
-                                                                    <button className="px-2 py-1 rounded border border-[color:var(--border)] text-[10px] font-semibold" type="button" onClick={() => adjustSeconds(0.5)} disabled={disabled}>+0.5s</button>
-                                                                    <button className="px-2 py-1 rounded border border-[color:var(--border)] text-[10px] font-semibold" type="button" onClick={() => adjustSeconds(-0.5)} disabled={disabled}>-0.5s</button>
-                                                                </div>
-                                                            </div>
-                                                            <div className="text-[10px] text-[color:var(--fg-muted)] mt-1">0.5s – 60s, half-second steps.</div>
-                                                            {error && <div className="text-red-500 text-xs mt-1">{error}</div>}
-                                                        </div>
-                                                    );
-                                                }
-                                                return (
-                                                    <div key={key}>
-                                                        <label className="block text-[color:var(--fg-muted)] mb-1">{label}{!isOptional ? ' *' : ''}</label>
-                                                        {isTargetPage ? (
-                                                            <select
-                                                                className="input w-full"
-                                                                value={String(stringValue || '')}
-                                                                onChange={(e) => setFieldValue(key, e.target.value)}
-                                                                disabled={disabled}
-                                                            >
-                                                                <option value="" disabled>Select page…</option>
-                                                                {(() => {
-                                                                    const p = selectedProject;
-                                                                    const order = p?.pageOrder || [];
-                                                                    const pages = order.map(id => ({ id, title: p?.pages?.[id]?.title || id }));
-                                                                    return pages.map(pg => (
-                                                                        <option key={pg.id} value={pg.id}>{pg.title}</option>
-                                                                    ));
-                                                                })()}
-                                                            </select>
-                                                        ) : multiline ? (
-                                                            <div>
-                                                                <textarea
-                                                                    className="input w-full min-h-[6rem]"
-                                                                    value={stringValue}
-                                                                    onChange={(e) => setFieldValue(key, e.target.value)}
-                                                                    disabled={disabled}
-                                                                />
-                                                                <div className="mt-1 text-[10px] text-[color:var(--fg-muted)]">{stringValue.length} characters</div>
-                                                            </div>
-                                                        ) : assetKind && baseField instanceof z.ZodString ? (
-                                                            <SchemaAssetField
-                                                                value={stringValue}
-                                                                placeholder={assetPlaceholder}
-                                                                disabled={disabled}
-                                                                assets={assets}
-                                                                assetKind={assetKind}
-                                                                onChange={(next) => setFieldValue(key, next && next.length ? next : undefined)}
-                                                            />
-                                                        ) : isUrlField ? (
-                                                            <SchemaUrlField
-                                                                value={stringValue}
-                                                                disabled={disabled}
-                                                                onChange={(next) => setFieldValue(key, next && next.length ? next : undefined)}
-                                                                onKeyDown={handleEnterSubmitComp}
-                                                            />
-                                                        ) : baseField instanceof z.ZodBoolean ? (
-                                                            <div className="flex items-center gap-2">
-                                                                <input type="checkbox" className="checkbox" checked={!!formValues[key]} onChange={(e) => setFieldValue(key, e.target.checked)} disabled={disabled} />
-                                                                <span className="text-xs">{label}</span>
-                                                            </div>
-                                                        ) : baseField instanceof z.ZodNumber ? (
-                                                            <SchemaNumberField
-                                                                value={typeof rawValue === 'number' ? rawValue : undefined}
-                                                                min={numberMeta?.min}
-                                                                max={numberMeta?.max}
-                                                                step={numberMeta?.step}
-                                                                disabled={disabled}
-                                                                onChange={(next) => setFieldValue(key, next)}
-                                                                onKeyDown={handleEnterSubmitComp}
-                                                            />
-                                                        ) : (isEnum || isNativeEnum) ? (
-                                                            <select
-                                                                className="input w-full"
-                                                                value={String(stringValue || '')}
-                                                                onChange={(e) => setFieldValue(key, e.target.value)}
-                                                                disabled={disabled}
-                                                            >
-                                                                <option value="" disabled>Select…</option>
-                                                                {(() => {
-                                                                    // derive options for enum types
-                                                                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                                                                    const def: any = (baseField as any)._def;
-                                                                    let opts: string[] = [];
-                                                                    if (isEnum && Array.isArray(def?.values)) opts = def.values as string[];
-                                                                    else if (isNativeEnum && def?.values) opts = Object.values(def.values).filter((v: unknown) => typeof v === 'string') as string[];
-                                                                    return opts.map((opt) => (
-                                                                        <option key={opt} value={opt}>{opt}</option>
-                                                                    ));
-                                                                })()}
-                                                            </select>
-                                                        ) : isColorField ? (
-                                                            <div className="flex items-center gap-2">
-                                                                <input
-                                                                    className="rounded border border-[color:var(--border)] bg-[color:var(--muted)]/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[color:var(--surface)]"
-                                                                    type="color"
-                                                                    value={stringValue || '#2563eb'}
-                                                                    onChange={(e) => setFieldValue(key, e.target.value)}
-                                                                    disabled={disabled}
-                                                                    style={{ width: 36, height: 24, padding: 0, minWidth: 36 }}
-                                                                    aria-label={`${label} color`}
-                                                                />
-                                                                <span className="font-mono text-xs text-[color:var(--fg-muted)]">{stringValue || '#2563eb'}</span>
-                                                            </div>
-                                                        ) : (
-                                                            <input
-                                                                className="input w-full"
-                                                                type={stringInputType}
-                                                                value={stringValue}
-                                                                onChange={(e) => setFieldValue(key, e.target.value)}
-                                                                onKeyDown={handleEnterSubmitComp}
-                                                                disabled={disabled}
-                                                            />
-                                                        )}
-                                                        {!!helperText && <div className="mt-1 text-[10px] text-[color:var(--fg-muted)]">{helperText}</div>}
-                                                        {!!error && <div className="mt-1 text-xs text-red-500">{error}</div>}
-                                                    </div>
-                                                );
-                                            })}
-                                        </div>
+                                        {!!defaultFieldNodes.length && (
+                                            <div className="space-y-2">
+                                                {defaultFieldNodes}
+                                            </div>
+                                        )}
+                                        {!!appearanceFieldNodes.length && (
+                                            <div className={`${defaultFieldNodes.length ? 'pt-3 mt-3 border-t border-[color:var(--border)]' : ''} space-y-2`}>
+                                                <div className="text-[color:var(--fg-muted)] font-medium">Appearance</div>
+                                                {appearanceFieldNodes}
+                                            </div>
+                                        )}
                                         <div className="mt-3 flex items-center justify-end gap-2">
                                             <button className="btn btn-outline btn-xs" onClick={() => { applyForm(); }} disabled={locked}>Apply</button>
                                         </div>

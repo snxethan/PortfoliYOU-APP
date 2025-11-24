@@ -1,9 +1,10 @@
 import { useNavigate } from "react-router-dom";
 import { useState } from "react";
-import { Cloud, UploadCloud, Wrench, X, Save, FolderOpen, Edit3, Pin, PinOff } from "lucide-react";
+import { Cloud, UploadCloud, Wrench, X, Save, FolderOpen, Edit3, Pin, PinOff, Palette } from "lucide-react";
 
 import { useAuth } from "../../providers/AuthProvider";
 import { useProjects } from "../../providers/ProjectsProvider";
+import ThemeSettingsModal from "../modals/ThemeSettingsModal";
 
 export default function PortfolioIsland() {
   const { user } = useAuth();
@@ -11,6 +12,7 @@ export default function PortfolioIsland() {
   const navigate = useNavigate();
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState("");
+  const [themeModalOpen, setThemeModalOpen] = useState(false);
   const [pinned, setPinned] = useState<boolean>(() => {
     try { return localStorage.getItem('py_island_pin') === '1'; } catch { return false; }
   });
@@ -77,6 +79,14 @@ export default function PortfolioIsland() {
                     <span className="ml-1 hidden sm:inline">Rename</span>
                   </button>
                 )}
+                <button
+                  className="btn btn-ghost"
+                  disabled={!selectedProjectId}
+                  onClick={() => setThemeModalOpen(true)}
+                  title="Customize theme"
+                >
+                  <Palette size={16} className="mr-1" /> Theme
+                </button>
                 {/* Export button removed per request; Open moved to right group */}
               </div>
             )}
@@ -200,6 +210,9 @@ export default function PortfolioIsland() {
           ) : <div />}
         </div>
       </header>
+      {themeModalOpen && (
+        <ThemeSettingsModal open={themeModalOpen} onClose={() => setThemeModalOpen(false)} />
+      )}
     </div>
   );
 }

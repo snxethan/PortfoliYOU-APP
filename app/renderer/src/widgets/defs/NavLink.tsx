@@ -2,10 +2,11 @@ import React from 'react';
 import { z } from 'zod';
 
 import type { WidgetDefinition } from '../types';
-import { useWidget } from '../sdk';
+import { useWidget, useWidgetTheme } from '../sdk';
 
 function NavLinkView(props: NavLinkProps) {
     const { currentPageId } = useWidget();
+    const theme = useWidgetTheme();
     const href = props.targetPageId ? `#/page/${props.targetPageId}` : '';
     const isButton = props.style === 'button';
     const isCurrent = currentPageId && props.targetPageId === currentPageId;
@@ -16,12 +17,12 @@ function NavLinkView(props: NavLinkProps) {
     };
     const ff = props.font === 'serif' ? 'ui-serif, Georgia, Cambria, "Times New Roman", Times, serif'
         : props.font === 'mono' ? 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace'
-            : 'ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Helvetica Neue, Arial, "Apple Color Emoji", "Segoe UI Emoji"';
+            : theme.bodyFont || 'ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Helvetica Neue, Arial, "Apple Color Emoji", "Segoe UI Emoji"';
 
     if (!href) {
         return (
             <div style={wrapperStyle}>
-                <span role="link" aria-disabled="true" title={props.label} style={{ opacity: 0.6, fontSize: 12 }}>
+                <span role="link" aria-disabled="true" title={props.label} style={{ opacity: 0.6, fontSize: 12, color: theme.muted }}>
                     {props.label}
                 </span>
             </div>
@@ -29,8 +30,9 @@ function NavLinkView(props: NavLinkProps) {
     }
 
     if (isButton) {
-        const bg = props.color || '#2563eb';
-        const text = props.textColor || '#ffffff';
+        const bg = props.color || theme.accent || '#2563eb';
+        const text = props.textColor || theme.widgetText || '#ffffff';
+        const border = theme.border || '#0f172a';
         return (
             <div style={wrapperStyle}>
                 <a
@@ -47,8 +49,8 @@ function NavLinkView(props: NavLinkProps) {
                         textDecoration: 'none',
                         fontSize: props.fontSize ? `${props.fontSize}px` : 12,
                         fontWeight: 600,
-                        border: '2px solid #000',
-                        boxShadow: '1px 1px 0 #000',
+                        border: `2px solid ${border}`,
+                        boxShadow: `1px 1px 0 color-mix(in srgb, ${border} 70%, transparent)`,
                         fontFamily: ff,
                     }}
                 >
@@ -58,7 +60,7 @@ function NavLinkView(props: NavLinkProps) {
         );
     }
 
-    const color = props.color || '#2563eb';
+    const color = props.color || theme.accent || '#2563eb';
     const textDecoration = props.underline ? 'underline' : 'none';
     return (
         <div style={wrapperStyle}>
@@ -67,7 +69,13 @@ function NavLinkView(props: NavLinkProps) {
                 aria-label={props.ariaLabel || props.label}
                 aria-current={isCurrent ? 'page' : undefined}
                 title={props.label}
-                style={{ color, textDecoration, fontSize: props.fontSize ? `${props.fontSize}px` : 14, fontWeight: 600, fontFamily: ff }}
+                style={{
+                    color,
+                    textDecoration: textDecoration === 'underline' || isCurrent ? 'underline' : 'none',
+                    fontSize: props.fontSize ? `${props.fontSize}px` : 14,
+                    fontWeight: 600,
+                    fontFamily: ff,
+                }}
             >
                 {props.label}
             </a>
@@ -95,6 +103,7 @@ type NavLinkProps = {
 const def: WidgetDefinition<NavLinkProps> = {
     type: 'nav-link',
     label: 'Page Navigation',
+    version: 1,
     defaultProps: {
         label: 'Go to page',
         targetPageId: 'page_home',

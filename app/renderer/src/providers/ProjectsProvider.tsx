@@ -10,6 +10,9 @@ import { idbGet, idbPut, computeHash, stores, AssetMeta } from "../lib/assetsSto
 import { auth, db, storage } from "../lib/firebase";
 import { sanitizeVideoProps } from "../widgets/videoProps";
 import type { VideoWidgetProps } from "../widgets/videoProps";
+import type { Theme, ThemePatch } from "../themes/types";
+import { THEME_PRESETS, DEFAULT_THEME_PRESET_ID, getPresetById } from "../themes/presets";
+import { createThemeFromPreset as createThemeFromPresetUtil, mergeTheme } from "../themes/utils";
 
 import { useNotifications } from "./NotificationsProvider";
 
@@ -20,22 +23,13 @@ type ZipEntry = {
 	name: string;
 };
 
-export type Theme = {
-	themeId: string;
-	name: string;
-	colors: { primary: string; secondary: string; bg: string; fg: string };
-	typography: { heading: string; body: string; scale: number };
-	schemaVersion: number;
-	createdAt: string;
-	updatedAt: string;
-};
-
 export type Page = {
 	pageId: string;
 	title: string;
 	order: number;
 	widgets: string[];
 	starter?: boolean;
+	backgroundColor?: string | null;
 	breakpoints: { desktop: boolean; tablet: boolean; mobile: boolean };
 	schemaVersion: number;
 	createdAt: string;
@@ -99,8 +93,47 @@ function sanitizeProjectVideoWidgets(project: LocalProject): LocalProject {
 	return { ...project, widgets: sanitized };
 }
 
+const themePresetFallback = getPresetById(DEFAULT_THEME_PRESET_ID) || THEME_PRESETS[0];
+
+function hydrateThemeCandidate(raw: Partial<Theme> | undefined, nameHint: string): Theme {
+	const base = createThemeFromPresetUtil(themePresetFallback, {
+		themeId: raw?.themeId,
+		name: raw?.name || nameHint,
+		origin: raw?.origin || 'custom',
+		createdAt: raw?.createdAt,
+	});
+	const merged = mergeTheme(base, { colors: raw?.colors, typography: raw?.typography, name: raw?.name }) as Theme;
+	return {
+		...merged,
+		createdAt: raw?.createdAt || base.createdAt,
+		updatedAt: raw?.updatedAt || merged.updatedAt,
+		schemaVersion: typeof raw?.schemaVersion === 'number' ? raw.schemaVersion : merged.schemaVersion,
+		origin: raw?.origin || merged.origin,
+	};
+}
+
+function ensureProjectThemes(project: LocalProject): LocalProject {
+	const themesMap = (project.themes && typeof project.themes === 'object') ? project.themes as Record<string, Partial<Theme>> : {};
+	const nextThemes: Record<string, Theme> = {};
+	let activeId = project.activeThemeId;
+	for (const [themeId, raw] of Object.entries(themesMap)) {
+		if (!raw) continue;
+		const hydrated = hydrateThemeCandidate({ ...raw, themeId }, project.name || 'Theme');
+		nextThemes[hydrated.themeId] = hydrated;
+		if (hydrated.themeId === activeId) {
+			activeId = hydrated.themeId;
+		}
+	}
+	if (!activeId || !nextThemes[activeId]) {
+		const fallback = createThemeFromPresetUtil(themePresetFallback, { name: project.name ? `${project.name} Theme` : 'Portfolio Theme' });
+		nextThemes[fallback.themeId] = fallback;
+		activeId = fallback.themeId;
+	}
+	return { ...project, themes: nextThemes, activeThemeId: activeId } as LocalProject;
+}
+
 function sanitizeProjectsList(projects: LocalProject[]): LocalProject[] {
-	return projects.map(sanitizeProjectVideoWidgets);
+	return projects.map((proj) => ensureProjectThemes(sanitizeProjectVideoWidgets(proj)));
 }
 
 type ProjectsCtx = {
@@ -143,15 +176,22 @@ type ProjectsCtx = {
 	renamePage: (projectId: string, pageId: string, newTitle: string) => void;
 	deletePage: (projectId: string, pageId: string) => void;
 	setPageStarter: (projectId: string, pageId: string, starter: boolean) => void;
+	setPageBackground: (projectId: string, pageId: string, color?: string | null) => void;
 	// Page widgets
 	getPageItems: (projectId: string, pageId: string) => Array<{
 		id: string; x: number; y: number; w: number; h: number; z: number;
-		title?: string; type?: string; props?: unknown; pinned?: boolean; locked?: boolean;
+		title?: string; type?: string; props?: unknown; schemaVersion?: number; pinned?: boolean; locked?: boolean;
 	}>;
 	setPageItems: (projectId: string, pageId: string, items: Array<{
 		id: string; x: number; y: number; w: number; h: number; z: number;
-		title?: string; type?: string; props?: unknown; pinned?: boolean; locked?: boolean;
+		title?: string; type?: string; props?: unknown; schemaVersion?: number; pinned?: boolean; locked?: boolean;
 	}>) => void;
+	activeTheme: Theme | null;
+	setActiveTheme: (projectId: string, themeId: string) => void;
+	createThemeFromPreset: (projectId: string, presetId: string, opts?: { activate?: boolean; name?: string }) => Theme | null;
+	duplicateTheme: (projectId: string, sourceThemeId: string, opts?: { activate?: boolean }) => Theme | null;
+	updateTheme: (projectId: string, themeId: string, patch: ThemePatch) => void;
+	deleteTheme: (projectId: string, themeId: string) => void;
 };
 
 const Ctx = createContext<ProjectsCtx | null>(null);
@@ -164,8 +204,11 @@ function readStore(): LocalProject[] {
 	} catch { return []; }
 }
 function writeStore(list: LocalProject[]) {
-	const sanitized = sanitizeProjectsList(list);
-	localStorage.setItem("py.projects", JSON.stringify(sanitized));
+	try {
+		localStorage.setItem("py.projects", JSON.stringify(list));
+	} catch {
+		/* ignore storage failures */
+	}
 }
 function readSelected(): string | null { try { return JSON.parse(localStorage.getItem("py.selectedProjectId") || "null"); } catch { return null; } }
 function writeSelected(id: string | null) { localStorage.setItem("py.selectedProjectId", JSON.stringify(id)); }
@@ -404,17 +447,13 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 		return out;
 	};
 
+	const selected = useMemo(() => projects.find(p => p.id === selectedProjectId) || null, [projects, selectedProjectId]);
+	const selectedTheme = useMemo(() => selected ? (selected.themes?.[selected.activeThemeId] ?? null) : null, [selected]);
+
 	const api = useMemo<ProjectsCtx>(() => {
-		// Default theme
-		const defaultTheme: Theme = {
-			themeId: "theme_default_light",
-			name: "Light Default",
-			colors: { primary: "#2b6cb0", secondary: "#1a202c", bg: "#ffffff", fg: "#111827" },
-			typography: { heading: "Inter", body: "Inter", scale: 1.0 },
-			schemaVersion: 1,
-			createdAt: now(),
-			updatedAt: now(),
-		};
+		// Default theme seeded from preset
+		const preset = themePresetFallback;
+		const defaultTheme: Theme = createThemeFromPresetUtil(preset, { themeId: "theme_default_light", name: preset.name });
 
 		// Default page
 		const defaultPage: Page = {
@@ -422,6 +461,7 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 			title: "Home",
 			order: 0,
 			widgets: [],
+			backgroundColor: null,
 			breakpoints: { desktop: true, tablet: true, mobile: true },
 			schemaVersion: 1,
 			createdAt: now(),
@@ -468,6 +508,17 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 					const next = [...projects]; next[idx] = nextProj; setProjects(next); writeStore(next);
 				}
 			},
+			setPageBackground: (projectId: string, pageId: string, color?: string | null) => {
+				const idx = projects.findIndex(p => p.id === projectId); if (idx < 0) return;
+				const proj = projects[idx];
+				const page = proj.pages[pageId]; if (!page) return;
+				const normalized = typeof color === 'string' ? color.trim() : '';
+				const nextColor = normalized ? normalized : null;
+				if (page.backgroundColor === nextColor) return;
+				const updatedPage: Page = { ...page, backgroundColor: nextColor, updatedAt: now() };
+				const nextProj: LocalProject = { ...proj, pages: { ...proj.pages, [pageId]: updatedPage }, updatedAt: now() } as LocalProject;
+				const next = [...projects]; next[idx] = nextProj; setProjects(next); writeStore(next);
+			},
 			createPage: (projectId: string, title?: string) => {
 				const idx = projects.findIndex(p => p.id === projectId); if (idx < 0) return null;
 				const proj = projects[idx];
@@ -485,6 +536,7 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 					starter: false,
 					order,
 					widgets: [],
+					backgroundColor: null,
 					breakpoints: { desktop: true, tablet: true, mobile: true },
 					schemaVersion: 1,
 					createdAt: now(),
@@ -500,7 +552,7 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 				if (!isCloud) {
 					notify({ type: 'info', message: 'Adding more pages increases your project file size.', title: nextProj.name, persistent: false });
 				}
-				notify({ type: 'success', message: `Page "${(title || 'Untitled')}" created`, title: nextProj.name, persistent: false });
+				notify({ type: 'success', message: `Page "${page.title}" created`, title: nextProj.name, persistent: false });
 				return pid;
 			},
 			renamePage: (projectId: string, pageId: string, newTitle: string) => {
@@ -520,6 +572,7 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 					return;
 				}
 				if (!proj.pages[pageId]) return;
+				const removedTitle = proj.pages[pageId]?.title || 'Untitled';
 				const nextOrder = proj.pageOrder.filter(id => id !== pageId);
 				const nextPages = { ...proj.pages } as Record<string, Page>;
 				// Remove page and clean up references
@@ -545,6 +598,7 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 					}
 				}
 				const next = [...projects]; next[idx] = nextProj; setProjects(next); writeStore(next);
+				notify({ type: 'info', message: `Page "${removedTitle}" deleted`, title: proj.name, persistent: false });
 			},
 			addProject: (name = "Untitled Portfolio") => {
 				const id = crypto.randomUUID();
@@ -690,7 +744,8 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 			},
 			selectProject: (projectId: string) => { setSelectedProjectId(projectId); writeSelected(projectId); },
 			selectedProjectId,
-			selectedProject: projects.find(p => p.id === selectedProjectId) || null,
+			selectedProject: selected,
+			activeTheme: selectedTheme,
 			clearAll: () => {
 				setProjects([]);
 				localStorage.removeItem("py.projects");
@@ -717,7 +772,7 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 				const proj = projects.find(p => p.id === projectId); if (!proj) return [];
 				const page = proj.pages[pageId]; if (!page) return [];
 				const ids = page.widgets || [];
-				const out: Array<{ id: string; x: number; y: number; w: number; h: number; z: number; title?: string; type?: string; props?: unknown; pinned?: boolean; locked?: boolean; }> = [];
+				const out: Array<{ id: string; x: number; y: number; w: number; h: number; z: number; title?: string; type?: string; props?: unknown; schemaVersion?: number; pinned?: boolean; locked?: boolean; }> = [];
 				for (const wid of ids) {
 					const w = proj.widgets[wid]; if (!w) continue;
 					type LayoutLike = Partial<{ x: number | string; y: number | string; w: number | string; h: number | string; z: number | string; title: string; pinned: boolean; locked: boolean }>;
@@ -732,6 +787,7 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 						title: layout.title || undefined,
 						type: w.type || undefined,
 						props: w.props,
+						schemaVersion: typeof w.schemaVersion === 'number' ? w.schemaVersion : 1,
 						pinned: Boolean(layout.pinned),
 						locked: Boolean(layout.locked),
 					});
@@ -751,6 +807,7 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 					const it = items[i];
 					const existing = nextWidgets[it.id];
 					const createdAt = existing?.createdAt || nowStr;
+					const schemaVersion = typeof it.schemaVersion === 'number' ? it.schemaVersion : (typeof existing?.schemaVersion === 'number' ? existing?.schemaVersion : 1);
 					nextWidgets[it.id] = {
 						widgetId: it.id,
 						type: it.type || existing?.type || 'custom',
@@ -761,7 +818,7 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 							x: it.x, y: it.y, w: it.w, h: it.h, z: it.z,
 							pinned: !!it.pinned, locked: !!it.locked, title: it.title ?? ((existing?.layout as { title?: string } | undefined)?.title) ?? undefined,
 						},
-						schemaVersion: 1,
+						schemaVersion,
 						createdAt,
 						updatedAt: nowStr,
 					} as Widget;
@@ -789,6 +846,76 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 					updatedAt: nowStr,
 				} as LocalProject;
 				const next = [...projects]; next[idx] = nextProj; setProjects(next); writeStore(next);
+			},
+			setActiveTheme: (projectId: string, themeId: string) => {
+				const idx = projects.findIndex(p => p.id === projectId); if (idx < 0) return;
+				const proj = projects[idx];
+				if (!proj.themes?.[themeId]) return;
+				if (proj.activeThemeId === themeId) return;
+				const nextProj: LocalProject = { ...proj, activeThemeId: themeId, updatedAt: now() } as LocalProject;
+				const next = [...projects]; next[idx] = nextProj; setProjects(next); writeStore(next);
+			},
+			createThemeFromPreset: (projectId: string, presetId: string, opts) => {
+				const idx = projects.findIndex(p => p.id === projectId); if (idx < 0) return null;
+				const proj = projects[idx];
+				const preset = getPresetById(presetId) || themePresetFallback;
+				const created = createThemeFromPresetUtil(preset, { name: opts?.name || preset.name, origin: 'preset' });
+				const nextThemes = { ...proj.themes, [created.themeId]: created } as Record<string, Theme>;
+				const nextProj: LocalProject = {
+					...proj,
+					themes: nextThemes,
+					activeThemeId: opts?.activate ? created.themeId : proj.activeThemeId,
+					updatedAt: now(),
+				} as LocalProject;
+				const hydrated = ensureProjectThemes(nextProj);
+				const next = [...projects]; next[idx] = hydrated; setProjects(next); writeStore(next);
+				return hydrated.themes[created.themeId];
+			},
+			duplicateTheme: (projectId: string, sourceThemeId: string, opts) => {
+				const idx = projects.findIndex(p => p.id === projectId); if (idx < 0) return null;
+				const proj = projects[idx];
+				const source = proj.themes?.[sourceThemeId]; if (!source) return null;
+				const copyName = `${source.name} Copy`;
+				const seed = createThemeFromPresetUtil(themePresetFallback, { name: copyName, origin: 'custom' });
+				const duplicate = { ...mergeTheme(seed, { colors: source.colors, typography: source.typography, name: copyName, origin: 'custom' }), createdAt: now(), updatedAt: now() } as Theme;
+				const nextThemes = { ...proj.themes, [duplicate.themeId]: duplicate } as Record<string, Theme>;
+				const nextProj: LocalProject = {
+					...proj,
+					themes: nextThemes,
+					activeThemeId: opts?.activate ? duplicate.themeId : proj.activeThemeId,
+					updatedAt: now(),
+				} as LocalProject;
+				const next = [...projects]; next[idx] = nextProj; setProjects(next); writeStore(next);
+				return duplicate;
+			},
+			updateTheme: (projectId: string, themeId: string, patch: ThemePatch) => {
+				const idx = projects.findIndex(p => p.id === projectId); if (idx < 0) return;
+				const proj = projects[idx];
+				const current = proj.themes?.[themeId]; if (!current) return;
+				const updated = mergeTheme(current, patch);
+				const nextThemes = { ...proj.themes, [themeId]: updated } as Record<string, Theme>;
+				const nextProj: LocalProject = { ...proj, themes: nextThemes, updatedAt: now() } as LocalProject;
+				const next = [...projects]; next[idx] = nextProj; setProjects(next); writeStore(next);
+			},
+			deleteTheme: (projectId: string, themeId: string) => {
+				const idx = projects.findIndex(p => p.id === projectId); if (idx < 0) return;
+				const proj = projects[idx];
+				const keys = Object.keys(proj.themes || {});
+				if (keys.length <= 1) {
+					try { notify({ type: 'warn', message: 'Keep at least one theme in your portfolio.', title: proj.name, persistent: false }); } catch { /* noop */ }
+					return;
+				}
+				if (!proj.themes?.[themeId]) return;
+				const nextThemes = { ...proj.themes } as Record<string, Theme>;
+				delete nextThemes[themeId];
+				let nextActive = proj.activeThemeId;
+				if (nextActive === themeId) {
+					const fallbackId = Object.keys(nextThemes)[0];
+					nextActive = fallbackId;
+				}
+				const nextProj: LocalProject = { ...proj, themes: nextThemes, activeThemeId: nextActive, updatedAt: now() } as LocalProject;
+				const hydrated = ensureProjectThemes(nextProj);
+				const next = [...projects]; next[idx] = hydrated; setProjects(next); writeStore(next);
 			},
 			exportProject: async (projectId: string) => {
 				const proj = projects.find(p => p.id === projectId);
@@ -1374,7 +1501,7 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 				}
 			},
 		};
-	}, [projects, selectedProjectId, saving, lastSavedAt, cloudMaxProjects, cloudBytesUsed, cloudProjectsCount, autosaveEnabled, notify]);
+	}, [projects, selectedProjectId, saving, lastSavedAt, cloudMaxProjects, cloudBytesUsed, cloudProjectsCount, autosaveEnabled, notify, selected, selectedTheme]);
 
 	// Auto-save to file for projects that have a _filePath
 	const prevTimesRef = useRef<Record<string, string>>({});
@@ -1458,7 +1585,40 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 		if (typeof obj['status'] !== 'object' || obj['status'] === null) obj['status'] = { deployed: false, lastDeployAt: null, deployType: null };
 		if (typeof obj['themes'] !== 'object' || obj['themes'] === null) obj['themes'] = {};
 		if (typeof obj['pages'] !== 'object' || obj['pages'] === null) obj['pages'] = {};
+		else {
+			const pages = obj['pages'] as Record<string, Record<string, unknown>>;
+			const nextPages: Record<string, Record<string, unknown>> = {};
+			for (const [pid, raw] of Object.entries(pages)) {
+				if (!raw || typeof raw !== 'object') {
+					nextPages[pid] = raw as Record<string, unknown>;
+					continue;
+				}
+				const bgValue = typeof raw['backgroundColor'] === 'string' ? raw['backgroundColor'] as string : null;
+				const trimmed = bgValue ? bgValue.trim() : '';
+				nextPages[pid] = {
+					...raw,
+					backgroundColor: trimmed ? trimmed : null,
+				};
+			}
+			obj['pages'] = nextPages;
+		}
 		if (typeof obj['widgets'] !== 'object' || obj['widgets'] === null) obj['widgets'] = {};
+		else {
+			const widgets = obj['widgets'] as Record<string, Widget>;
+			const nextWidgets: Record<string, Widget> = {};
+			for (const [wid, widget] of Object.entries(widgets)) {
+				if (!widget || typeof widget !== 'object') {
+					nextWidgets[wid] = widget as Widget;
+					continue;
+				}
+				if (typeof widget.schemaVersion !== 'number' || widget.schemaVersion < 1) {
+					nextWidgets[wid] = { ...widget, schemaVersion: 1 } as Widget;
+				} else {
+					nextWidgets[wid] = widget;
+				}
+			}
+			obj['widgets'] = nextWidgets;
+		}
 		const migrated = sanitizeProjectVideoWidgets(obj as LocalProject);
 		migrated.updatedAt = now();
 		return migrated;

@@ -322,6 +322,7 @@ const schema = z
 const def: WidgetDefinition<GitHubReposProps> = {
     type: 'github-repos',
     label: 'GitHub Repos',
+    version: 1,
     defaultProps: {
         username: FALLBACK_USERNAME,
         maxItems: DEFAULT_MAX_ITEMS,
