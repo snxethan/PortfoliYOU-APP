@@ -1,4 +1,4 @@
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { useMemo, useState } from "react";
 import { Cloud, UploadCloud, Wrench, X, Save, FolderOpen, Pin, PinOff, Palette, Settings2 } from "lucide-react";
 
@@ -11,17 +11,29 @@ export default function PortfolioIsland() {
   const { selectedProject, selectedProjectId, saving, lastSavedAt, saveProject, clearSelection, autosaveEnabled, setAutosaveEnabled } = useProjects();
   const { openSettings } = usePortfolioSettings();
   const navigate = useNavigate();
+  const location = useLocation();
   const [pinned, setPinned] = useState<boolean>(() => {
     try { return localStorage.getItem('py_island_pin') === '1'; } catch { return false; }
   });
+  const [opacity, setOpacity] = useState<number>(() => {
+    try {
+      const v = Number(localStorage.getItem('py_island_opacity'));
+      if (!v || !Number.isFinite(v)) return 0.95;
+      return Math.min(1, Math.max(0.25, v));
+    } catch { return 0.95; }
+  });
   const savedText = useMemo(() => lastSavedAt ? new Date(lastSavedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : null, [lastSavedAt]);
   const hasSelection = !!selectedProjectId;
-  const containerClass = (pinned ? "sticky top-0 z-[9999] " : "") + "px-4 pt-4";
+  // Hide the island on the Home page when there's no selected portfolio
+  if (location.pathname === '/' && !hasSelection) return null;
+  // When pinned, keep the island positioned beneath the fixed FrameBar (36px / top-9)
+  const containerClass = (pinned ? "sticky top-9 z-50 " : "") + "px-4 pt-4";
   const labelClass = "text-[11px] uppercase tracking-wide text-[color:var(--fg-muted)]";
   const segmentClass = "flex items-center gap-2 rounded-full border border-[color:var(--border)] bg-[color:var(--surface)]/60 px-3 py-1.5 shadow-sm flex-wrap";
-  const actionBtnClass = "btn btn-ghost btn-sm flex items-center gap-1";
-  const iconControlClass = "inline-flex items-center justify-center w-9 h-9 rounded-full border border-[color:var(--border)] bg-[color:var(--surface)]/80 hover:bg-[color:var(--muted)]/40 transition disabled:opacity-40";
-
+  const actionBtnClass = "btn btn-ghost btn-sm flex items-center gap-1 text-[11px]";
+  // Use the shared hover-accent helper so these icon controls match other buttons
+  // and adopt the app's light/dark hover styling consistently.
+  const iconControlClass = "inline-flex items-center justify-center w-9 h-9 rounded-md border border-[color:var(--border)] bg-[color:var(--surface)]/70 hover-accent transition disabled:opacity-40 shadow-sm";
   const statusChip = (
     <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-[color:var(--border)] bg-[color:var(--muted)]/30 text-[11px] font-semibold text-[color:var(--fg-muted)]">
       {saving ? (
@@ -37,9 +49,14 @@ export default function PortfolioIsland() {
     </div>
   );
 
+  const pct = Math.round(opacity * 100);
+
   return (
-    <div className={containerClass}>
-      <div className={`surface border border-[color:var(--border)] rounded-2xl px-3 py-3 shadow-lg bg-[color:var(--surface)]/80 transition ${hasSelection ? 'ring-2 ring-[color:var(--accent)]/50 ring-offset-2 ring-offset-[color:var(--bg,transparent)]' : ''}`}>
+    <div className={`portfolio-island ${containerClass}`}>
+      <div
+        className={`surface border border-[color:var(--border)] rounded-2xl px-3 py-3 shadow-lg bg-[color:var(--surface)]/80 transition ${hasSelection ? 'ring-2 ring-[color:var(--accent)]/50 ring-offset-2 ring-offset-[color:var(--bg,transparent)]' : ''}`}
+        style={{ ['--island-opacity' as any]: opacity }}
+      >
         <div className="flex flex-wrap items-center gap-2 w-full">
           <button
             type="button"
@@ -67,9 +84,37 @@ export default function PortfolioIsland() {
           )}
           <div className="flex flex-col items-end gap-2 ml-auto">
             <div className="flex items-center gap-1">
+              {pinned && (
+                <div className="flex items-center gap-2 px-2">
+                  <label className="text-[10px] text-[color:var(--fg-muted)]">Opacity</label>
+                  <input
+                    aria-label="Portfolio island opacity"
+                    title="Adjust portfolio island opacity"
+                    type="range"
+                    min={25}
+                    max={100}
+                    step={5}
+                    value={pct}
+                    className="island-opacity-slider w-28"
+                    onChange={(e) => {
+                      const raw = Number((e.target as HTMLInputElement).value);
+                      const next = Math.min(100, Math.max(25, raw)) / 100;
+                      setOpacity(next);
+                      try { localStorage.setItem('py_island_opacity', String(next)); } catch { /* ignore */ }
+                    }}
+                    style={{
+                      backgroundImage: `linear-gradient(90deg, var(--accent), var(--accent))`,
+                      backgroundSize: `${pct}% 100%`,
+                      backgroundRepeat: 'no-repeat',
+                      backgroundColor: 'color-mix(in oklab, var(--surface) 85%, transparent)'
+                    }}
+                  />
+                  <div className="text-[11px] text-[color:var(--fg-muted)]">{Math.round(opacity * 100)}%</div>
+                </div>
+              )}
               <button
                 type="button"
-                className={iconControlClass}
+                className={`btn btn-ghost p-2 w-9 h-9 inline-flex items-center justify-center rounded-md text-[color:var(--fg-muted)]`}
                 title={pinned ? "Unpin island from top" : "Pin island to top"}
                 aria-pressed={pinned}
                 onClick={() => setPinned(prev => {
@@ -82,7 +127,7 @@ export default function PortfolioIsland() {
               </button>
               <button
                 type="button"
-                className={iconControlClass}
+                className={`btn btn-ghost p-2 w-9 h-9 inline-flex items-center justify-center rounded-md text-[color:var(--fg-muted)]`}
                 disabled={!hasSelection}
                 title="Close current portfolio"
                 onClick={() => { clearSelection(); navigate('/'); }}
@@ -137,7 +182,7 @@ export default function PortfolioIsland() {
               onClick={() => selectedProjectId && navigate('/editor')}
             >
               <Wrench size={14} />
-              Editor
+              EDITOR
             </button>
             <button
               type="button"
@@ -146,7 +191,7 @@ export default function PortfolioIsland() {
               onClick={() => selectedProjectId && navigate('/deploy')}
             >
               <UploadCloud size={14} />
-              Deploy
+              DEPLOY
             </button>
           </div>
 

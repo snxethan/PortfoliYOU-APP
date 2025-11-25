@@ -20,7 +20,7 @@ import { usePortfolioSettings } from "../providers/PortfolioSettingsProvider";
 
 export default function HomePage() {
 	const { user } = useAuth();
-	const { projects, hasAny, importProject, exportProject, selectProject, deleteProject, saveProject, selectedProjectId, cloudMaxProjects, cloudMaxStorageMB, cloudBytesUsed, cloudProjectsCount, listCloudProjects, getCloudObjectInfoByCloudId, reconcileCloudLinks } = useProjects();
+	const { projects, hasAny, importProject, selectProject, deleteProject, saveProject, selectedProjectId, cloudMaxProjects, cloudMaxStorageMB, cloudBytesUsed, cloudProjectsCount, listCloudProjects, getCloudObjectInfoByCloudId, reconcileCloudLinks } = useProjects();
 	const { notifications, dismiss, clearAll } = useNotifications();
 	const { openSettings, openCreate } = usePortfolioSettings();
 	const navigate = useNavigate();
@@ -73,27 +73,47 @@ export default function HomePage() {
 	const quickstartRef = useRef<HTMLDivElement | null>(null);
 	const accountRef = useRef<HTMLDivElement | null>(null);
 	useEffect(() => {
+		// timers to track active hide timeouts so we can restart pulses reliably
+		const timers: Record<string, number | null> = { list: null, quick: null, acc: null };
+		function clearTimer(key: string) {
+			const v = timers[key];
+			if (typeof v === 'number') { clearTimeout(v); timers[key] = null; }
+		}
+		const triggerPulse = (setter: (v: boolean) => void, key: 'list' | 'quick' | 'acc', duration = 1600) => {
+			// clear any pending hide timer
+			clearTimer(key);
+			// restart animation by turning it off then on in next frame
+			setter(false);
+			requestAnimationFrame(() => {
+				setter(true);
+				timers[key] = window.setTimeout(() => { setter(false); timers[key] = null; }, duration);
+			});
+		};
+
 		const onReq = () => {
 			if (hasAny && recent.length > 0) {
-				setPulseList(true);
 				listRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-				setTimeout(() => setPulseList(false), 2400);
+				triggerPulse(setPulseList, 'list');
 			} else {
-				setPulseQuickstart(true);
 				quickstartRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-				setTimeout(() => setPulseQuickstart(false), 2400);
+				triggerPulse(setPulseQuickstart, 'quick');
 			}
 		};
-		const onAccount = () => {
-			setPulseAccount(true);
+		const onAccount = (ev: Event) => {
+			const detail = (ev as CustomEvent | undefined)?.detail as any;
+			// If event originated from Home itself, ignore to avoid double-highlighting
+			if (detail && detail.origin === 'home') return;
 			accountRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-			setTimeout(() => setPulseAccount(false), 2400);
+			triggerPulse(setPulseAccount, 'acc');
 		};
+
 		window.addEventListener('py:highlight-request', onReq);
 		window.addEventListener('py:highlight-account', onAccount);
 		return () => {
 			window.removeEventListener('py:highlight-request', onReq);
 			window.removeEventListener('py:highlight-account', onAccount);
+			// clear timers
+			clearTimer('list'); clearTimer('quick'); clearTimer('acc');
 		};
 	}, [hasAny, recent.length]);
 
@@ -110,19 +130,23 @@ export default function HomePage() {
 			{/* Centered CTA under title is now shown inside Dashboard; no extra CTA block here */}
 			{/* Notification center area on Home for managing/dismissing persistent notifications */}
 			{notificationsOpen && (
-				<NotificationsCenter
-					notifications={notifications as Array<{ id: string; type: NotificationType; title?: string; message: string; createdAt: number | string }>}
-					onDismiss={dismiss}
-					onClearAll={clearAll}
-				/>
+				<div className="surface border border-[color:var(--border)] rounded-2xl p-4">
+					<NotificationsCenter
+						notifications={notifications as Array<{ id: string; type: NotificationType; title?: string; message: string; createdAt: number | string }>}
+						onDismiss={dismiss}
+						onClearAll={clearAll}
+					/>
+				</div>
 			)}
 
 			{/* 2nd section: portfolios (local + cloud) and account */}
 			{/* Portfolios section */}
 			<section>
-				<div id="py-list" ref={listRef} className={`surface p-5 border border-[color:var(--border)] rounded-md ${pulseList ? 'highlight-pulse' : ''}`}>
-					<h3 className="font-semibold mb-3 text-center uppercase tracking-wide">PORTFOLIO DASHBOARD</h3>
-					{/* Inline create/import sub-section */}
+				<div id="py-list" ref={listRef} className={`surface border border-[color:var(--border)] rounded-2xl p-6 space-y-4 shadow-lg shadow-black/20 ${pulseList ? 'highlight-pulse' : ''}`}>
+					<div className="flex flex-col gap-1">
+						<p className="text-xs uppercase tracking-wide text-[color:var(--fg-muted)]">Portfolio workspace</p>
+						<p className="text-sm text-[color:var(--fg-muted)]">Create new work, manage local files, and keep cloud projects in sync.</p>
+					</div>
 					<div id="py-quickstart" ref={quickstartRef} className={`${pulseQuickstart ? 'highlight-pulse' : ''}`}>
 						<QuickstartPanel
 							onOpenCreate={() => openCreate()}
@@ -130,8 +154,6 @@ export default function HomePage() {
 							onSelectProject={(id) => selectProject(id)}
 						/>
 					</div>
-
-					{/* Local portfolios list */}
 					<ProjectsList
 						projects={recent as unknown as LocalProject[]}
 						selectedProjectId={selectedProjectId}
@@ -139,15 +161,12 @@ export default function HomePage() {
 						userSignedIn={!!user}
 						onSelect={(id) => selectProject(id)}
 						onDelete={(id, opts) => deleteProject(id, opts)}
-						onExport={(id) => exportProject(id)}
 						onSaveAs={(id) => saveProject(id, { saveAs: true })}
 						onOpenFileLocation={async (filePath) => { if (window.api?.showItemInFolder) await window.api.showItemInFolder({ filePath }); }}
 						onOpenEditor={(id) => { selectProject(id); navigate('/editor'); }}
 						onOpenDeploy={(id) => { selectProject(id); navigate('/deploy'); }}
 						onOpenSettings={(id, section) => openSettings({ projectId: id, section })}
 					/>
-
-					{/* Cloud portfolios list */}
 					{user && (
 						<CloudProjectsList
 							userSignedIn={!!user}
@@ -181,21 +200,15 @@ export default function HomePage() {
 			{user && (
 				<section>
 					<div id="py-account" ref={accountRef}>
-						<div className="surface p-0">
-							<></>
-						</div>
-						{/* Account dashboard extracted */}
-						<div className="surface p-0">
-							<AccountDashboard
-								userDisplay={(user?.email ?? user?.uid) as string}
-								usageMB={(((cloudBytesUsed && cloudBytesUsed > 0 ? cloudBytesUsed : Object.values(cloudInfo).reduce((a, b) => a + (b.sizeBytes || 0), 0)) / (1024 * 1024)).toFixed(2))}
-								maxStorageMB={String(cloudMaxStorageMB || 1024)}
-								projectCount={(cloudProjectsCount && cloudProjectsCount > 0 ? cloudProjectsCount : cloudRemoteCount)}
-								projectQuota={cloudQuota}
-								onOpenSettings={() => setAccountOpen(true)}
-								highlight={pulseAccount}
-							/>
-						</div>
+						<AccountDashboard
+							userDisplay={(user?.email ?? user?.uid) as string}
+							usageMB={(((cloudBytesUsed && cloudBytesUsed > 0 ? cloudBytesUsed : Object.values(cloudInfo).reduce((a, b) => a + (b.sizeBytes || 0), 0)) / (1024 * 1024)).toFixed(2))}
+							maxStorageMB={String(cloudMaxStorageMB || 1024)}
+							projectCount={(cloudProjectsCount && cloudProjectsCount > 0 ? cloudProjectsCount : cloudRemoteCount)}
+							projectQuota={cloudQuota}
+							onOpenSettings={() => setAccountOpen(true)}
+							highlight={pulseAccount}
+						/>
 					</div>
 				</section>
 			)}

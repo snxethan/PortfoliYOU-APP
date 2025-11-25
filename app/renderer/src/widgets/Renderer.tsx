@@ -3,8 +3,8 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { WidgetsRegistry } from './registry';
 import type { WidgetDefinition, WidgetInstance } from './types';
 import { WidgetContext, validateProps } from './sdk';
-import type { Theme } from '../../themes/types';
-import { getWidgetThemeSnapshot } from './theme';
+import type { Theme } from '../themes/types';
+import { getWidgetThemeSnapshot, type WidgetThemeSnapshot } from './theme';
 
 type PreparedWidgetProps = {
   props: unknown;
@@ -41,9 +41,12 @@ function prepareWidgetProps(def: WidgetDefinition<unknown>, rawProps: unknown, r
   return { props: normalized, schemaVersion: targetVersion, upgraded };
 }
 
-export default function WidgetRenderer({ instance, editing = false, interactive = true, onChangeProps, onUpgradeInstance, currentPageId, theme }: { instance: WidgetInstance<unknown>; editing?: boolean; interactive?: boolean; onChangeProps?: (partial: Record<string, unknown>) => void; onUpgradeInstance?: (next: { props: unknown; schemaVersion: number }) => void; currentPageId?: string; theme?: Theme | null }) {
+export default function WidgetRenderer({ instance, editing = false, interactive = true, onChangeProps, onUpgradeInstance, currentPageId, theme, themeSnapshot }: { instance: WidgetInstance<unknown>; editing?: boolean; interactive?: boolean; onChangeProps?: (partial: Record<string, unknown>) => void; onUpgradeInstance?: (next: { props: unknown; schemaVersion: number }) => void; currentPageId?: string; theme?: Theme | null; themeSnapshot?: WidgetThemeSnapshot | null }) {
   const [def, setDef] = useState<WidgetDefinition<unknown> | undefined>(() => WidgetsRegistry.get(instance.type));
-  const themeSnapshot = useMemo(() => getWidgetThemeSnapshot(theme), [theme]);
+  const resolvedTheme = useMemo(() => {
+    if (themeSnapshot) return themeSnapshot;
+    return getWidgetThemeSnapshot(theme);
+  }, [themeSnapshot, theme]);
 
   useEffect(() => {
     let cancelled = false;
@@ -85,7 +88,7 @@ export default function WidgetRenderer({ instance, editing = false, interactive 
   }
 
   return (
-    <WidgetContext.Provider value={{ id: instance.id, editing, interactive, updateProps, currentPageId, theme: themeSnapshot }}>
+    <WidgetContext.Provider value={{ id: instance.id, editing, interactive, updateProps, currentPageId, theme: resolvedTheme }}>
       {content}
     </WidgetContext.Provider>
   );

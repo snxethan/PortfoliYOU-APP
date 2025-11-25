@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Layers, Pin, PinOff, Lock, Unlock, ChevronsUp, ChevronsDown, ChevronUp, ChevronDown, X, Trash2 } from "lucide-react";
+import { Layers, Pin, PinOff, Lock, Unlock, ChevronsUp, ChevronsDown, ChevronUp, ChevronDown, ChevronRight, X, Trash2 } from "lucide-react";
 import { z } from "zod";
 
 import { useAssets } from "../../../providers/AssetsProvider";
@@ -160,7 +160,14 @@ function deriveNumberBounds(field: z.ZodNumber) {
 
 function shouldUseTextareaField(defType: string | null, key: string) {
     const lower = key.toLowerCase();
-    if (TEXTAREA_FIELD_HINTS.some(h => lower.includes(h))) return true;
+    // If the key looks like a color (e.g. textColor) don't treat it as a textarea.
+    if (lower.includes('color')) return false;
+    // Match textarea hints as whole words or separated by non-alphanumerics to avoid
+    // matching 'textColor' (which contains 'text' but is not a multiline field).
+    for (const hint of TEXTAREA_FIELD_HINTS) {
+        const re = new RegExp(`(^|[^a-z0-9])${hint}($|[^a-z0-9])`);
+        if (re.test(lower)) return true;
+    }
     if (defType === 'text' && lower === 'text') return true;
     return false;
 }
@@ -231,7 +238,13 @@ export default function ModifyWidgetModal({
     const videoBorderRadiusValue = typeof rawBorderRadius === 'number' && Number.isFinite(rawBorderRadius) ? rawBorderRadius : '';
     const videoBorderColorValue = (typeof formValues.borderColor === 'string' && /^#([0-9a-fA-F]{3}){1,2}$/.test(formValues.borderColor)) ? formValues.borderColor : '#e5e7eb';
     const videoBorderStyleValue = (typeof formValues.borderStyle === 'string' ? formValues.borderStyle : 'solid') as 'solid' | 'dashed' | 'dotted';
-    const navStyle = (defType === 'nav-link') ? String((formValues['style'] as string) || 'link') : undefined;
+    // Derive navStyle from the current form values first, then fall back to the
+    // original item props (in case the form hasn't been populated yet). This
+    // ensures the UI shows the proper controls (e.g. textColor color picker)
+    // when editing nav-link widgets.
+    const navStyle = (defType === 'nav-link')
+        ? String((formValues['style'] as string) ?? ((item.props as any)?.style as string) ?? 'link')
+        : undefined;
     const videoBackgroundColorValue = typeof formValues.backgroundColor === 'string' ? formValues.backgroundColor : '';
     const videoBackgroundColorSwatch = HEX_COLOR_RE.test(videoBackgroundColorValue) ? videoBackgroundColorValue : '#ffffff';
     // Collapsible sections (persist across openings)
@@ -469,7 +482,7 @@ export default function ModifyWidgetModal({
         }
     }
 
-    const renderSchemaField = (key: string, schema: z.ZodTypeAny): JSX.Element | null => {
+    const renderSchemaField = (key: string, schema: z.ZodTypeAny): React.ReactElement | null => {
         if (!zodSchema) return null;
         const field = schema as z.ZodTypeAny;
         const isOptional = field instanceof z.ZodOptional;
@@ -526,6 +539,7 @@ export default function ModifyWidgetModal({
         const assetKind = (baseField instanceof z.ZodString) ? inferAssetKind(defType, key) : null;
         const isUrlField = (baseField instanceof z.ZodString) && !assetKind && isLikelyUrlField(key, baseField);
         const isColorField = key.toLowerCase().includes('color');
+        const isNavButtonColorField = defType === 'nav-link' && navStyle === 'button' && (key === 'color' || key === 'textColor');
         const stringInputType = inferStringInputType(baseField);
         const numberMeta = baseField instanceof z.ZodNumber ? deriveNumberBounds(baseField) : undefined;
         const assetPlaceholder = assetKind === 'image'
@@ -609,6 +623,7 @@ export default function ModifyWidgetModal({
                         assets={assets}
                         assetKind={assetKind}
                         onChange={(next) => setFieldValue(key, next && next.length ? next : undefined)}
+                        onKeyDown={handleEnterSubmitComp}
                     />
                 ) : isUrlField ? (
                     <SchemaUrlField
@@ -652,7 +667,7 @@ export default function ModifyWidgetModal({
                             ));
                         })()}
                     </select>
-                ) : isColorField ? (
+                ) : isColorField || isNavButtonColorField ? (
                     <div className="flex items-center gap-2">
                         <input
                             className="rounded border border-[color:var(--border)] bg-[color:var(--muted)]/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[color:var(--surface)]"
@@ -663,7 +678,28 @@ export default function ModifyWidgetModal({
                             style={{ width: 36, height: 24, padding: 0, minWidth: 36 }}
                             aria-label={`${label} color`}
                         />
-                        <span className="font-mono text-xs text-[color:var(--fg-muted)]">{stringValue || '#2563eb'}</span>
+                        <input
+                            className="input flex-1 font-mono text-xs"
+                            value={stringValue || ''}
+                            onChange={(e) => setFieldValue(key, e.target.value)}
+                            onKeyDown={handleEnterSubmitComp}
+                            placeholder={"#ffffff or named color"}
+                            disabled={disabled}
+                        />
+                        {defType === 'nav-link' && key === 'textColor' && (
+                            <button
+                                type="button"
+                                className="px-2 py-1 rounded border border-[color:var(--border)] text-[10px] font-semibold"
+                                onClick={() => {
+                                    const bg = typeof formValues.color === 'string' ? formValues.color : '';
+                                    if (bg) setFieldValue('textColor', bg);
+                                }}
+                                disabled={disabled}
+                                title="Use background color"
+                            >
+                                Use background
+                            </button>
+                        )}
                     </div>
                 ) : (
                     <input
@@ -681,8 +717,8 @@ export default function ModifyWidgetModal({
         );
     };
 
-    const defaultFieldNodes = schemaFieldBuckets.default.map(([key, schema]) => renderSchemaField(key, schema)).filter((node): node is JSX.Element => Boolean(node));
-    const appearanceFieldNodes = schemaFieldBuckets.appearance.map(([key, schema]) => renderSchemaField(key, schema)).filter((node): node is JSX.Element => Boolean(node));
+    const defaultFieldNodes = schemaFieldBuckets.default.map(([key, schema]) => renderSchemaField(key, schema)).filter((node): node is React.ReactElement => Boolean(node));
+    const appearanceFieldNodes = schemaFieldBuckets.appearance.map(([key, schema]) => renderSchemaField(key, schema)).filter((node): node is React.ReactElement => Boolean(node));
 
     function applyProps() {
         if (locked) return;
@@ -690,10 +726,19 @@ export default function ModifyWidgetModal({
             const parsed = JSON.parse(propsText);
             setPropsError(null);
             setCarouselError(null);
-            onApplyProps(parsed);
-            notify({ type: 'success', message: `${widgetName} JSON settings applied successfully`, title: selectedProject?.name || 'Editor', persistent: false });
-        } catch {
+            try {
+                onApplyProps(parsed);
+                notify({ type: 'success', message: `${widgetName} JSON settings applied successfully`, title: selectedProject?.name || 'Editor', persistent: false });
+                onClose();
+            } catch (err) {
+                console.error('applyProps: onApplyProps threw', err);
+                setPropsError('Failed to apply settings');
+                try { notify({ type: 'error', message: 'Failed to apply JSON settings', title: selectedProject?.name || 'Editor', persistent: false }); } catch { /* noop */ }
+            }
+        } catch (err) {
+            console.error('applyProps: invalid JSON', err);
             setPropsError("Invalid JSON");
+            try { notify({ type: 'error', message: 'Invalid JSON settings', title: selectedProject?.name || 'Editor', persistent: false }); } catch { /* noop */ }
         }
     }
 
@@ -708,6 +753,8 @@ export default function ModifyWidgetModal({
                 }
             }
             setFormErrors(errs);
+            try { notify({ type: 'error', message: 'Fix form errors before applying', title: selectedProject?.name || 'Editor', persistent: false }); } catch { /* noop */ }
+            console.warn('applyForm: validation failed', parsed.error);
             return;
         }
         setFormErrors({});
@@ -721,8 +768,15 @@ export default function ModifyWidgetModal({
             setCarouselError(null);
             payload = { ...payload, items: serialized };
         }
-        onApplyProps(payload);
-        notify({ type: 'success', message: `${widgetName} settings applied successfully`, title: selectedProject?.name || 'Editor', persistent: false });
+        try {
+            onApplyProps(payload);
+            notify({ type: 'success', message: `${widgetName} settings applied successfully`, title: selectedProject?.name || 'Editor', persistent: false });
+            onClose();
+        } catch (err) {
+            console.error('applyForm: onApplyProps threw', err);
+            setFormErrors({ _global: 'Failed to apply settings' });
+            try { notify({ type: 'error', message: 'Failed to apply settings', title: selectedProject?.name || 'Editor', persistent: false }); } catch { /* noop */ }
+        }
     }
 
     const pinDisabled = locked;
@@ -736,34 +790,41 @@ export default function ModifyWidgetModal({
             tabIndex={-1}
         >
             <div
-                className="surface p-5 w-full max-w-4xl border border-[color:var(--border)] rounded-md max-h-[85vh] overflow-auto"
+                className="surface w-full max-w-4xl border border-[color:var(--border)] rounded-2xl max-h-[85vh] overflow-auto scrollable scrollable-container"
                 onClick={(e) => e.stopPropagation()}
                 onKeyDown={handleEnterSubmitAnywhere}
             >
-                <div className="flex items-center justify-center mb-3 relative">
-                    <button className="btn btn-ghost btn-xs absolute right-0 top-0" onClick={onClose} aria-label="Close">
+                <div className="flex items-center justify-between px-4 py-3 border-b border-[color:var(--border)] modal-header-sticky">
+                    <div>
+                        <h2 className="text-lg font-semibold">Modify Widget</h2>
+                        <p className="text-xs text-[color:var(--fg-muted)]">Edit properties, layout and behavior for the selected widget</p>
+                    </div>
+                    <button className="btn btn-ghost btn-xs" onClick={onClose} aria-label="Close">
                         <X size={14} />
                     </button>
-                    <div className="flex items-center gap-2 text-sm font-medium">
-                        <Layers size={16} /> Modify Widget
-                    </div>
                 </div>
 
-                <div className="space-y-5 text-sm">
+                <div className="p-4 space-y-5 text-sm">
                     {/* Component Properties */}
-                    <div className="border border-[color:var(--border)] rounded-md overflow-hidden">
-                        <button className="w-full flex items-center justify-between gap-2 px-2 py-1.5 bg-[color:var(--muted)]/40 text-[10px] tracking-wide uppercase" onClick={toggleCompOpen} title={compOpen ? 'Collapse' : 'Expand'} aria-expanded={compOpen}>
-                            <span>Component Properties</span>
-                            <span>{compOpen ? '▾' : '▸'}</span>
+                    <div className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)]/90 overflow-hidden">
+                        <button className="w-full flex items-center justify-between gap-2 px-4 py-2 text-left" onClick={toggleCompOpen} title={compOpen ? 'Collapse' : 'Expand'} aria-expanded={compOpen}>
+                            <div className="flex items-center gap-2">
+                                {compOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                                <p className="text-sm uppercase tracking-wide text-[color:var(--fg-muted)]">Component Properties</p>
+                            </div>
+                            <div className="text-[color:var(--fg-muted)]" />
                         </button>
                         {compOpen && (
-                            <div className="p-3 space-y-3 bg-[color:var(--muted)]/30">
+                            <div className="p-4 space-y-4">
                                 {/* Image quick upload (when editing Image widget) */}
                                 {defType === 'image' && (
-                                    <div className="border border-[color:var(--border)] rounded-md bg-[color:var(--muted)]/20">
+                                    <div className="rounded-xl border border-[color:var(--border)] bg-[color:var(--surface)]/80">
                                         <button className="w-full flex items-center justify-between gap-2 px-3 py-2 text-xs font-semibold text-[color:var(--fg-muted)]" onClick={() => persistedToggle('py_image_tools_open', setImageToolsOpen)}>
-                                            <span>Image</span>
-                                            <span>{imageToolsOpen ? '▾' : '▸'}</span>
+                                            <div className="flex items-center gap-2">
+                                                {imageToolsOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                                                <span>Image</span>
+                                            </div>
+                                            <div />
                                         </button>
                                         {imageToolsOpen && (
                                             <div className="p-3 pt-0 space-y-3">
@@ -785,7 +846,11 @@ export default function ModifyWidgetModal({
                                                                     if (m?.hash) {
                                                                         setFieldValue('src', `asset://${m.hash}`);
                                                                     }
-                                                                } catch { /* ignore */ }
+                                                                } catch (err) {
+                                                                    console.error('Image upload failed', err);
+                                                                    try { notify({ type: 'error', message: `Failed to upload ${f.name}`, title: selectedProject?.name || 'Editor', persistent: false }); } catch { /* noop */ }
+                                                                    setImageFileName('');
+                                                                }
                                                             }}
                                                         />
                                                     </label>
@@ -822,10 +887,13 @@ export default function ModifyWidgetModal({
                                 )}
 
                                 {isVideo && (
-                                    <div className="border border-[color:var(--border)] rounded-md bg-[color:var(--muted)]/20">
+                                    <div className="rounded-xl border border-[color:var(--border)] bg-[color:var(--surface)]/80">
                                         <button className="w-full flex items-center justify-between gap-2 px-3 py-2 text-xs font-semibold text-[color:var(--fg-muted)]" onClick={() => persistedToggle('py_video_tools_open', setVideoToolsOpen)}>
-                                            <span>Video settings</span>
-                                            <span>{videoToolsOpen ? '▾' : '▸'}</span>
+                                            <div className="flex items-center gap-2">
+                                                {videoToolsOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                                                <span>Video settings</span>
+                                            </div>
+                                            <div />
                                         </button>
                                         {videoToolsOpen && (
                                             <div className="p-3 space-y-3">
@@ -917,7 +985,11 @@ export default function ModifyWidgetModal({
                                                                         if (m?.hash) {
                                                                             setFieldValue('poster', `asset://${m.hash}`);
                                                                         }
-                                                                    } catch { /* noop */ }
+                                                                    } catch (err) {
+                                                                        console.error('Poster upload failed', err);
+                                                                        try { notify({ type: 'error', message: `Failed to upload ${f.name}`, title: selectedProject?.name || 'Editor', persistent: false }); } catch { /* noop */ }
+                                                                        setPosterFileName('');
+                                                                    }
                                                                 }}
                                                             />
                                                         </label>
@@ -1088,10 +1160,13 @@ export default function ModifyWidgetModal({
                                 )}
 
                                 {isCarousel && (
-                                    <div className="border border-[color:var(--border)] rounded-md bg-[color:var(--muted)]/20">
+                                    <div className="rounded-xl border border-[color:var(--border)] bg-[color:var(--surface)]/80">
                                         <button className="w-full flex items-center justify-between gap-2 px-3 py-2 text-xs font-semibold text-[color:var(--fg-muted)]" onClick={() => persistedToggle('py_carousel_tools_open', setCarouselToolsOpen)}>
-                                            <span>Carousel slides</span>
-                                            <span>{carouselToolsOpen ? '▾' : '▸'}</span>
+                                            <div className="flex items-center gap-2">
+                                                {carouselToolsOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                                                <span>Carousel slides</span>
+                                            </div>
+                                            <div />
                                         </button>
                                         {carouselToolsOpen && (
                                             <div className="p-3 space-y-3">
@@ -1188,7 +1263,7 @@ export default function ModifyWidgetModal({
 
                                 {/* Zod-backed properties */}
                                 {zodSchema && (
-                                    <div className="border border-[color:var(--border)] rounded-md p-3 bg-[color:var(--muted)]/40">
+                                    <div className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)]/90 p-4">
                                         <div className="text-[color:var(--fg-muted)] mb-2 font-medium">Component Properties</div>
                                         {!!defaultFieldNodes.length && (
                                             <div className="space-y-2">
@@ -1214,13 +1289,16 @@ export default function ModifyWidgetModal({
                     </div>
 
                     {/* Widget Properties */}
-                    <div className="border border-[color:var(--border)] rounded-md overflow-hidden">
-                        <button className="w-full flex items-center justify-between gap-2 px-2 py-1.5 bg-[color:var(--muted)]/40 text-[10px] tracking-wide uppercase" onClick={toggleWidgetOpen} title={widgetOpen ? 'Collapse' : 'Expand'} aria-expanded={widgetOpen}>
-                            <span>Widget Properties</span>
-                            <span>{widgetOpen ? '▾' : '▸'}</span>
+                    <div className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)]/90 overflow-hidden">
+                        <button className="w-full flex items-center justify-between gap-2 px-4 py-2 text-left" onClick={toggleWidgetOpen} title={widgetOpen ? 'Collapse' : 'Expand'} aria-expanded={widgetOpen}>
+                            <div className="flex items-center gap-2">
+                                {widgetOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                                <p className="text-sm uppercase tracking-wide text-[color:var(--fg-muted)]">Widget Properties</p>
+                            </div>
+                            <div className="text-[color:var(--fg-muted)]" />
                         </button>
                         {widgetOpen && (
-                            <div className="p-3 bg-[color:var(--muted)]/30 space-y-4">
+                            <div className="p-4 bg-[color:var(--surface)]/90 space-y-4">
                                 {/* Name */}
                                 <div>
                                     <label className="block text-[color:var(--fg-muted)] mb-1">Name</label>
@@ -1251,13 +1329,16 @@ export default function ModifyWidgetModal({
                                 </div>
 
                                 {/* Protection */}
-                                <div className="border border-[color:var(--border)] rounded-md">
+                                <div className="rounded-xl border border-[color:var(--border)] bg-[color:var(--surface)]/80">
                                     <button className="w-full flex items-center justify-between gap-2 px-3 py-2 text-xs font-semibold text-[color:var(--fg-muted)]" onClick={() => persistedToggle('py_widget_protection_open', setProtectionOpen)}>
-                                        <span>Protection</span>
-                                        <span>{protectionOpen ? '▾' : '▸'}</span>
+                                        <div className="flex items-center gap-2">
+                                            {protectionOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                                            <span>Protection</span>
+                                        </div>
+                                        <div />
                                     </button>
                                     {protectionOpen && (
-                                        <div className="p-3 bg-[color:var(--muted)]/40">
+                                        <div className="p-3 bg-[color:var(--surface)]/90">
                                             <div className="flex items-center gap-2">
                                                 <button
                                                     className={`btn btn-ghost flex items-center gap-2 ${pinDisabled ? 'opacity-50 cursor-not-allowed' : ''}`}
@@ -1282,10 +1363,13 @@ export default function ModifyWidgetModal({
                                 </div>
 
                                 {/* Layer order */}
-                                <div className="border border-[color:var(--border)] rounded-md">
+                                <div className="rounded-xl border border-[color:var(--border)] bg-[color:var(--surface)]/80">
                                     <button className="w-full flex items-center justify-between gap-2 px-3 py-2 text-xs font-semibold text-[color:var(--fg-muted)]" onClick={() => persistedToggle('py_widget_layers_open', setLayerOpen)}>
-                                        <span>Layer order</span>
-                                        <span>{layerOpen ? '▾' : '▸'}</span>
+                                        <div className="flex items-center gap-2">
+                                            {layerOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                                            <span>Layer order</span>
+                                        </div>
+                                        <div />
                                     </button>
                                     {layerOpen && (
                                         <div className="p-3">
@@ -1364,9 +1448,10 @@ type SchemaAssetFieldProps = {
     assets: AssetsCtx;
     assetKind: AssetKind;
     onChange: (value?: string) => void;
+    onKeyDown?: (event: React.KeyboardEvent<HTMLInputElement>) => void;
 };
 
-function SchemaAssetField({ value, placeholder, disabled, assets, assetKind, onChange }: SchemaAssetFieldProps) {
+function SchemaAssetField({ value, placeholder, disabled, assets, assetKind, onChange, onKeyDown }: SchemaAssetFieldProps) {
     const filteredAssets = useMemo(() => {
         return assets.list.filter((asset) => {
             if (assetKind === 'image') return asset.type?.startsWith('image/');
@@ -1395,7 +1480,9 @@ function SchemaAssetField({ value, placeholder, disabled, assets, assetKind, onC
                                 const metas = await assets.addFiles([file]);
                                 const meta = metas[0];
                                 if (meta?.hash) onChange(`asset://${meta.hash}`);
-                            } catch { /* ignore upload errors */ }
+                            } catch (err) {
+                                console.error('Asset upload failed', err);
+                            }
                         }}
                     />
                 </label>
@@ -1422,6 +1509,7 @@ function SchemaAssetField({ value, placeholder, disabled, assets, assetKind, onC
                 value={value}
                 onChange={(e) => onChange(e.target.value)}
                 disabled={disabled}
+                onKeyDown={onKeyDown}
             />
         </div>
     );

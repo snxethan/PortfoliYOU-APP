@@ -38,8 +38,15 @@ export function AssetsProvider({ children }: { children: React.ReactNode }) {
 
     const refresh = useCallback(async () => {
         const items = await idbAllMeta();
-        setList(items);
-    }, []);
+        // Only show assets that belong to the currently selected project
+        const pid = selectedProject?.id ?? null;
+        if (pid) {
+            setList(items.filter(it => it.projectId === pid));
+        } else {
+            // If no project selected, show no assets
+            setList([]);
+        }
+    }, [selectedProject?.id]);
 
     useEffect(() => { void refresh(); }, [refresh]);
 
@@ -60,6 +67,7 @@ export function AssetsProvider({ children }: { children: React.ReactNode }) {
                 width: dim.width,
                 height: dim.height,
                 createdAt: new Date().toISOString(),
+                projectId: selectedProject?.id,
             };
             // Notify if image is large
             try {
@@ -68,12 +76,21 @@ export function AssetsProvider({ children }: { children: React.ReactNode }) {
                 }
             } catch { /* ignore notification failures */ }
             await idbPut(stores.STORE_BLOBS, hash, file);
-            await idbPut(stores.STORE_META, hash, meta);
-            results.push(meta);
+            // Persist meta; ensure we attach the current selected project id at write time
+            try {
+                const pid = selectedProject?.id ?? meta.projectId ?? undefined;
+                const nextMeta = { ...meta, projectId: pid };
+                await idbPut(stores.STORE_META, hash, nextMeta);
+                results.push(nextMeta);
+            } catch (err) {
+                // Fallback: write original meta and continue
+                await idbPut(stores.STORE_META, hash, meta);
+                results.push(meta);
+            }
         }
         await refresh();
         return results;
-    }, [refresh]);
+    }, [refresh, selectedProject?.id]);
 
     const getUrl = useCallback(async (hash: string) => {
         if (urlsRef.current[hash]) return urlsRef.current[hash];
@@ -152,8 +169,18 @@ export function AssetsProvider({ children }: { children: React.ReactNode }) {
     }, [syncAllToCloud]);
 
     const get = useCallback(async (hash: string) => {
-        return (await idbGet<AssetMeta>(stores.STORE_META, hash)) || null;
-    }, []);
+        const meta = (await idbGet<AssetMeta>(stores.STORE_META, hash)) || null;
+        // If a meta exists but isn't associated with the current project, attach it now
+        try {
+            const pid = selectedProject?.id;
+            if (meta && !meta.projectId && pid) {
+                const next: AssetMeta = { ...meta, projectId: pid };
+                await idbPut(stores.STORE_META, hash, next);
+                return next;
+            }
+        } catch { /* ignore */ }
+        return meta;
+    }, [selectedProject?.id]);
 
     const api = useMemo<AssetsCtx>(() => ({ list, addFiles, getUrl, remove, syncToCloud, get, syncAllToCloud, ensure }), [list, addFiles, getUrl, remove, syncToCloud, get, syncAllToCloud, ensure]);
     return <Ctx.Provider value={api}>{children}</Ctx.Provider>;

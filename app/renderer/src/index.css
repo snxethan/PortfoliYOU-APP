@@ -18,6 +18,7 @@
 		/* main text */
 		--fg-muted: #9fb3c8;
 		/* secondary text */
+		--fg-strong: #fefefe;
 
 
 		--primary: #06b6d4;
@@ -50,6 +51,7 @@
 
 		--fg: #0b1220;
 		--fg-muted: #4a5568;
+		--fg-strong: #050505;
 
 		/* Use cyan as the accent in light mode */
 		--primary: #06b6d4;
@@ -151,6 +153,7 @@
 
 	.section-title {
 		@apply text-lg font-semibold;
+		color: var(--fg-strong, var(--fg));
 	}
 
 	.section-subtitle {
@@ -194,27 +197,28 @@
 	/* Double-pulse glow only (no outline), smooth fade in/out */
 	@keyframes py-flash-double {
 		0% {
-			box-shadow: 0 0 0 0 color-mix(in oklab, var(--accent) 0%, transparent);
+			box-shadow: 0 0 0 0 color-mix(in oklab, var(--accent) 0%, transparent), 0 0 0 0 rgba(0, 0, 0, 0);
+			border-color: var(--border);
 		}
 
-		18% {
-			box-shadow: 0 0 0 5px color-mix(in oklab, var(--accent) 40%, transparent);
+		15% {
+			box-shadow: 0 6px 18px -8px color-mix(in oklab, var(--accent) 22%, transparent), 0 0 0 6px color-mix(in oklab, var(--accent) 28%, transparent) inset;
+			border-color: color-mix(in oklab, var(--accent) 30%, var(--border));
 		}
 
-		35% {
-			box-shadow: 0 0 0 1px color-mix(in oklab, var(--accent) 15%, transparent);
+		40% {
+			box-shadow: 0 10px 28px -12px color-mix(in oklab, var(--accent) 18%, transparent), 0 0 0 2px color-mix(in oklab, var(--accent) 18%, transparent) inset;
+			border-color: color-mix(in oklab, var(--accent) 24%, var(--border));
 		}
 
-		55% {
-			box-shadow: 0 0 0 4px color-mix(in oklab, var(--accent) 32%, transparent);
-		}
-
-		80% {
-			box-shadow: 0 0 0 1px color-mix(in oklab, var(--accent) 10%, transparent);
+		65% {
+			box-shadow: 0 6px 18px -10px color-mix(in oklab, var(--accent) 12%, transparent), 0 0 0 4px color-mix(in oklab, var(--accent) 20%, transparent) inset;
+			border-color: color-mix(in oklab, var(--accent) 18%, var(--border));
 		}
 
 		100% {
-			box-shadow: 0 0 0 0 color-mix(in oklab, var(--accent) 0%, transparent);
+			box-shadow: 0 0 0 0 color-mix(in oklab, var(--accent) 0%, transparent), 0 0 0 0 rgba(0, 0, 0, 0);
+			border-color: var(--border);
 		}
 	}
 
@@ -222,6 +226,8 @@
 		outline: none !important;
 		animation: py-flash-double 1.4s ease-in-out 1 forwards;
 		will-change: box-shadow;
+		/* Subtle accent border during pulse to match new styling */
+		border-color: color-mix(in oklab, var(--accent) 40%, var(--border));
 	}
 
 	/* Darker, clearer hover background for rows */
@@ -273,4 +279,315 @@
 	--fg-muted: #1f2937 !important;
 	--primary: #000000 !important;
 	--accent: #000000 !important;
+}
+
+/* Palette full-height helper: uses measured --canvas-h set on wrapper */
+.palette-full-height {
+	height: var(--canvas-h, auto);
+	box-sizing: border-box;
+}
+
+/* Prevent touch-action on resize handle via class instead of inline style */
+.no-touch-action {
+	touch-action: none;
+}
+
+/* Slightly lift header contents so label & collapse button sit higher */
+.palette-header {
+	padding-top: 0.5rem;
+	/* override utility spacing when present */
+}
+
+/* Custom scrollbar styling (WebKit + Firefox) using theme variables */
+/* Apply custom scrollbar styling globally for WebKit browsers */
+/* Targets any element with a scrollbar (modals, panels, widgets, body, etc.) */
+*::-webkit-scrollbar {
+	width: 10px;
+	height: 10px;
+}
+
+*::-webkit-scrollbar-track {
+	background: color-mix(in oklab, var(--surface) 80%, transparent);
+	border-radius: 999px;
+}
+
+*::-webkit-scrollbar-thumb {
+	background: linear-gradient(180deg, color-mix(in oklab, var(--accent) 60%, transparent), color-mix(in oklab, var(--accent) 30%, transparent));
+	border-radius: 999px;
+	border: 2px solid color-mix(in oklab, var(--surface) 60%, transparent);
+}
+
+/* Firefox: apply thin styled scrollbars globally */
+* {
+	scrollbar-width: thin;
+	scrollbar-color: color-mix(in oklab, var(--accent) 60%, transparent) color-mix(in oklab, var(--surface) 80%, transparent);
+}
+
+/* Startup loader: theme-aware spinner + bars */
+.py-loader {
+	display: inline-block;
+	width: 64px;
+	height: 24px;
+}
+
+.py-loader .bar {
+	display: inline-block;
+	width: 8px;
+	height: 100%;
+	margin: 0 4px;
+	background: var(--accent);
+	border-radius: 4px;
+	animation: py-loader-bounce 800ms cubic-bezier(.2, .8, .2, 1) infinite;
+}
+
+.py-loader .bar:nth-child(2) {
+	animation-delay: 100ms;
+}
+
+.py-loader .bar:nth-child(3) {
+	animation-delay: 200ms;
+}
+
+.py-loader .bar:nth-child(4) {
+	animation-delay: 300ms;
+}
+
+.py-loader--light .bar {
+	background: var(--primary);
+}
+
+@keyframes py-loader-bounce {
+	0% {
+		transform: translateY(0);
+		opacity: 0.6;
+	}
+
+	50% {
+		transform: translateY(-8px);
+		opacity: 1;
+	}
+
+	100% {
+		transform: translateY(0);
+		opacity: 0.6;
+	}
+}
+
+/* Utility: apply scrollable styles to commonly scrollable containers */
+.scrollable-container {
+	overflow: auto;
+}
+
+/* Page startup overlay loader (uses theme variables). Kept in CSS to support light/dark modes. */
+#py-loader {
+	position: fixed;
+	inset: 0;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	background: radial-gradient(circle at top, color-mix(in oklab, var(--accent) 8%, transparent), transparent 55%), var(--bg);
+	z-index: 2147483000;
+	transition: opacity 0.35s ease;
+	pointer-events: none;
+}
+
+#py-loader.py-loader--hidden {
+	opacity: 0;
+}
+
+#py-loader .py-loader__inner {
+	text-align: center;
+	display: flex;
+	flex-direction: column;
+	gap: 1rem;
+	align-items: center;
+	padding: 1.25rem 1.75rem;
+	border-radius: 1rem;
+	background: color-mix(in oklab, var(--surface) 92%, transparent);
+	border: 1px solid color-mix(in oklab, var(--border) 90%, transparent);
+	box-shadow: 0 20px 50px rgba(0, 0, 0, 0.35);
+}
+
+#py-loader .py-loader__spinner {
+	width: 48px;
+	height: 48px;
+	border-radius: 9999px;
+	border: 4px solid color-mix(in oklab, var(--border) 85%, transparent);
+	border-top-color: var(--primary);
+	animation: py-spin 1s linear infinite;
+}
+
+#py-loader p {
+	margin: 0;
+	font-size: 0.95rem;
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+	color: var(--fg-muted);
+}
+
+#py-loader .py-loader__brand {
+	font-size: 1.05rem;
+	font-weight: 600;
+	letter-spacing: 0.06em;
+	color: var(--fg-strong);
+}
+
+@keyframes py-spin {
+	to {
+		transform: rotate(360deg);
+	}
+}
+
+/* Modal header sticky helper: keeps header visible when modal content scrolls */
+.modal-header-sticky {
+	position: sticky;
+	top: 0;
+	z-index: 30;
+	background: color-mix(in oklab, var(--surface) 95%, transparent);
+	padding-top: 0.75rem;
+	padding-bottom: 0.5rem;
+	margin-bottom: 0.5rem;
+	border-bottom: 1px solid color-mix(in oklab, var(--border) 90%, transparent);
+}
+
+/* Ensure close buttons inside sticky header remain visible */
+.modal-header-sticky .btn {
+	z-index: 40;
+}
+
+/* Window frame draggable region + controls */
+.window-frame {
+	-webkit-app-region: drag;
+	display: flex;
+	align-items: center;
+	height: 36px;
+	gap: 8px;
+	padding: 0 8px;
+	border-bottom: 1px solid color-mix(in oklab, var(--border) 90%, transparent);
+	background: color-mix(in oklab, var(--surface) 94%, transparent);
+	position: fixed;
+	top: 0;
+	left: 0;
+	right: 0;
+	z-index: 100000;
+}
+
+.window-frame__left {
+	min-width: 56px;
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+
+.window-frame__center {
+	flex: 1;
+	pointer-events: none;
+	/* let dragging work across center */
+}
+
+.window-frame__controls {
+	-webkit-app-region: no-drag;
+	display: flex;
+	gap: 6px;
+	align-items: center;
+	/* pin to the viewport corner so the controls reach the absolute top-right */
+	position: fixed;
+	right: -6px;
+	top: -6px;
+	padding: 0;
+	margin: 0;
+	z-index: 100001;
+}
+
+.window-control {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	/* slightly larger hit area so corner clicks hit the control */
+	width: 40px;
+	height: 40px;
+	border-radius: 6px;
+	border: 1px solid transparent;
+	background: transparent;
+	color: var(--fg);
+}
+
+.window-control:hover {
+	background: color-mix(in oklab, var(--muted) 75%, var(--accent) 10%);
+	border-color: color-mix(in oklab, var(--border) 85%, transparent);
+}
+
+.window-control--close {
+	color: var(--fg);
+}
+
+.window-control--close:hover {
+	background: #c2410c;
+	color: #fff;
+}
+
+/* Portfolio island: use CSS variable --island-opacity (0.25 - 1) to control background transparency
+   Keep inner UI elements fully opaque while allowing page content beneath to show through. */
+.portfolio-island .surface {
+	background: color-mix(in oklab, var(--surface) calc(var(--island-opacity, 1) * 100%), transparent) !important;
+}
+
+/* Accent-styled range slider for PortfolioIsland opacity control */
+.island-opacity-slider {
+	-webkit-appearance: none;
+	appearance: none;
+	/* the element background will be set dynamically to render the filled portion */
+	background: transparent;
+	height: 6px;
+}
+
+.island-opacity-slider:focus {
+	outline: none;
+}
+
+.island-opacity-slider::-webkit-slider-runnable-track {
+	height: 6px;
+	/* make the native track transparent so the element background gradient shows the filled portion */
+	background: transparent;
+	border-radius: 999px;
+}
+
+/* Firefox: use the progress pseudo-element to color the filled portion */
+.island-opacity-slider::-moz-range-progress {
+	height: 6px;
+	background: var(--accent);
+	border-radius: 999px;
+}
+
+.island-opacity-slider::-moz-range-track {
+	height: 6px;
+	background: color-mix(in oklab, var(--surface) 85%, transparent);
+	border-radius: 999px;
+}
+
+.island-opacity-slider::-webkit-slider-thumb {
+	-webkit-appearance: none;
+	appearance: none;
+	width: 14px;
+	height: 14px;
+	border-radius: 999px;
+	background: var(--accent);
+	/* use a solid surface color for the thumb border to avoid a visible seam */
+	border: 2px solid var(--surface);
+	margin-top: -4px;
+	/* center the thumb on the track */
+}
+
+.island-opacity-slider::-moz-range-track {
+	height: 6px;
+	background: color-mix(in oklab, var(--surface) 85%, transparent);
+	border-radius: 999px;
+}
+
+.island-opacity-slider::-moz-range-thumb {
+	width: 14px;
+	height: 14px;
+	border-radius: 999px;
+	background: var(--accent);
+	border: 2px solid var(--surface);
 }

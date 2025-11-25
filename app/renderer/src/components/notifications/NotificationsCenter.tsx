@@ -36,7 +36,7 @@ export default function NotificationsCenter({
     }, [notifications]);
 
     return (
-        <div className="surface p-3 border border-[color:var(--accent)] rounded-md">
+        <div className="surface p-4 border border-[color:var(--accent)] rounded-2xl">
             <div className="mb-2">
                 <div className="grid grid-cols-3 items-center">
                     <div />

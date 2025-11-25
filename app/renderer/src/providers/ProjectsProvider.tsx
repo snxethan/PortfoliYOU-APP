@@ -223,11 +223,30 @@ function readStore(): LocalProject[] {
 		return sanitizeProjectsList(raw as LocalProject[]);
 	} catch { return []; }
 }
-function writeStore(list: LocalProject[]) {
+type IdleHandle = number;
+let pendingStoreWrite: IdleHandle | null = null;
+let queuedStorePayload: LocalProject[] | null = null;
+function flushQueuedStore() {
+	const payload = queuedStorePayload;
+	queuedStorePayload = null;
+	if (!payload) return;
 	try {
-		localStorage.setItem("py.projects", JSON.stringify(list));
+		localStorage.setItem("py.projects", JSON.stringify(payload));
 	} catch {
 		/* ignore storage failures */
+	}
+}
+function writeStore(list: LocalProject[]) {
+	queuedStorePayload = list;
+	if (pendingStoreWrite !== null) return;
+	const schedule = () => {
+		pendingStoreWrite = null;
+		flushQueuedStore();
+	};
+	if (typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function') {
+		pendingStoreWrite = window.requestIdleCallback(schedule, { timeout: 400 }) as unknown as IdleHandle;
+	} else {
+		pendingStoreWrite = window.setTimeout(schedule, 0) as unknown as IdleHandle;
 	}
 }
 function readSelected(): string | null { try { return JSON.parse(localStorage.getItem("py.selectedProjectId") || "null"); } catch { return null; } }
@@ -370,7 +389,8 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 		}
 		collectAssetHash(sanitizedProject.portfolioMeta?.iconImageUrl || null);
 		collectAssetHash(sanitizedProject.portfolioMeta?.socialImageUrl || null);
-		// Emit project.json with src rewritten to relative assets path for portability
+
+		// Emit separate JSON files for better performance and modularity
 		const projectForArchive: LocalProject = JSON.parse(JSON.stringify(payload.project));
 		for (const w of Object.values(projectForArchive.widgets || {})) {
 			try {
@@ -393,24 +413,97 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 				meta.socialImageUrl = h ? `assets/${h}` : meta.socialImageUrl;
 			}
 		}
-		const wrapper = { ...payload, project: projectForArchive };
-		zip.file("project.json", JSON.stringify(wrapper, null, 2));
-		// Add assets folder
-		if (hashes.size > 0) {
-			const folder = zip.folder('assets');
-			for (const h of hashes) {
-				try {
-					const blob = await idbGet<Blob>(stores.STORE_BLOBS, h);
-					if (!blob) continue;
-					// Preserve content-type via file options; JSZip stores binary only
-					const ab = await blob.arrayBuffer();
-					folder?.file(h, ab);
-					// Optionally include sidecar meta json
-					const meta = await idbGet<AssetMeta>(stores.STORE_META, h);
-					if (meta) folder?.file(`${h}.meta.json`, JSON.stringify(meta));
-				} catch { /* ignore */ }
+
+		// Break project into multiple JSON files for better performance and offload to worker
+		const { pages, widgets, themes, ...projectMeta } = projectForArchive;
+
+		// Prepare assets as transferable ArrayBuffers
+		const assetList: Array<{ hash: string; buffer: ArrayBuffer; meta?: AssetMeta }> = [];
+		for (const h of hashes) {
+			try {
+				const blob = await idbGet<Blob>(stores.STORE_BLOBS, h);
+				if (!blob) continue;
+				const ab = await blob.arrayBuffer();
+				const meta = await idbGet<AssetMeta>(stores.STORE_META, h);
+				assetList.push({ hash: h, buffer: ab, meta });
+			} catch { /* ignore */ }
+		}
+
+		// Use a dedicated worker for heavy JSON + ZIP work when available
+		if (typeof Worker !== 'undefined') {
+			try {
+				const worker = new Worker(new URL('../workers/saveWorker.ts', import.meta.url), { type: 'module' });
+				const payload = { _format: 'portfoliyou', _version: 2, exportedAt: now() };
+				const msg = { type: 'serialize', payload, projectMeta, pages, widgets, themes, assets: assetList };
+				const base64 = await new Promise<string>((resolve, reject) => {
+					const timeout = setTimeout(() => {
+						worker.terminate();
+						reject(new Error('worker-timeout'));
+					}, 60_000);
+					worker.onmessage = (e) => {
+						const d = e.data;
+						clearTimeout(timeout);
+						worker.terminate();
+						if (d && d.type === 'success') resolve(d.base64);
+						else reject(new Error(d?.error || 'worker-error'));
+					};
+					worker.onerror = (err) => {
+						clearTimeout(timeout);
+						worker.terminate();
+						reject(err instanceof Error ? err : new Error('worker-failure'));
+					};
+					// Post message; transfer buffers to avoid copy
+					try {
+						const transfer = assetList.map(a => a.buffer);
+						(worker as any).postMessage(msg, transfer);
+					} catch (err) {
+						worker.terminate();
+						reject(err);
+					}
+				});
+				return base64;
+			} catch (err) {
+				// fallback to in-thread path below
 			}
 		}
+
+		// Fallback: perform in main thread with yielding
+		zip.file('project-meta.json', JSON.stringify({ ...payload, project: projectMeta }, null, 2));
+		await new Promise(resolve => setTimeout(resolve, 0));
+		zip.file('pages.json', JSON.stringify(pages, null, 2));
+		await new Promise(resolve => setTimeout(resolve, 0));
+		zip.file('widgets.json', JSON.stringify(widgets, null, 2));
+		await new Promise(resolve => setTimeout(resolve, 0));
+		zip.file('themes.json', JSON.stringify(themes, null, 2));
+		await new Promise(resolve => setTimeout(resolve, 0));
+
+		// Add assets folder with chunked loading to prevent UI blocking
+		if (hashes.size > 0) {
+			const folder = zip.folder('assets');
+			const hashArray = Array.from(hashes);
+			// Process assets in chunks to yield control to UI thread
+			const chunkSize = 5;
+			for (let i = 0; i < hashArray.length; i += chunkSize) {
+				const chunk = hashArray.slice(i, i + chunkSize);
+				await Promise.all(chunk.map(async (h) => {
+					try {
+						const blob = await idbGet<Blob>(stores.STORE_BLOBS, h);
+						if (!blob) return;
+						// Yield control briefly to prevent blocking
+						await new Promise(resolve => setTimeout(resolve, 0));
+						const ab = await blob.arrayBuffer();
+						folder?.file(h, ab);
+						// Optionally include sidecar meta json
+						const meta = await idbGet<AssetMeta>(stores.STORE_META, h);
+						if (meta) folder?.file(`${h}.meta.json`, JSON.stringify(meta));
+					} catch { /* ignore */ }
+				}));
+				// Yield control between chunks
+				await new Promise(resolve => setTimeout(resolve, 0));
+			}
+		}
+		// Yield before final ZIP generation
+		await new Promise(resolve => setTimeout(resolve, 0));
 		const base64 = await zip.generateAsync({ type: 'base64' });
 		return base64;
 	};
@@ -418,18 +511,63 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 	// Helper: parse archive (ArrayBuffer) and load assets into local store; returns LocalProject
 	const importFromArchive = async (buf: ArrayBuffer): Promise<LocalProject> => {
 		const zip = await JSZip.loadAsync(buf);
-		const projEntry = zip.file('project.json');
-		if (!projEntry) throw new Error('missing-project-json');
-		const text = await projEntry.async('string');
-		let parsed: unknown;
-		try { parsed = JSON.parse(text); } catch { throw new Error('invalid-project-json'); }
-		// Unwrap wrapper
-		let raw: unknown = parsed;
-		if (typeof raw === 'object' && raw !== null) {
-			const r = raw as Record<string, unknown>;
-			if (r['_format'] === 'portfoliyou' && typeof r['project'] === 'object' && r['project'] !== null) raw = r['project'];
+		let project: LocalProject;
+
+		// Check for new multi-file format first
+		const metaEntry = zip.file('project-meta.json');
+		const pagesEntry = zip.file('pages.json');
+		const widgetsEntry = zip.file('widgets.json');
+		const themesEntry = zip.file('themes.json');
+
+		if (metaEntry && pagesEntry && widgetsEntry && themesEntry) {
+			// New format: separate files
+			const metaText = await metaEntry.async('string');
+			const pagesText = await pagesEntry.async('string');
+			const widgetsText = await widgetsEntry.async('string');
+			const themesText = await themesEntry.async('string');
+
+			let metaParsed: unknown;
+			let pagesParsed: unknown;
+			let widgetsParsed: unknown;
+			let themesParsed: unknown;
+
+			try {
+				metaParsed = JSON.parse(metaText);
+				pagesParsed = JSON.parse(pagesText);
+				widgetsParsed = JSON.parse(widgetsText);
+				themesParsed = JSON.parse(themesText);
+			} catch {
+				throw new Error('invalid-project-json');
+			}
+
+			// Unwrap meta wrapper
+			let metaRaw: unknown = metaParsed;
+			if (typeof metaRaw === 'object' && metaRaw !== null) {
+				const r = metaRaw as Record<string, unknown>;
+				if (r['_format'] === 'portfoliyou' && typeof r['project'] === 'object' && r['project'] !== null) metaRaw = r['project'];
+			}
+
+			project = {
+				...migrateProjectSchema(metaRaw),
+				pages: pagesParsed as Record<string, Page>,
+				widgets: widgetsParsed as Record<string, Widget>,
+				themes: themesParsed as Record<string, Theme>,
+			} as LocalProject;
+		} else {
+			// Fallback to old single-file format
+			const projEntry = zip.file('project.json');
+			if (!projEntry) throw new Error('missing-project-json');
+			const text = await projEntry.async('string');
+			let parsed: unknown;
+			try { parsed = JSON.parse(text); } catch { throw new Error('invalid-project-json'); }
+			// Unwrap wrapper
+			let raw: unknown = parsed;
+			if (typeof raw === 'object' && raw !== null) {
+				const r = raw as Record<string, unknown>;
+				if (r['_format'] === 'portfoliyou' && typeof r['project'] === 'object' && r['project'] !== null) raw = r['project'];
+			}
+			project = migrateProjectSchema(raw);
 		}
-		const project = migrateProjectSchema(raw);
 		// Import assets: any files under assets/ are stored and src rewritten to asset://hash
 		// First, compute available filenames in assets/
 		const assetsFolder = zip.folder('assets');
@@ -1618,7 +1756,7 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 			if (tasks.length) {
 				try { setSaving(true); await Promise.all(tasks); setLastSavedAt(now()); try { notify({ type: 'success', message: 'Saved to disk', title: tasks.length > 1 ? `${tasks.length} projects` : undefined, persistent: false }); } catch { /* ignore */ } } catch { /* swallow to avoid UI disruption */ } finally { setSaving(false); }
 			}
-		}, 400);
+		}, 2000);
 		return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
 	}, [projects]);
 

@@ -56,13 +56,13 @@ export default function EditorTopBar(props: EditorTopBarProps) {
         onResetZoom,
     } = props;
 
-    const groupClass = "flex items-center gap-3 px-3 py-2 rounded-lg border border-[color:var(--border)] bg-[color:var(--surface)]/70 shadow-sm";
-    const groupLabelClass = "text-[11px] uppercase tracking-wide text-[color:var(--fg-muted)]";
+    const groupClass = "flex items-center gap-2 md:gap-3 px-2.5 py-1.5 rounded-lg border border-[color:var(--border)] bg-[color:var(--surface)]/70 shadow-sm";
+    const groupLabelClass = "text-[10px] uppercase tracking-wide text-[color:var(--fg-muted)]";
     const previewDisabledClass = previewMode ? "opacity-60 pointer-events-none" : "";
 
     return (
-        <div className="flex flex-col gap-3 px-4 py-3 border-b border-[color:var(--border)] bg-[color:var(--muted)]/40">
-            <div className="flex flex-wrap items-stretch gap-3">
+        <div className="flex flex-col gap-2.5 px-4 py-3 border-b border-[color:var(--border)] bg-[color:var(--muted)]/40">
+            <div className="flex flex-wrap items-stretch gap-2 md:gap-3">
                 <div className={groupClass}>
                     <span className={groupLabelClass}>Mode</span>
                     <button
@@ -79,12 +79,12 @@ export default function EditorTopBar(props: EditorTopBarProps) {
                         </span>
                     </button>
                     <button
-                        className="btn btn-ghost btn-sm flex items-center gap-2"
+                        className="btn btn-ghost btn-xs flex items-center gap-1.5 px-2"
                         title="Open webpage (popup)"
                         onClick={onOpenWebpage}
                     >
                         <Eye size={16} />
-                        Preview Page
+                        Preview
                     </button>
                 </div>
 
@@ -94,7 +94,7 @@ export default function EditorTopBar(props: EditorTopBarProps) {
                         <span>Gap</span>
                         <input
                             type="number"
-                            className="input w-16"
+                            className="input w-14 text-xs"
                             min={0}
                             max={48}
                             step={0.5}
@@ -154,11 +154,11 @@ export default function EditorTopBar(props: EditorTopBarProps) {
 
                 <div className={`${groupClass} ${previewDisabledClass}`}>
                     <span className={groupLabelClass}>History</span>
-                    <button className="btn btn-ghost flex items-center gap-2 text-sm disabled:opacity-60" title="Undo (Ctrl+Z)" onClick={undo} disabled={!canUndo} data-testid="undo-btn">
+                    <button className="btn btn-ghost btn-xs flex items-center gap-1 disabled:opacity-60" title="Undo (Ctrl+Z)" onClick={undo} disabled={!canUndo} data-testid="undo-btn">
                         <Undo size={16} />
                         Undo
                     </button>
-                    <button className="btn btn-ghost flex items-center gap-2 text-sm disabled:opacity-60" title="Redo (Ctrl+Y)" onClick={redo} disabled={!canRedo} data-testid="redo-btn">
+                    <button className="btn btn-ghost btn-xs flex items-center gap-1 disabled:opacity-60" title="Redo (Ctrl+Y)" onClick={redo} disabled={!canRedo} data-testid="redo-btn">
                         <Redo size={16} />
                         Redo
                     </button>

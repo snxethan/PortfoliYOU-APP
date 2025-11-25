@@ -4,7 +4,7 @@ import { useAuth } from "../../providers/AuthProvider";
 
 export function AuthCta() {
   const { user } = useAuth();
-  
+
   if (user) {
     return (
       <div className="surface p-3">
@@ -19,7 +19,7 @@ export function AuthCta() {
   return (
     <button
       type="button"
-      onClick={() => window.dispatchEvent(new CustomEvent('py:highlight-account'))}
+      onClick={() => window.dispatchEvent(new CustomEvent('py:highlight-account', { detail: { origin: 'home' } }))}
       className="w-full text-center surface p-3 bg-gradient-to-br from-blue-50 to-indigo-50 border border-blue-200 rounded-md hover:border-[color:var(--accent)] hover:bg-white transition-colors"
       title="Open account section in sidebar"
       aria-label="Enable cloud sync: open account section in sidebar"
@@ -34,7 +34,7 @@ export function AuthCta() {
         <div className="text-xs text-blue-700 max-w-full whitespace-normal break-words leading-snug">
           Enable cloud backups and never lose your work. Sign in to your account to sync projects across devices and access them from anywhere.
         </div>
-  
+
       </div>
     </button>
   );

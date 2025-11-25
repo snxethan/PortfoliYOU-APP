@@ -3,6 +3,7 @@ import { Suspense, lazy, useEffect, useState, useCallback } from "react";
 
 import Sidebar from "./components/Sidebar";
 import PortfolioIsland from "./components/portfolio-island/PortfolioIsland";
+import FrameBar from "./components/FrameBar";
 const HomePage = lazy(() => import("./pages/Home"));
 const EditorPage = lazy(() => import("./pages/Editor"));
 const DeployPage = lazy(() => import("./pages/Deploy"));
@@ -53,39 +54,42 @@ export default function App() {
                 <SaveHotkeys />
                 <GlobalZoomControls />
                 <NotificationsUI />
-                <div className="min-h-screen grid grid-cols-[var(--sidebar-w,15rem)_1fr]">
+                <div className="min-h-screen" style={{ paddingTop: 36 }}>
+                  <FrameBar />
                   <Sidebar />
-                  <div className="min-h-screen flex flex-col">
-                    <PortfolioIsland />
-                    <main className="flex-1">
-                      <Suspense fallback={
-                        <div className="flex items-center justify-center py-16">
-                          <div className="w-10 h-10 border-4 border-[color:var(--border)] border-t-[color:var(--primary)] rounded-full animate-spin" />
-                        </div>
-                      }>
-                        <Routes>
-                          <Route path="/" element={<HomePage />} />
-                          {/* Backward-compat: redirect old Modify route to Editor */}
-                          <Route path="/modify" element={<LegacyModifyRedirect />} />
-                          <Route
-                            path="/editor"
-                            element={
-                              <ProtectedRoute>
-                                <EditorPage />
-                              </ProtectedRoute>
-                            }
-                          />
-                          <Route
-                            path="/deploy"
-                            element={
-                              <ProtectedRoute>
-                                <DeployPage />
-                              </ProtectedRoute>
-                            }
-                          />
-                        </Routes>
-                      </Suspense>
-                    </main>
+                  <div style={{ marginLeft: 'var(--sidebar-w,15rem)' }} className="min-h-0">
+                    <div className="min-h-screen flex flex-col">
+                      <PortfolioIsland />
+                      <main className="flex-1">
+                        <Suspense fallback={
+                          <div className="flex items-center justify-center py-16">
+                            <div className="w-10 h-10 border-4 border-[color:var(--border)] border-t-[color:var(--primary)] rounded-full animate-spin" />
+                          </div>
+                        }>
+                          <Routes>
+                            <Route path="/" element={<HomePage />} />
+                            {/* Backward-compat: redirect old Modify route to Editor */}
+                            <Route path="/modify" element={<LegacyModifyRedirect />} />
+                            <Route
+                              path="/editor"
+                              element={
+                                <ProtectedRoute>
+                                  <EditorPage />
+                                </ProtectedRoute>
+                              }
+                            />
+                            <Route
+                              path="/deploy"
+                              element={
+                                <ProtectedRoute>
+                                  <DeployPage />
+                                </ProtectedRoute>
+                              }
+                            />
+                          </Routes>
+                        </Suspense>
+                      </main>
+                    </div>
                   </div>
                 </div>
               </PortfolioSettingsProvider>

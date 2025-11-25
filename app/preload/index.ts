@@ -46,6 +46,46 @@ contextBridge.exposeInMainWorld("api", {
 	stopFlashFrame: async () => {
 		return ipcRenderer.invoke("py:stopFlashFrame");
 	},
+	// Window controls
+	windowMinimize: async () => {
+		return ipcRenderer.invoke('py:window:minimize');
+	},
+	windowMaximize: async () => {
+		return ipcRenderer.invoke('py:window:maximize');
+	},
+	windowUnmaximize: async () => {
+		return ipcRenderer.invoke('py:window:unmaximize');
+	},
+	windowToggleMaximize: async () => {
+		return ipcRenderer.invoke('py:window:toggleMaximize');
+	},
+	windowIsMaximized: async () => {
+		return ipcRenderer.invoke('py:window:isMaximized');
+	},
+	windowClose: async () => {
+		return ipcRenderer.invoke('py:window:close');
+	},
+	openDevTools: async (options?: { mode?: 'right' | 'bottom' | 'undocked' }) => {
+		return ipcRenderer.invoke('py:window:openDevTools', options || {});
+	},
+	toggleDevTools: async () => {
+		return ipcRenderer.invoke('py:window:toggleDevTools');
+	},
+	// Subscribe to window events emitted by main (returns an unsubscribe function)
+	onWindowEvent: (eventName: string, cb: (data: any) => void) => {
+		const allowed = ['window-maximize', 'window-unmaximize', 'window-move-top', 'window-maximize-state'];
+		if (!allowed.includes(eventName)) return () => { };
+		const handler = (_: any, data: any) => cb(data);
+		ipcRenderer.on(eventName, handler);
+		return () => { ipcRenderer.removeListener(eventName, handler); };
+	},
+	// Clipboard
+	clipboardWrite: async (options: { text: string }) => {
+		return ipcRenderer.invoke('py:clipboardWrite', options);
+	},
+	clipboardRead: async () => {
+		return ipcRenderer.invoke('py:clipboardRead');
+	},
 }); // exposes a safe API to the renderer process
 
 

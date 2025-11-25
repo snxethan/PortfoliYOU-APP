@@ -47,10 +47,10 @@ export default function PageControls({
         return fallbackTheme;
     }, [pageBackground, fallbackTheme]);
     const hasCustomBackground = Boolean((pageBackground || '').trim());
-    const panelClass = "flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[color:var(--border)] bg-[color:var(--surface)]/85 px-3 py-1.5 shadow-sm";
-    const panelHeaderClass = "flex items-center gap-2 text-xs";
-    const panelContentClass = "flex flex-wrap items-center gap-2 justify-end text-sm";
-    const panelLabelClass = "text-[11px] uppercase tracking-wide text-[color:var(--fg-muted)]";
+    const panelClass = "flex flex-col gap-1.5 rounded-xl border border-[color:var(--border)] bg-[color:var(--surface)]/85 px-2 py-1.5 shadow-sm";
+    const panelHeaderClass = "w-full flex items-center justify-center gap-1 text-[10px]";
+    const panelContentClass = "w-full flex flex-wrap items-center justify-center gap-1 text-[12px]";
+    const panelLabelClass = "text-[10px] uppercase tracking-wide text-[color:var(--fg-muted)]";
 
     return (
         <div className="px-4 py-3 border-b border-[color:var(--border)] bg-[color:var(--bg)]">
@@ -59,25 +59,34 @@ export default function PageControls({
                     <div className={panelClass}>
                         <div className={panelHeaderClass}>
                             <span className={panelLabelClass}>Page appearance</span>
-                            <button className="btn btn-ghost btn-xs px-2" title="Page settings" aria-label="Page settings" onClick={() => onOpenSettings?.()} disabled={!currentPageId}>
-                                <Settings size={12} />
-                            </button>
                         </div>
                         <div className={panelContentClass}>
                             <label className="flex items-center gap-1 text-[10px] uppercase tracking-wide text-[color:var(--fg-muted)]" title="Page background color">
-                                <Droplet size={12} />
+                                <Droplet size={14} />
                                 <input
                                     type="color"
-                                    className="w-8 h-8 rounded border border-[color:var(--border)] bg-[color:var(--surface)]"
+                                    className="w-7 h-7 rounded border border-[color:var(--border)] bg-[color:var(--surface)]"
                                     value={quickSwatch}
                                     onChange={(e) => onQuickBackgroundChange(e.target.value)}
                                     disabled={!currentPageId}
                                     aria-label="Pick page background color"
                                 />
                             </label>
+                            {hasCustomBackground && (
+                                <button
+                                    className="btn btn-ghost btn-xs px-1.5 py-1 min-h-[28px]"
+                                    type="button"
+                                    title="Reset to theme"
+                                    aria-label="Reset page background to theme"
+                                    onClick={() => onQuickBackgroundChange(null)}
+                                    disabled={!currentPageId}
+                                >
+                                    <RotateCcw size={14} />
+                                </button>
+                            )}
                             {onOpenThemeSettings && (
                                 <button
-                                    className="btn btn-ghost btn-xs"
+                                    className="btn btn-ghost btn-xs px-1.5 py-1 min-h-[28px]"
                                     type="button"
                                     title="Open theme settings"
                                     aria-label="Open theme settings"
@@ -87,16 +96,18 @@ export default function PageControls({
                                     <Palette size={14} />
                                 </button>
                             )}
-                            {hasCustomBackground && (
+
+
+                            {onOpenSettings && (
                                 <button
-                                    className="btn btn-ghost btn-xs"
+                                    className="btn btn-ghost btn-xs px-1.5 py-1 min-h-[28px]"
                                     type="button"
-                                    title="Reset to theme"
-                                    aria-label="Reset page background to theme"
-                                    onClick={() => onQuickBackgroundChange(null)}
+                                    title="Page settings"
+                                    aria-label="Open page settings"
+                                    onClick={() => onOpenSettings?.()}
                                     disabled={!currentPageId}
                                 >
-                                    <RotateCcw size={14} />
+                                    <Settings size={14} />
                                 </button>
                             )}
                         </div>
@@ -108,7 +119,7 @@ export default function PageControls({
                         </div>
                         {!editing ? (
                             <div className={panelContentClass}>
-                                <button className="btn btn-ghost btn-xs" title="Rename page" aria-label="Rename page" onClick={() => {
+                                <button className="btn btn-ghost btn-xs px-1.5 py-1 min-h-[28px]" title="Rename page" aria-label="Rename page" onClick={() => {
                                     if (!currentPageId) return;
                                     const title = pages[currentPageId]?.title || 'Untitled';
                                     setDraft(title);
@@ -117,7 +128,7 @@ export default function PageControls({
                                     <Edit3 size={14} />
                                 </button>
                                 <select
-                                    className="input px-2 py-1 text-sm w-auto min-w-[160px]"
+                                    className="input px-2 py-1 text-sm w-auto min-w-[130px] md:min-w-[150px]"
                                     value={currentPageId || ''}
                                     onChange={(e) => {
                                         const id = e.target.value || null;
@@ -133,17 +144,17 @@ export default function PageControls({
                                         );
                                     })}
                                 </select>
-                                <button className="btn btn-ghost btn-xs" title="New page" aria-label="New page" onClick={() => onCreatePage()}>
+                                <button className="btn btn-ghost btn-xs px-1.5 py-1 min-h-[28px]" title="New page" aria-label="New page" onClick={() => onCreatePage()}>
                                     <Plus size={14} />
                                 </button>
-                                <button className="btn btn-ghost btn-xs text-red-500 border border-red-500/40 hover:bg-red-500/10" title="Delete current page" aria-label="Delete page" onClick={() => onDeleteCurrentPage()} disabled={!currentPageId}>
+                                <button className="btn btn-ghost btn-xs px-1.5 py-1 min-h-[28px] text-red-500 border border-red-500/40 hover:bg-red-500/10" title="Delete current page" aria-label="Delete page" onClick={() => onDeleteCurrentPage()} disabled={!currentPageId}>
                                     <Trash2 size={14} />
                                 </button>
                             </div>
                         ) : (
                             <div className={panelContentClass}>
                                 <input
-                                    className="input px-2 py-1 text-sm w-auto min-w-[200px]"
+                                    className="input px-2 py-1 text-sm w-auto min-w-[160px] md:min-w-[190px]"
                                     value={draft}
                                     onChange={(e) => setDraft(e.target.value)}
                                     onKeyDown={(e) => {
@@ -157,7 +168,7 @@ export default function PageControls({
                                     autoFocus
                                     placeholder="Page name"
                                 />
-                                <button className="btn btn-primary btn-xs" onClick={() => { const t = (draft || '').trim(); if (t) { onRenameInline(t); } setEditing(false); }}>Save</button>
+                                <button className="btn btn-accent btn-xs" onClick={() => { const t = (draft || '').trim(); if (t) { onRenameInline(t); } setEditing(false); }}>Save</button>
                                 <button className="btn btn-outline btn-xs" onClick={() => setEditing(false)}>Cancel</button>
                             </div>
                         )}

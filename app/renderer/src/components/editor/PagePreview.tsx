@@ -3,8 +3,9 @@ import React, { memo, useMemo } from 'react';
 import WidgetRenderer from '../../widgets/Renderer';
 
 import type { GridItem } from './canvas/GridCanvas';
+import type { WidgetThemeSnapshot } from '../../widgets/theme';
 
-function PagePreviewInner({ width, cols, gap, rowH, items, currentPageId, onNavigatePage, background }: {
+function PagePreviewInner({ width, cols, gap, rowH, items, currentPageId, onNavigatePage, background, themeSnapshot }: {
     width: number;
     cols: number;
     gap: number;
@@ -13,6 +14,7 @@ function PagePreviewInner({ width, cols, gap, rowH, items, currentPageId, onNavi
     currentPageId?: string;
     onNavigatePage?: (pageId: string) => void;
     background?: string;
+    themeSnapshot?: WidgetThemeSnapshot | null;
 }) {
     const colW = useMemo(() => {
         if (cols <= 0) return 0;
@@ -71,7 +73,12 @@ function PagePreviewInner({ width, cols, gap, rowH, items, currentPageId, onNavi
                         style={{ position: 'absolute', left, top, width: wpx, height: hpx, zIndex: typeof item.z === 'number' ? 100 + item.z : undefined, overflow: 'hidden' }}
                     >
                         {item.type ? (
-                            <WidgetRenderer instance={{ id: item.id, type: item.type, props: item.props ?? {}, schemaVersion: item.schemaVersion }} interactive={false} currentPageId={currentPageId} />
+                            <WidgetRenderer
+                                instance={{ id: item.id, type: item.type, props: item.props ?? {}, schemaVersion: item.schemaVersion }}
+                                interactive={false}
+                                currentPageId={currentPageId}
+                                themeSnapshot={themeSnapshot}
+                            />
                         ) : (
                             <div style={{ fontSize: 10, color: 'var(--fg-muted)', border: '1px dashed var(--border)', borderRadius: 4, height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>Unknown widget</div>
                         )}

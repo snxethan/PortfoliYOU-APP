@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef, useState, lazy, Suspense } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useLayoutEffect, lazy, Suspense } from "react";
 import { useNavigate } from "react-router-dom";
-import { ChevronsLeft, ChevronsRight, ChevronDown, ChevronRight } from "lucide-react";
-import { DndContext, PointerSensor, useSensor, useSensors, DragEndEvent, DragStartEvent, rectIntersection, DragOverlay, type Modifier } from "@dnd-kit/core";
+import { ChevronsLeft, ChevronsRight, ChevronDown, ChevronRight, GripVertical } from "lucide-react";
+import { DndContext, PointerSensor, MouseSensor, TouchSensor, useSensor, useSensors, DragEndEvent, DragStartEvent, rectIntersection, DragOverlay, type Modifier } from "@dnd-kit/core";
 
 import { useProjects } from "../providers/ProjectsProvider";
 import { useNotifications } from '../providers/NotificationsProvider';
@@ -18,11 +18,23 @@ import AssetsPanel from "../components/editor/widgets/AssetsPanel";
 import PreviewPopup from "../components/editor/PreviewPopup";
 import PagePreview from "../components/editor/PagePreview";
 import { usePersistentFlag } from "../hooks/usePersistentFlag";
+import { getWidgetThemeSnapshot } from "../widgets/theme";
 
 const COLS = 12;
 const DEFAULT_ROW_H = 32; // px height per row (content area)
 const MIN_ZOOM = 0.5;
 const MAX_ZOOM = 1.75;
+
+function serializeGridItems(list: GridItem[]) {
+  return list.map(it => ({
+    id: it.id,
+    x: it.x, y: it.y, w: it.w, h: it.h,
+    z: typeof it.z === 'number' ? it.z : 0,
+    title: it.title, type: it.type, props: it.props,
+    schemaVersion: typeof it.schemaVersion === 'number' ? it.schemaVersion : 1,
+    pinned: it.pinned, locked: it.locked,
+  }));
+}
 
 export default function EditorPage() {
   const { selectedProject, createPage, deletePage, renamePage, getPageItems, setPageItems, setPageStarter, setPageBackground, activeTheme } = useProjects();
@@ -69,6 +81,7 @@ export default function EditorPage() {
   const themeBackground = activeTheme?.colors.background || '#ffffff';
   const pageBackground = currentPage?.backgroundColor && currentPage.backgroundColor.trim() ? currentPage.backgroundColor : null;
   const effectivePageBackground = pageBackground || themeBackground;
+  const widgetThemeSnapshot = useMemo(() => getWidgetThemeSnapshot(activeTheme), [activeTheme]);
 
   // Page settings modal state
   const [renameModalOpen, setRenameModalOpen] = useState<boolean>(false);
@@ -80,13 +93,27 @@ export default function EditorPage() {
 
   // Demo items to drag around the canvas
   const [items, setItems] = useState<GridItem[]>([]);
+  const itemsRef = useRef<GridItem[]>([]);
+  const replaceItems = useCallback((next: GridItem[]) => {
+    itemsRef.current = next;
+    setItems(next);
+  }, []);
+  const persistItems = useCallback((snapshot?: GridItem[]) => {
+    if (!selectedProject || !currentPageId) return;
+    try {
+      setPageItems(selectedProject.id, currentPageId, serializeGridItems(snapshot ?? itemsRef.current));
+    } catch { /* ignore */ }
+  }, [selectedProject?.id, currentPageId, setPageItems]);
+  useEffect(() => {
+    itemsRef.current = items;
+  }, [items]);
 
   // Load items from provider whenever project/page changes
   useEffect(() => {
-    if (!selectedProject || !currentPageId) { setItems([]); return; }
+    if (!selectedProject || !currentPageId) { replaceItems([]); return; }
     const loaded = getPageItems(selectedProject.id, currentPageId) as GridItem[];
-    setItems(loaded);
-  }, [selectedProject?.id, currentPageId, getPageItems]);
+    replaceItems(loaded);
+  }, [selectedProject?.id, currentPageId, getPageItems, replaceItems]);
 
   // Simple undo/redo stacks (keep last 50 operations)
   type ItemsUpdater = (prev: GridItem[]) => GridItem[];
@@ -98,35 +125,25 @@ export default function EditorPage() {
   const commitUpdate = useCallback((label: string, makeNext: ItemsUpdater) => {
     setItems(prev => {
       const next = makeNext(prev);
+      itemsRef.current = next;
       setHistory(h => {
         const entry: HistoryEntry = { label, undo: () => prev, redo: () => next };
         const nh = [...h, entry];
         return nh.length > MAX_HISTORY ? nh.slice(nh.length - MAX_HISTORY) : nh;
       });
       setRedoStack([]);
-      if (selectedProject && currentPageId) {
-        // Persist into provider/project
-        try {
-          const mapped = next.map(it => ({
-            id: it.id,
-            x: it.x, y: it.y, w: it.w, h: it.h,
-            z: typeof it.z === 'number' ? it.z : 0,
-            title: it.title, type: it.type, props: it.props,
-            schemaVersion: typeof it.schemaVersion === 'number' ? it.schemaVersion : 1,
-            pinned: it.pinned, locked: it.locked,
-          }));
-          setPageItems(selectedProject.id, currentPageId, mapped);
-        } catch { /* ignore */ }
-      }
+      persistItems(next);
       return next;
     });
-  }, [currentPageId, selectedProject?.id, setPageItems]);
+  }, [persistItems]);
 
   function undo() {
     setItems(prev => {
       if (history.length === 0) return prev;
       const entry = history[history.length - 1];
       const undone = entry.undo(prev);
+      itemsRef.current = undone;
+      persistItems(undone);
       setHistory(h => h.slice(0, -1));
       setRedoStack(r => [...r, entry]);
       // Run side-effect for page-level actions (create/delete/rename)
@@ -142,6 +159,8 @@ export default function EditorPage() {
       if (redoStack.length === 0) return prev;
       const entry = redoStack[redoStack.length - 1];
       const redone = entry.redo(prev);
+      itemsRef.current = redone;
+      persistItems(redone);
       setRedoStack(r => r.slice(0, -1));
       setHistory(h => [...h, entry]);
       entry.onRedo?.();
@@ -224,9 +243,33 @@ export default function EditorPage() {
   }
   // Collapsible widgets palette
   const [paletteCollapsed, setPaletteCollapsed] = usePersistentFlag('py_palette_collapsed');
+  const [paletteWidth, setPaletteWidth] = useState<number>(() => {
+    try { return Number(localStorage.getItem('py_palette_w')) || 320; } catch { return 320; }
+  });
+  const paletteMinWidth = 260;
+  const paletteMaxWidth = 520;
   function togglePalette() {
     setPaletteCollapsed(prev => !prev);
   }
+  const beginResizePalette = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (paletteCollapsed) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const startX = event.clientX;
+    const startWidth = paletteWidth;
+    const handleMove = (move: PointerEvent) => {
+      const delta = startX - move.clientX;
+      const next = Math.min(paletteMaxWidth, Math.max(paletteMinWidth, startWidth + delta));
+      setPaletteWidth(next);
+      try { localStorage.setItem('py_palette_w', String(Math.round(next))); } catch { /* ignore */ }
+    };
+    const handleUp = () => {
+      window.removeEventListener('pointermove', handleMove);
+      window.removeEventListener('pointerup', handleUp);
+    };
+    window.addEventListener('pointermove', handleMove);
+    window.addEventListener('pointerup', handleUp);
+  }, [paletteCollapsed, paletteWidth, paletteMaxWidth, paletteMinWidth]);
   // Grid overlay toggle
   const [showGrid, setShowGrid] = usePersistentFlag('py_show_grid');
   function toggleGrid() {
@@ -277,7 +320,7 @@ export default function EditorPage() {
       commitUpdate(label, (prev) => prev.map(i => i.id === selectedId ? result : i));
     }
   }
-  function onKeyDown(e: React.KeyboardEvent<HTMLDivElement>) {
+  async function onKeyDown(e: React.KeyboardEvent<HTMLDivElement>) {
     // Do not interfere with typing in inputs/textareas
     const t = e.target as HTMLElement;
     if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.getAttribute('contenteditable') === 'true')) return;
@@ -315,23 +358,99 @@ export default function EditorPage() {
       e.preventDefault();
       const src = items.find(i => i.id === selectedId) || null;
       setClipboard(src ? { ...src } : null);
+      // Also write to system clipboard (if available) so paste works across windows.
+      // Use a safe serializer that tolerates functions, BigInt and cycles.
+      try {
+        const marker = 'PORTFOLIYOU:WIDGET:v1\n';
+        const safeStringify = (obj: unknown) => {
+          try {
+            const seen = new WeakSet();
+            return JSON.stringify(obj, (_k, v) => {
+              if (typeof v === 'function') return undefined;
+              if (typeof v === 'bigint') return v.toString();
+              if (v && typeof v === 'object') {
+                if (seen.has(v)) return undefined;
+                seen.add(v as object);
+              }
+              return v;
+            });
+          } catch (e) { return null; }
+        };
+        const payload = src ? safeStringify(src) : '';
+        if (payload !== null) {
+          if ((window as any).api?.clipboardWrite) {
+            (window as any).api.clipboardWrite({ text: marker + payload });
+          } else {
+            try { navigator.clipboard?.writeText(marker + payload); } catch { /* ignore */ }
+          }
+        }
+      } catch { /* ignore */ }
       return;
     }
     if (meta && e.key.toLowerCase() === 'x' && selectedId) {
       e.preventDefault();
       const src = items.find(i => i.id === selectedId) || null;
       setClipboard(src ? { ...src } : null);
+      // write to system clipboard for cut using safe serializer
+      try {
+        const marker = 'PORTFOLIYOU:WIDGET:v1\n';
+        const safeStringify = (obj: unknown) => {
+          try {
+            const seen = new WeakSet();
+            return JSON.stringify(obj, (_k, v) => {
+              if (typeof v === 'function') return undefined;
+              if (typeof v === 'bigint') return v.toString();
+              if (v && typeof v === 'object') {
+                if (seen.has(v)) return undefined;
+                seen.add(v as object);
+              }
+              return v;
+            });
+          } catch (e) { return null; }
+        };
+        const payload = src ? safeStringify(src) : '';
+        if (payload !== null) {
+          if ((window as any).api?.clipboardWrite) {
+            (window as any).api.clipboardWrite({ text: marker + payload });
+          } else {
+            try { navigator.clipboard?.writeText(marker + payload); } catch { /* ignore */ }
+          }
+        }
+      } catch { /* ignore */ }
       commitUpdate('Cut item', (prev) => prev.filter(i => i.id !== selectedId));
       setSelectedId(null);
       return;
     }
     if (meta && e.key.toLowerCase() === 'v') {
       e.preventDefault();
-      if (!clipboard) return;
+      // Delegate to async paste handler so we can await clipboard in a safe scope
+      void handlePasteFromClipboard();
+      return;
+    }
+    // Async paste helper (declared just before next keyboard cases)
+    async function handlePasteFromClipboard() {
+      // Try system clipboard first
+      let payloadText: string | null = null;
+      try {
+        if ((window as any).api?.clipboardRead) {
+          const res = await (window as any).api.clipboardRead();
+          if (res && res.ok && typeof res.text === 'string') payloadText = res.text;
+        } else {
+          try { payloadText = await navigator.clipboard?.readText(); } catch { payloadText = null; }
+        }
+      } catch { payloadText = null; }
+
+      let clipboardObj: GridItem | null = null;
+      if (payloadText && payloadText.startsWith('PORTFOLIYOU:WIDGET:v1\n')) {
+        try { clipboardObj = JSON.parse(payloadText.slice('PORTFOLIYOU:WIDGET:v1\n'.length)); } catch { clipboardObj = null; }
+      }
+      // Fallback to in-memory clipboard state
+      if (!clipboardObj) clipboardObj = clipboard;
+      if (!clipboardObj) return;
       const nid = typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : Math.random().toString(36).slice(2, 9);
-      const nx = Math.min(COLS - clipboard.w, (clipboard.x ?? 0) + 1);
-      const ny = (clipboard.y ?? 0) + 1;
-      const dup: GridItem = { ...clipboard, id: nid, x: nx, y: ny, title: (clipboard.title || 'Widget') + ' copy' };
+      const nx = Math.min(COLS - (clipboardObj.w ?? 1), (clipboardObj.x ?? 0) + 1);
+      const ny = (clipboardObj.y ?? 0) + 1;
+      const dup: GridItem = { ...clipboardObj, id: nid, x: nx, y: ny, title: ((clipboardObj.title || 'Widget') + ' copy') };
       commitUpdate('Paste item', (prev) => {
         const norm = normalizeZ(prev);
         const maxZ = norm.length;
@@ -339,8 +458,8 @@ export default function EditorPage() {
       });
       notifyWidgetChange('create', dup.title);
       setSelectedId(nid);
-      return;
     }
+
     if (meta && e.key.toLowerCase() === 'd' && selectedId) {
       e.preventDefault();
       const src = items.find(i => i.id === selectedId);
@@ -364,25 +483,45 @@ export default function EditorPage() {
   type PaletteDrag = { src?: string; type?: string; label?: string; w?: number; h?: number; schemaVersion?: number } | undefined;
   const [activeDrag, setActiveDrag] = useState<PaletteDrag>(undefined);
   const dragPointerStart = useRef<{ x: number; y: number } | null>(null);
-  const dragPointerOffset = useRef<{ x: number; y: number } | null>(null);
+  const dragPointerLast = useRef<{ x: number; y: number } | null>(null);
   const dragOverlaySize = useRef<{ width: number; height: number } | null>(null);
 
   const dragOverlayCursorAlign = useMemo<Modifier>(() => (({ transform, activeNodeRect }) => {
     if (!transform) return transform;
-    const pointerOffset = dragPointerOffset.current;
+    const pointer = dragPointerLast.current || dragPointerStart.current;
+    if (!pointer) return transform;
     const overlaySize = dragOverlaySize.current;
-    const fallbackOffsetX = activeNodeRect ? activeNodeRect.width / 2 : 0;
-    const fallbackOffsetY = activeNodeRect ? activeNodeRect.height / 2 : 0;
-    const offsetX = pointerOffset?.x ?? fallbackOffsetX;
-    const offsetY = pointerOffset?.y ?? fallbackOffsetY;
-    const overlayHalfW = overlaySize ? overlaySize.width / 2 : fallbackOffsetX;
-    const overlayHalfH = overlaySize ? overlaySize.height / 2 : fallbackOffsetY;
+    const fallbackHalfW = activeNodeRect ? activeNodeRect.width / 2 : 0;
+    const fallbackHalfH = activeNodeRect ? activeNodeRect.height / 2 : 0;
+    const halfW = overlaySize ? overlaySize.width / 2 : fallbackHalfW;
+    const halfH = overlaySize ? overlaySize.height / 2 : fallbackHalfH;
+    // transform.x/y are offsets applied to the active node's initial position (activeNodeRect.left/top)
+    // Compute the required transform so the overlay's top-left equals pointer - half size.
+    const baseLeft = activeNodeRect ? activeNodeRect.left : 0;
+    const baseTop = activeNodeRect ? activeNodeRect.top : 0;
     return {
       ...transform,
-      x: transform.x + offsetX - overlayHalfW,
-      y: transform.y + offsetY - overlayHalfH,
+      x: pointer.x - halfW - baseLeft,
+      y: pointer.y - halfH - baseTop,
     };
   }) as Modifier, []);
+
+  // Measure canvas viewport height so sidebar can be constrained to it
+  const canvasWrapperRef = useRef<HTMLDivElement | null>(null);
+  const [canvasHeightPx, setCanvasHeightPx] = useState<number | null>(null);
+  useLayoutEffect(() => {
+    function measure() {
+      const el = canvasWrapperRef.current;
+      if (!el) { setCanvasHeightPx(null); return; }
+      const h = Math.round(el.getBoundingClientRect().height);
+      setCanvasHeightPx(h);
+    }
+    measure();
+    const ro = new ResizeObserver(() => measure());
+    if (canvasWrapperRef.current) ro.observe(canvasWrapperRef.current);
+    window.addEventListener('resize', measure);
+    return () => { ro.disconnect(); window.removeEventListener('resize', measure); };
+  }, [pageWidth, pageHeight, zoom, paletteWidth, paletteCollapsed]);
 
   // Modify panel
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -546,9 +685,9 @@ export default function EditorPage() {
               setCurrentPageId(id);
               if (selectedProject && id) {
                 try { localStorage.setItem(`py_current_page_${selectedProject.id}`, id); } catch { /* ignore */ }
-                setItems(getPageItems(selectedProject.id, id) as GridItem[]);
+                replaceItems(getPageItems(selectedProject.id, id) as GridItem[]);
               } else {
-                setItems([]);
+                replaceItems([]);
               }
             }}
             onCreatePage={() => {
@@ -558,7 +697,7 @@ export default function EditorPage() {
               if (id) {
                 setCurrentPageId(id);
                 try { localStorage.setItem(`py_current_page_${selectedProject.id}`, id); } catch { /* ignore */ }
-                setItems([]);
+                replaceItems([]);
                 setHistory(h => {
                   const entry: HistoryEntry = {
                     label: 'Create page',
@@ -570,14 +709,14 @@ export default function EditorPage() {
                       if (backId) {
                         setCurrentPageId(backId);
                         const loaded = getPageItems(selectedProject.id, backId) as GridItem[];
-                        setItems(loaded);
+                        replaceItems(loaded);
                       }
                     },
                     onRedo: () => {
                       const newId = createPage(selectedProject.id);
                       if (newId) {
                         setCurrentPageId(newId);
-                        setItems([]);
+                        replaceItems([]);
                       }
                     }
                   };
@@ -605,7 +744,7 @@ export default function EditorPage() {
               setRedoStack([]);
               renamePage(selectedProject.id, currentPageId, trimmed);
               try { localStorage.setItem(`py_current_page_${selectedProject.id}`, currentPageId); } catch { /* ignore */ }
-              try { setItems(getPageItems(selectedProject.id, currentPageId) as GridItem[]); } catch { /* ignore */ }
+              try { replaceItems(getPageItems(selectedProject.id, currentPageId) as GridItem[]); } catch { /* ignore */ }
             }}
             onOpenSettings={() => {
               if (!selectedProject || !currentPageId) return;
@@ -627,7 +766,7 @@ export default function EditorPage() {
               const nextId = remaining[0] || null;
               deletePage(selectedProject.id, removedId);
               setCurrentPageId(nextId);
-              if (nextId) setItems(getPageItems(selectedProject.id, nextId) as GridItem[]); else setItems([]);
+              if (nextId) replaceItems(getPageItems(selectedProject.id, nextId) as GridItem[]); else replaceItems([]);
               setHistory(h => {
                 let restoredId: string | null = null;
                 const entry: HistoryEntry = {
@@ -639,9 +778,9 @@ export default function EditorPage() {
                     if (nid) {
                       restoredId = nid;
                       renamePage(selectedProject.id, nid, title);
-                      setPageItems(selectedProject.id, nid, snapItems.map(it => ({ id: it.id, x: it.x, y: it.y, w: it.w, h: it.h, z: it.z ?? 0, title: it.title, type: it.type, props: it.props, schemaVersion: typeof it.schemaVersion === 'number' ? it.schemaVersion : 1, pinned: it.pinned, locked: it.locked })));
+                      setPageItems(selectedProject.id, nid, serializeGridItems(snapItems));
                       setCurrentPageId(nid);
-                      setItems(getPageItems(selectedProject.id, nid) as GridItem[]);
+                      replaceItems(getPageItems(selectedProject.id, nid) as GridItem[]);
                     }
                   },
                   onRedo: () => {
@@ -650,7 +789,7 @@ export default function EditorPage() {
                       deletePage(selectedProject.id, target);
                       const fallback = (selectedProject.pageOrder?.[0]) || null;
                       setCurrentPageId(fallback);
-                      if (fallback) setItems(getPageItems(selectedProject.id, fallback) as GridItem[]);
+                      if (fallback) replaceItems(getPageItems(selectedProject.id, fallback) as GridItem[]);
                     }
                   },
                 };
@@ -663,41 +802,59 @@ export default function EditorPage() {
 
         {/* Workspace */}
         <DndContext
-          sensors={useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }))}
+          sensors={useSensors(
+            useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+            useSensor(MouseSensor),
+            useSensor(TouchSensor, { activationConstraint: { delay: 150, tolerance: 5 } }),
+          )}
           collisionDetection={rectIntersection}
           onDragStart={(event: DragStartEvent) => {
             const data = event.active.data.current as PaletteDrag;
+            try { console.debug('[py:dnd] dragstart activeId=', event.active.id, 'data=', data); } catch { }
             if (data?.src === 'palette') {
               setActiveDrag(data);
               const pointerEvent = event.activatorEvent as PointerEvent | undefined;
               if (pointerEvent && typeof pointerEvent.clientX === 'number' && typeof pointerEvent.clientY === 'number') {
                 dragPointerStart.current = { x: pointerEvent.clientX, y: pointerEvent.clientY };
-                const initialRect = event.active.rect.current.initial;
-                if (initialRect) {
-                  dragPointerOffset.current = {
-                    x: pointerEvent.clientX - initialRect.left,
-                    y: pointerEvent.clientY - initialRect.top,
-                  };
-                } else {
-                  dragPointerOffset.current = null;
-                }
+                dragPointerLast.current = { x: pointerEvent.clientX, y: pointerEvent.clientY };
               } else {
                 dragPointerStart.current = null;
-                dragPointerOffset.current = null;
+              }
+            }
+          }}
+          onDragMove={(event) => {
+            try { console.debug('[py:dnd] dragmove delta=', event.delta, 'activeId=', event.active?.id); } catch { }
+            if (dragPointerStart.current) {
+              dragPointerLast.current = {
+                x: dragPointerStart.current.x + event.delta.x,
+                y: dragPointerStart.current.y + event.delta.y,
+              };
+            } else {
+              const pointerEvent = event.activatorEvent as PointerEvent | undefined;
+              if (pointerEvent && typeof pointerEvent.clientX === 'number' && typeof pointerEvent.clientY === 'number') {
+                dragPointerLast.current = { x: pointerEvent.clientX, y: pointerEvent.clientY };
               }
             }
           }}
           onDragEnd={(event: DragEndEvent) => {
             const { active, over } = event;
-            if (!over) return;
+            try { console.debug('[py:dnd] dragend active=', active?.id, 'over=', over?.id); } catch { }
+            if (!over) {
+              try { console.debug('[py:dnd] dragend: no droppable target'); } catch { }
+              setActiveDrag(undefined);
+              dragPointerStart.current = null;
+              dragPointerLast.current = null;
+              dragOverlaySize.current = null;
+              return;
+            }
             const data = active.data.current as { src?: string; type?: string; label?: string; w?: number; h?: number; schemaVersion?: number } | undefined;
             if (data?.src === 'palette' && over.id === 'grid-canvas') {
               const overRect = over.rect;
               const initial = active.rect.current.initial;
               if (!initial) return;
-              const startPointer = dragPointerStart.current;
-              const pointerX = startPointer ? startPointer.x + event.delta.x : initial.left + initial.width / 2 + event.delta.x;
-              const pointerY = startPointer ? startPointer.y + event.delta.y : initial.top + initial.height / 2 + event.delta.y;
+              const pointerRef = dragPointerLast.current || dragPointerStart.current;
+              const pointerX = pointerRef ? pointerRef.x : initial.left + initial.width / 2 + event.delta.x;
+              const pointerY = pointerRef ? pointerRef.y : initial.top + initial.height / 2 + event.delta.y;
               const relX = pointerX - overRect.left;
               const relY = pointerY - overRect.top;
 
@@ -729,13 +886,13 @@ export default function EditorPage() {
             // Clear drag overlay when drop completes
             setActiveDrag(undefined);
             dragPointerStart.current = null;
-            dragPointerOffset.current = null;
+            dragPointerLast.current = null;
             dragOverlaySize.current = null;
           }}
           onDragCancel={() => {
             setActiveDrag(undefined);
             dragPointerStart.current = null;
-            dragPointerOffset.current = null;
+            dragPointerLast.current = null;
             dragOverlaySize.current = null;
           }}
         >
@@ -743,143 +900,186 @@ export default function EditorPage() {
           <DragOverlay dropAnimation={null} modifiers={[dragOverlayCursorAlign]}>
             <DragOverlayPreview activeDrag={activeDrag} onMeasure={(size) => { dragOverlaySize.current = size; }} />
           </DragOverlay>
-          <div className="grid gap-0 min-h-[28rem]" style={{ gridTemplateColumns: paletteCollapsed ? '1fr 1.5rem' : '1fr 16rem' }} onKeyDown={onKeyDown} tabIndex={0}>
+          <div
+            className="h-full grid gap-0 min-h-[28rem] items-stretch"
+            style={{
+              gridTemplateColumns: paletteCollapsed ? 'minmax(0,1fr) 32px' : `minmax(0,1fr) ${Math.round(paletteWidth)}px`,
+              ...(canvasHeightPx ? { ['--canvas-h' as any]: `${canvasHeightPx}px` } : {}),
+            }}
+            onKeyDown={onKeyDown}
+            tabIndex={0}
+          >
             {/* Canvas or Preview inside a page-like viewport */}
-            <ViewportSurface
-              pageWidth={pageWidth}
-              pageHeight={pageHeight}
-              setPageWidth={setPageWidth}
-              setPageHeight={setPageHeight}
-              heightMode={heightMode}
-              previewMode={previewMode}
-              cols={COLS}
-              rowH={DEFAULT_ROW_H}
-              gap={gap}
-              items={items}
-              onItemsChange={(next) => commitUpdate('Edit layout', () => next)}
-              showGrid={showGrid}
-              selectedId={selectedId}
-              onSelect={setSelectedId}
-              onDelete={(id) => {
-                let removedTitle: string | undefined;
-                commitUpdate("Delete item", (prev) => {
-                  const tgt = prev.find(i => i.id === id);
-                  if (!tgt) return prev;
-                  removedTitle = tgt.title;
-                  return prev.filter((it) => it.id !== id);
-                });
-                if (removedTitle) notifyWidgetChange('delete', removedTitle);
-              }}
-              onDuplicate={(id) => {
-                let duplicateTitle: string | undefined;
-                commitUpdate("Duplicate item", (prev) => {
-                  const src = prev.find((it) => it.id === id);
-                  if (!src) return prev;
-                  duplicateTitle = src.title + " copy";
-                  const nid = typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : Math.random().toString(36).slice(2, 9);
-                  const nx = Math.min(COLS - src.w, src.x + 1);
-                  const ny = src.y + 1;
-                  const norm = normalizeZ(prev);
-                  const maxZ = norm.length; // place duplicate on top
-                  return [...norm, { ...src, id: nid, x: nx, y: ny, title: duplicateTitle, z: maxZ }];
-                });
-                if (duplicateTitle) notifyWidgetChange('create', duplicateTitle);
-              }}
-              onMoveStart={() => { /* no-op */ }}
-              onMoveEnd={(prevItem, nextItem) => {
-                if (prevItem.x === nextItem.x && prevItem.y === nextItem.y) return;
-                const label = `Move ${nextItem.title}`;
-                setHistory(h => {
-                  const entry: HistoryEntry = {
-                    label,
-                    undo: (items) => items.map(it => it.id === nextItem.id ? { ...it, x: prevItem.x, y: prevItem.y } : it),
-                    redo: (items) => items.map(it => it.id === nextItem.id ? { ...it, x: nextItem.x, y: nextItem.y } : it),
-                  };
-                  const nh = [...h, entry];
-                  return nh.length > MAX_HISTORY ? nh.slice(nh.length - MAX_HISTORY) : nh;
-                });
-                setRedoStack([]);
-              }}
-              onBringToFront={bringToFront}
-              onSendToBack={sendToBack}
-              onBringForward={bringForward}
-              onSendBackward={sendBackward}
-              onTogglePin={togglePin}
-              onOpenModify={openModify}
-              onDropAsset={(id, hash) => {
-                // Only handle for Image widgets: set src to asset://hash
-                commitUpdate('Set image from asset', (prev) => prev.map(it => it.id === id && it.type === 'image' ? { ...it, props: { ...(it.props as Record<string, unknown>), src: `asset://${hash}` } } : it));
-              }}
-              onNavigatePage={(pid) => {
-                if (!selectedProject) return;
-                setCurrentPageId(pid);
-                try { localStorage.setItem(`py_current_page_${selectedProject.id}`, pid); } catch { /* ignore */ }
-              }}
-              currentPageId={currentPageId || undefined}
-              zoom={zoom}
-              minZoom={MIN_ZOOM}
-              maxZoom={MAX_ZOOM}
-              onZoomChange={applyZoom}
-              pageBackground={effectivePageBackground}
-              theme={activeTheme}
-            />
+            <div className="h-full min-h-0" ref={canvasWrapperRef}>
+              <ViewportSurface
+                pageWidth={pageWidth}
+                pageHeight={pageHeight}
+                setPageWidth={setPageWidth}
+                setPageHeight={setPageHeight}
+                heightMode={heightMode}
+                previewMode={previewMode}
+                cols={COLS}
+                rowH={DEFAULT_ROW_H}
+                gap={gap}
+                items={items}
+                onItemsChange={replaceItems}
+                showGrid={showGrid}
+                selectedId={selectedId}
+                onSelect={setSelectedId}
+                onDelete={(id) => {
+                  let removedTitle: string | undefined;
+                  commitUpdate("Delete item", (prev) => {
+                    const tgt = prev.find(i => i.id === id);
+                    if (!tgt) return prev;
+                    removedTitle = tgt.title;
+                    return prev.filter((it) => it.id !== id);
+                  });
+                  if (removedTitle) notifyWidgetChange('delete', removedTitle);
+                }}
+                onDuplicate={(id) => {
+                  let duplicateTitle: string | undefined;
+                  commitUpdate("Duplicate item", (prev) => {
+                    const src = prev.find((it) => it.id === id);
+                    if (!src) return prev;
+                    duplicateTitle = src.title + " copy";
+                    const nid = typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : Math.random().toString(36).slice(2, 9);
+                    const nx = Math.min(COLS - src.w, src.x + 1);
+                    const ny = src.y + 1;
+                    const norm = normalizeZ(prev);
+                    const maxZ = norm.length; // place duplicate on top
+                    return [...norm, { ...src, id: nid, x: nx, y: ny, title: duplicateTitle, z: maxZ }];
+                  });
+                  if (duplicateTitle) notifyWidgetChange('create', duplicateTitle);
+                }}
+                onMoveStart={() => { /* no-op */ }}
+                onMoveEnd={(prevItem, nextItem) => {
+                  if (
+                    prevItem.x === nextItem.x &&
+                    prevItem.y === nextItem.y &&
+                    prevItem.w === nextItem.w &&
+                    prevItem.h === nextItem.h
+                  ) {
+                    return;
+                  }
+                  const label = `Move ${nextItem.title}`;
+                  setHistory(h => {
+                    const entry: HistoryEntry = {
+                      label,
+                      undo: (items) => items.map(it => it.id === nextItem.id ? { ...it, x: prevItem.x, y: prevItem.y } : it),
+                      redo: (items) => items.map(it => it.id === nextItem.id ? { ...it, x: nextItem.x, y: nextItem.y } : it),
+                    };
+                    const nh = [...h, entry];
+                    return nh.length > MAX_HISTORY ? nh.slice(nh.length - MAX_HISTORY) : nh;
+                  });
+                  setRedoStack([]);
+                  persistItems();
+                }}
+                onBringToFront={bringToFront}
+                onSendToBack={sendToBack}
+                onBringForward={bringForward}
+                onSendBackward={sendBackward}
+                onTogglePin={togglePin}
+                onOpenModify={openModify}
+                onDropAsset={(id, hash) => {
+                  // Only handle for Image widgets: set src to asset://hash
+                  commitUpdate('Set image from asset', (prev) => prev.map(it => it.id === id && it.type === 'image' ? { ...it, props: { ...(it.props as Record<string, unknown>), src: `asset://${hash}` } } : it));
+                }}
+                onNavigatePage={(pid) => {
+                  if (!selectedProject) return;
+                  setCurrentPageId(pid);
+                  try { localStorage.setItem(`py_current_page_${selectedProject.id}`, pid); } catch { /* ignore */ }
+                }}
+                currentPageId={currentPageId || undefined}
+                zoom={zoom}
+                minZoom={MIN_ZOOM}
+                maxZoom={MAX_ZOOM}
+                onZoomChange={applyZoom}
+                pageBackground={effectivePageBackground}
+                theme={activeTheme}
+                themeSnapshot={widgetThemeSnapshot}
+              />
+            </div>
 
             {/* Widget Sidebar (collapsible) */}
-            <aside className={`border-l border-[color:var(--border)] bg-[color:var(--bg)] relative ${previewMode ? 'opacity-50 pointer-events-none' : ''}`}>
+            <aside className={`relative surface p-4 border border-[color:var(--border)] rounded-2xl shadow-lg bg-[color:var(--surface)]/80 overflow-hidden ${previewMode ? 'opacity-50 pointer-events-none' : ''} flex flex-col palette-full-height`}>
               {paletteCollapsed ? (
-                <div className="h-full flex items-center justify-center">
-                  <button className="btn btn-ghost btn-xs rotate-180" title="Expand palette" onClick={togglePalette}>
-                    <ChevronsLeft size={14} />
-                  </button>
+                <div
+                  role="button"
+                  tabIndex={0}
+                  onClick={togglePalette}
+                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); togglePalette(); } }}
+                  className="absolute inset-0 flex items-center justify-center cursor-pointer z-20"
+                  title="Expand widget sidebar"
+                >
+                  <ChevronsLeft size={16} />
                 </div>
               ) : (
-                <div className="h-full flex flex-col">
-                  <div className="flex items-center justify-between p-2 border-b border-[color:var(--border)] bg-[color:var(--muted)]/40">
-                    <div className="text-xs text-[color:var(--fg-muted)]">CANVAS DASHBOARD</div>
-                    <button className="btn btn-ghost btn-xs" title="Collapse palette" onClick={togglePalette}>
+                <div className="h-full flex flex-col relative">
+                  <div
+                    className="absolute left-0 top-0 bottom-0 w-4 cursor-ew-resize z-10 flex items-center justify-center text-[color:var(--fg-muted)] no-touch-action"
+                    onPointerDown={beginResizePalette}
+                    role="presentation"
+                  >
+                    <span className="sr-only">Resize sidebar</span>
+                    <div className="rounded-full border border-[color:var(--border)] bg-[color:var(--surface)]/80 p-0.5 shadow-sm">
+                      <GripVertical size={12} />
+                    </div>
+                  </div>
+                  <div className="px-3 pt-4 pb-3 relative palette-header">
+                    <p className="text-xs uppercase tracking-wide text-[color:var(--fg-muted)]">Canvas Dashboard</p>
+                    <button
+                      className="absolute right-2 top-1 btn btn-ghost btn-xs p-1"
+                      title="Collapse palette"
+                      onClick={togglePalette}
+                      aria-label="Collapse widget palette"
+                    >
                       <ChevronsRight size={14} />
                     </button>
                   </div>
-                  <div className="p-2 overflow-auto grow space-y-3">
-                    {/* Widgets section */}
-                    <div className="border border-[color:var(--border)] rounded-md overflow-hidden">
-                      <button
-                        className="w-full flex items-center justify-between gap-2 px-2 py-1.5 bg-[color:var(--muted)]/40 text-[10px] tracking-wide uppercase"
-                        onClick={toggleWidgetsOpen}
-                        title={widgetsOpen ? 'Collapse' : 'Expand'}
-                      >
-                        <span className="flex items-center gap-2">
-                          {widgetsOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-                          Widgets
-                        </span>
-                      </button>
+                  <div className="p-2 overflow-auto grow space-y-3 scrollable scrollable-container">
+                    <section className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)]/90 shadow-sm">
+                      <div className="px-4 pt-1 pb-1">
+                        <button
+                          className="w-full flex items-center justify-between gap-2 px-4 py-2 text-left"
+                          onClick={toggleWidgetsOpen}
+                          title={widgetsOpen ? 'Collapse widgets' : 'Expand widgets'}
+                        >
+                          <div className="flex items-center gap-2">
+                            {(widgetsOpen) ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                            <p className="text-sm uppercase tracking-wide text-[color:var(--fg-muted)]">Widgets</p>
+                          </div>
+                          <div className="text-[color:var(--fg-muted)]" />
+                        </button>
+                      </div>
                       {widgetsOpen && (
-                        <div className="p-2">
+                        <div className="p-3 pt-0">
                           <Suspense fallback={<div className="text-xs text-[color:var(--fg-muted)] p-2">Loading widgets…</div>}>
                             <WidgetsPalette />
                           </Suspense>
                         </div>
                       )}
-                    </div>
+                    </section>
 
-                    {/* Assets section */}
-                    <div className="border border-[color:var(--border)] rounded-md overflow-hidden">
-                      <button
-                        className="w-full flex items-center justify-between gap-2 px-2 py-1.5 bg-[color:var(--muted)]/40 text-[10px] tracking-wide uppercase"
-                        onClick={toggleAssetsOpen}
-                        title={assetsOpen ? 'Collapse' : 'Expand'}
-                      >
-                        <span className="flex items-center gap-2">
-                          {assetsOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-                          Assets
-                        </span>
-                      </button>
+                    <section className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)]/90 shadow-sm">
+                      <div className="px-4 pt-1 pb-1">
+                        <button
+                          className="w-full flex items-center justify-between gap-2 px-4 py-2 text-left"
+                          onClick={toggleAssetsOpen}
+                          title={assetsOpen ? 'Collapse assets' : 'Expand assets'}
+                        >
+                          <div className="flex items-center gap-2">
+                            {assetsOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                            <p className="text-sm uppercase tracking-wide text-[color:var(--fg-muted)]">Assets</p>
+                          </div>
+                          <div className="text-[color:var(--fg-muted)]" />
+                        </button>
+                      </div>
                       {assetsOpen && (
-                        <div className="p-2">
+                        <div className="p-3 pt-0">
                           <AssetsPanel hideHeader />
                         </div>
                       )}
-                    </div>
+                    </section>
                   </div>
                 </div>
               )}
@@ -893,11 +1093,21 @@ export default function EditorPage() {
       {/* Standalone popup window preview (renders current page) */}
       <PreviewPopup open={popupOpen} onClose={closeWebpage} title="PortfoliYOU – Preview" width={pageWidth} height={pageHeight} pageBackground={effectivePageBackground} theme={activeTheme}>
         <div style={{ width: pageWidth, background: effectivePageBackground }}>
-          <PagePreview width={pageWidth} cols={COLS} gap={gap} rowH={DEFAULT_ROW_H} items={items} currentPageId={currentPageId || undefined} background={effectivePageBackground} onNavigatePage={(pid) => {
-            if (!selectedProject) return;
-            setCurrentPageId(pid);
-            try { localStorage.setItem(`py_current_page_${selectedProject.id}`, pid); } catch { /* ignore */ }
-          }} />
+          <PagePreview
+            width={pageWidth}
+            cols={COLS}
+            gap={gap}
+            rowH={DEFAULT_ROW_H}
+            items={items}
+            currentPageId={currentPageId || undefined}
+            background={effectivePageBackground}
+            onNavigatePage={(pid) => {
+              if (!selectedProject) return;
+              setCurrentPageId(pid);
+              try { localStorage.setItem(`py_current_page_${selectedProject.id}`, pid); } catch { /* ignore */ }
+            }}
+            themeSnapshot={widgetThemeSnapshot}
+          />
         </div>
       </PreviewPopup>
 
@@ -932,7 +1142,7 @@ export default function EditorPage() {
             try {
               try { localStorage.setItem(`py_current_page_${selectedProject.id}`, currentPageId); } catch { /* ignore */ }
               setCurrentPageId(currentPageId);
-              setItems(getPageItems(selectedProject.id, currentPageId) as GridItem[]);
+              replaceItems(getPageItems(selectedProject.id, currentPageId) as GridItem[]);
             } catch { /* ignore */ }
             setRenameModalOpen(false);
           }}
@@ -950,7 +1160,7 @@ export default function EditorPage() {
             const remaining = (selectedProject.pageOrder || []).filter(id => id !== currentPageId);
             const nextId = remaining[0] || null;
             setCurrentPageId(nextId);
-            if (nextId) setItems(getPageItems(selectedProject.id, nextId) as GridItem[]); else setItems([]);
+            if (nextId) replaceItems(getPageItems(selectedProject.id, nextId) as GridItem[]); else replaceItems([]);
           }}
         />
       )}

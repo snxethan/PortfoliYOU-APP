@@ -52,6 +52,7 @@ export type WidgetMeta = {
   tags?: string[]; // additional category tags to improve filtering
   keywords?: string[]; // search keywords surfaced by the palette search
   version?: number; // lightweight schema version for palette/creation flows
+  description?: string; // short hover text for palette/tooltips
 };
 
 export type WidgetLoader = () => Promise<WidgetDefinition<unknown> | { default: WidgetDefinition<unknown> }>;

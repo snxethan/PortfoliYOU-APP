@@ -1,8 +1,9 @@
-import { useRef, useState } from "react";
+import { memo, useRef, useState } from "react";
 import { Copy, Settings as SettingsIcon, Pin, PinOff, Trash2 } from "lucide-react";
 
 import WidgetRenderer from "../../../widgets/Renderer";
 import type { Theme } from "../../../themes/types";
+import type { WidgetThemeSnapshot } from "../../../widgets/theme";
 
 export type GridItem = {
   id: string;
@@ -28,7 +29,7 @@ export type GridMetrics = {
 
 
 
-export default function DraggableItem({ item, metrics, onMove, scrollEl, zoom, onDelete, onDuplicate, onMoveStart, onMoveEnd, onBringToFront, onSendToBack, onBringForward, onSendBackward, onTogglePin, onOpenModify, onDropAsset, selected, onSelect, theme }: {
+function DraggableItem({ item, metrics, onMove, scrollEl, zoom, onDelete, onDuplicate, onMoveStart, onMoveEnd, onBringToFront, onSendToBack, onBringForward, onSendBackward, onTogglePin, onOpenModify, onDropAsset, selected, onSelect, theme, themeSnapshot }: {
   item: GridItem;
   metrics: GridMetrics;
   onMove: (next: GridItem) => void;
@@ -48,6 +49,7 @@ export default function DraggableItem({ item, metrics, onMove, scrollEl, zoom, o
   selected?: boolean;
   onSelect?: (id: string) => void;
   theme?: Theme | null;
+  themeSnapshot?: WidgetThemeSnapshot | null;
 }) {
   // Prevent unused param lint when certain actions are intentionally not rendered in toolbar
   void onDelete; void onBringToFront; void onSendToBack; void onBringForward; void onSendBackward;
@@ -275,6 +277,7 @@ export default function DraggableItem({ item, metrics, onMove, scrollEl, zoom, o
               editing
               interactive={false}
               theme={theme}
+              themeSnapshot={themeSnapshot}
               onChangeProps={(partial) => {
                 const nextProps = { ...((item.props as Record<string, unknown>) ?? {}), ...partial };
                 onMove({ ...item, props: nextProps });
@@ -305,3 +308,5 @@ export default function DraggableItem({ item, metrics, onMove, scrollEl, zoom, o
     </div>
   );
 }
+
+export default memo(DraggableItem);

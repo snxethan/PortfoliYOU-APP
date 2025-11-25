@@ -3,8 +3,9 @@ import { useDroppable } from "@dnd-kit/core";
 
 import DraggableItem, { GridItem, GridMetrics } from "./DraggableItem";
 import type { Theme } from "../../../themes/types";
+import type { WidgetThemeSnapshot } from "../../../widgets/theme";
 
-export default function GridCanvas({ pageWidth, zoom, cols, gap, rowH, items, onChange, scrollEl, viewportHeight, onDelete, onDuplicate, onItemMoveStart, onItemMoveEnd, onBringToFront, onSendToBack, onBringForward, onSendBackward, onTogglePin, onOpenModify, onDropAsset, showGrid, selectedId, onSelect, theme }: {
+export default function GridCanvas({ pageWidth, zoom, cols, gap, rowH, items, onChange, scrollEl, viewportHeight, onDelete, onDuplicate, onItemMoveStart, onItemMoveEnd, onBringToFront, onSendToBack, onBringForward, onSendBackward, onTogglePin, onOpenModify, onDropAsset, showGrid, selectedId, onSelect, theme, themeSnapshot }: {
   pageWidth: number;
   zoom: number;
   cols: number;
@@ -29,6 +30,7 @@ export default function GridCanvas({ pageWidth, zoom, cols, gap, rowH, items, on
   selectedId?: string | null;
   onSelect?: (id: string | null) => void;
   theme?: Theme | null;
+  themeSnapshot?: WidgetThemeSnapshot | null;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: 'grid-canvas' });
   const zoomFactor = zoom || 1;
@@ -109,6 +111,7 @@ export default function GridCanvas({ pageWidth, zoom, cols, gap, rowH, items, on
           onTogglePin={onTogglePin}
           onOpenModify={onOpenModify}
           theme={theme}
+          themeSnapshot={themeSnapshot}
           selected={selectedId === it.id}
           onSelect={(id) => onSelect?.(id)}
           onDropAsset={onDropAsset}

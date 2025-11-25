@@ -14,6 +14,16 @@ declare global {
       fetchText: (options: { url: string; headers?: Record<string, string> }) => Promise<{ ok: boolean; text?: string; error?: string }>;
       flashFrame: (options?: { durationMs?: number; urgent?: boolean }) => Promise<{ ok: boolean; error?: string }>;
       stopFlashFrame: () => Promise<{ ok: boolean; error?: string }>;
+      // Window controls
+      windowMinimize?: () => Promise<{ ok: boolean }>;
+      windowMaximize?: () => Promise<{ ok: boolean; maximized?: boolean }>;
+      windowUnmaximize?: () => Promise<{ ok: boolean; maximized?: boolean }>;
+      windowToggleMaximize?: () => Promise<{ ok: boolean; maximized?: boolean }>;
+      windowIsMaximized?: () => Promise<{ ok: boolean; maximized?: boolean }>;
+      windowClose?: () => Promise<{ ok: boolean }>;
+      onWindowEvent?: (eventName: string, cb: (data: any) => void) => () => void;
+      openDevTools?: (options?: { mode?: 'right' | 'bottom' | 'undocked' }) => Promise<{ ok: boolean; error?: string }>;
+      toggleDevTools?: () => Promise<{ ok: boolean; error?: string }>;
     };
   }
 }

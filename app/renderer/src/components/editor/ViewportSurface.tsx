@@ -6,6 +6,7 @@ import PagePreview from "./PagePreview";
 import GridCanvas from "./canvas/GridCanvas";
 import type { GridItem } from "./canvas/GridCanvas";
 import { themeToCssVars, FALLBACK_THEME } from "../../themes/utils";
+import { getWidgetThemeSnapshot, type WidgetThemeSnapshot } from "../../widgets/theme";
 type ThemeVarsStyle = React.CSSProperties & Record<string, string>;
 
 export type ViewportSurfaceProps = {
@@ -48,6 +49,7 @@ export type ViewportSurfaceProps = {
     onZoomChange: (value: number) => void;
     pageBackground: string;
     theme?: Theme | null;
+    themeSnapshot?: WidgetThemeSnapshot | null;
 };
 
 export default function ViewportSurface(props: ViewportSurfaceProps) {
@@ -85,6 +87,7 @@ export default function ViewportSurface(props: ViewportSurfaceProps) {
         onZoomChange,
         pageBackground,
         theme,
+        themeSnapshot,
     } = props;
 
     const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -96,6 +99,7 @@ export default function ViewportSurface(props: ViewportSurfaceProps) {
         }
         return style;
     }, [theme]);
+    const widgetThemeSnapshot = useMemo(() => themeSnapshot ?? getWidgetThemeSnapshot(theme), [themeSnapshot, theme]);
 
     // Compute preview content height (same math as PagePreview) to allow expand mode to grow beyond pageHeight
     const previewContentRows = useMemo(() => {
@@ -125,10 +129,15 @@ export default function ViewportSurface(props: ViewportSurfaceProps) {
     }, [zoom, onZoomChange, clampZoomValue]);
     const scaledWidth = pageWidth * zoom;
     const scaledHeight = logicalHeight * zoom;
+    // Outer scroll behavior: when heightMode is 'fixed' the inner canvas should handle scrolling
+    // to avoid showing two scrollbars (one on the outer container and one on the inner canvas).
+    const outerClass = heightMode === 'fixed'
+        ? 'p-2 min-w-0 h-full overflow-hidden'
+        : 'p-2 min-w-0 overflow-auto scrollable scrollable-container';
     const canvasBackground = pageBackground || '#ffffff';
 
     return (
-        <div ref={scrollRef} className="p-2 min-w-0 overflow-auto" onWheel={handleWheel}>
+        <div ref={scrollRef} className={outerClass} onWheel={handleWheel}>
             <div className="flex justify-center">
                 <div
                     className={"min-h-[28rem] border border-[color:var(--border)] shadow-sm rounded-md relative " + (heightMode === 'fixed' ? 'overflow-y-auto overflow-x-hidden' : 'overflow-visible')}
@@ -160,6 +169,7 @@ export default function ViewportSurface(props: ViewportSurfaceProps) {
                                     currentPageId={currentPageId}
                                     background={canvasBackground}
                                     onNavigatePage={onNavigatePage}
+                                    themeSnapshot={widgetThemeSnapshot}
                                 />
                             </PreviewIframe>
                         </div>
@@ -189,6 +199,7 @@ export default function ViewportSurface(props: ViewportSurfaceProps) {
                                 onTogglePin={onTogglePin}
                                 onOpenModify={onOpenModify}
                                 onDropAsset={onDropAsset}
+                                themeSnapshot={widgetThemeSnapshot}
                             />
                         </div>
                     )}

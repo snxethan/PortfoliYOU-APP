@@ -19,22 +19,34 @@ export default function AccountDashboard({
     highlight?: boolean;
 }) {
     return (
-        <div className={`surface p-5 ${highlight ? 'highlight-pulse' : ''}`}>
-            <div className="flex items-center justify-between mb-3">
-                <h3 className="font-semibold text-center flex-1 uppercase tracking-wide">ACCOUNT DASHBOARD</h3>
-                <button className="btn btn-ghost btn-xs" title="Account settings" onClick={onOpenSettings}>
-                    <SettingsIcon size={14} />
-                </button>
-            </div>
-            <div className="text-sm text-center "><span className="font-mono">{userDisplay}</span></div>
-            <div className="mt-3 grid grid-cols-2 gap-3 text-sm">
-                <div className="surface p-3 bg-[color:var(--muted)]/40 border border-[color:var(--border)] rounded-md">
-                    <div className="text-xs text-[color:var(--fg-muted)]">Cloud usage</div>
-                    <div className="mt-1 font-semibold">{usageMB} / {maxStorageMB} MB</div>
+        <div className={`surface border border-[color:var(--border)] rounded-2xl p-4 space-y-4 shadow-lg shadow-black/14 bg-[color:var(--surface)]/80 ${highlight ? 'highlight-pulse' : ''}`}>
+            <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-full bg-[color:var(--muted)]/40 border border-[color:var(--border)] flex items-center justify-center text-sm font-semibold">
+                        {userDisplay ? userDisplay.charAt(0).toUpperCase() : "U"}
+                    </div>
+                    <div>
+                        <p className="text-xs uppercase tracking-wide text-[color:var(--fg-muted)]">Account</p>
+                        <p className="text-sm text-[color:var(--fg)] mt-0.5 leading-tight truncate max-w-[18rem]">
+                            <span className="font-medium">{userDisplay}</span>
+                        </p>
+                    </div>
                 </div>
-                <div className="surface p-3 bg-[color:var(--muted)]/40 border border-[color:var(--border)] rounded-md">
-                    <div className="text-xs text-[color:var(--fg-muted)]">Cloud projects</div>
-                    <div className="mt-1 font-semibold">{projectCount} / {projectQuota}</div>
+                <div className="flex items-center gap-2">
+                    <button className="btn btn-sm shadow-sm" onClick={onOpenSettings} title="Manage account">
+                        <SettingsIcon size={14} />
+                        <span className="ml-2">Manage</span>
+                    </button>
+                </div>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+                <div className="rounded-xl border border-[color:var(--border)] bg-[color:var(--muted)]/40 p-4">
+                    <div className="text-xs text-[color:var(--fg-muted)] uppercase tracking-wide">Cloud usage</div>
+                    <div className="mt-2 text-lg font-semibold">{usageMB} <span className="text-xs text-[color:var(--fg-muted)]">/ {maxStorageMB} MB</span></div>
+                </div>
+                <div className="rounded-xl border border-[color:var(--border)] bg-[color:var(--muted)]/40 p-4">
+                    <div className="text-xs text-[color:var(--fg-muted)] uppercase tracking-wide">Cloud projects</div>
+                    <div className="mt-2 text-lg font-semibold">{projectCount} <span className="text-xs text-[color:var(--fg-muted)]">/ {projectQuota}</span></div>
                 </div>
             </div>
         </div>

@@ -9,7 +9,7 @@ import https from "node:https";
 import http from "node:http";
 import fs from "node:fs/promises";
 
-import { app, BrowserWindow, shell, ipcMain, dialog } from "electron";
+import { app, BrowserWindow, shell, ipcMain, dialog, Menu, clipboard } from "electron";
 
 const isDev = !!process.env.VITE_DEV_SERVER_URL;
 let win: BrowserWindow | null = null;
@@ -34,20 +34,119 @@ function create() {
 
   const iconPath = resolveIconPath();
   win = new BrowserWindow({
-    width: 1200, // sets the width of the window to 1200 pixels
-    height: 800, // sets the height of the window to 800 pixels
+    width: 1200,
+    height: 800,
+    minWidth: 900,
+    minHeight: 600,
+    frame: false,
     title: "Portfoli-YOU",
     icon: iconPath,
     webPreferences: {
-      // preload script runs before other scripts in the renderer process
-      // https://www.electronjs.org/docs/latest/api/browser-window#new-browserwindowoptions
       preload: path.join(__dirname, "../preload/index.js"),
-      contextIsolation: true, // 
+      contextIsolation: true,
       nodeIntegration: false,
     },
   });
   if (isDev) win!.loadURL(process.env.VITE_DEV_SERVER_URL!);
   else win!.loadFile(path.join(__dirname, "../renderer/index.html"));
+
+  // Emit window state events to renderer for live UI updates
+  win.webContents.once('did-finish-load', () => {
+    try {
+      win!.webContents.send('window-maximize-state', { maximized: win!.isMaximized() });
+      const b = win!.getBounds();
+      win!.webContents.send('window-move-top', { atTop: typeof b.y === 'number' && b.y <= 0 });
+    } catch { /* ignore */ }
+  });
+
+  win.on('maximize', () => {
+    try { win?.webContents.send('window-maximize', { maximized: true }); } catch { /* ignore */ }
+  });
+  win.on('unmaximize', () => {
+    try { win?.webContents.send('window-unmaximize', { maximized: false }); } catch { /* ignore */ }
+  });
+  // Emit move events so renderer can detect drag-to-top (for snap-to-maximize UI)
+  win.on('move', () => {
+    try {
+      const b = win!.getBounds();
+      const atTop = typeof b.y === 'number' && b.y <= 0;
+      win!.webContents.send('window-move-top', { atTop });
+    } catch { /* ignore */ }
+  });
+
+  // Application menu with standard Edit actions so Cut/Copy/Paste work with
+  // Ctrl/Cmd-X/C/V and other platform-appropriate shortcuts.
+  try {
+    const isMac = process.platform === 'darwin';
+    const template: any = [
+      // App menu (macOS)
+      ...(isMac ? [{
+        label: app.name,
+        submenu: [
+          { role: 'about' },
+          { type: 'separator' },
+          { role: 'services' },
+          { type: 'separator' },
+          { role: 'hide' },
+          { role: 'hideOthers' },
+          { role: 'unhide' },
+          { type: 'separator' },
+          { role: 'quit' }
+        ]
+      }] : []),
+
+      // File menu
+      {
+        label: 'File',
+        submenu: [
+          isMac ? { role: 'close' } : { role: 'quit' }
+        ]
+      },
+
+      // Edit menu with standard clipboard actions
+      {
+        label: 'Edit',
+        submenu: [
+          { role: 'undo' },
+          { role: 'redo' },
+          { type: 'separator' },
+          { role: 'cut' },
+          { role: 'copy' },
+          { role: 'paste' },
+          ...(isMac ? [
+            { role: 'pasteAndMatchStyle' },
+            { role: 'delete' },
+            { role: 'selectAll' }
+          ] : [
+            { role: 'delete' },
+            { type: 'separator' },
+            { role: 'selectAll' }
+          ])
+        ]
+      },
+
+      // View menu useful for dev
+      {
+        label: 'View',
+        submenu: [
+          { role: 'reload' },
+          { role: 'forceReload' },
+          { role: 'toggleDevTools' },
+          { type: 'separator' },
+          { role: 'resetZoom' },
+          { role: 'zoomIn' },
+          { role: 'zoomOut' },
+          { type: 'separator' },
+          { role: 'toggleFullScreen' }
+        ]
+      }
+    ];
+    const menu = Menu.buildFromTemplate(template);
+    Menu.setApplicationMenu(menu);
+  } catch (e) {
+    // If menu setup fails, ignore — app still works but clipboard shortcuts might
+    // rely on default behavior.
+  }
 
   // Ensure Windows Taskbar grouping and notifications show proper identity
   try { app.setAppUserModelId("dev.snxethan.portfoliyou"); } catch { /* ignore */ }
@@ -104,6 +203,61 @@ function create() {
       }
       if (flashTimer) { clearTimeout(flashTimer); flashTimer = null; }
     } catch { /* ignore */ }
+  });
+
+  // Window control IPC handlers
+  ipcMain.handle('py:window:minimize', () => {
+    const w = BrowserWindow.getFocusedWindow() || win;
+    if (w) { w.minimize(); return { ok: true }; }
+    return { ok: false };
+  });
+  ipcMain.handle('py:window:maximize', () => {
+    const w = BrowserWindow.getFocusedWindow() || win;
+    if (w && !w.isMaximized()) { w.maximize(); return { ok: true, maximized: true }; }
+    return { ok: false, maximized: false };
+  });
+  ipcMain.handle('py:window:unmaximize', () => {
+    const w = BrowserWindow.getFocusedWindow() || win;
+    if (w && w.isMaximized()) { w.unmaximize(); return { ok: true, maximized: false }; }
+    return { ok: false, maximized: false };
+  });
+  ipcMain.handle('py:window:toggleMaximize', () => {
+    const w = BrowserWindow.getFocusedWindow() || win;
+    if (!w) return { ok: false };
+    if (w.isMaximized()) { w.unmaximize(); return { ok: true, maximized: false }; }
+    w.maximize(); return { ok: true, maximized: true };
+  });
+  ipcMain.handle('py:window:isMaximized', () => {
+    const w = BrowserWindow.getFocusedWindow() || win;
+    return { ok: true, maximized: !!w && w.isMaximized() };
+  });
+  ipcMain.handle('py:window:close', () => {
+    const w = BrowserWindow.getFocusedWindow() || win;
+    if (w) { w.close(); return { ok: true }; }
+    return { ok: false };
+  });
+
+  // Open/Toggle DevTools for focused window
+  ipcMain.handle('py:window:openDevTools', (_event, opts?: { mode?: 'right' | 'bottom' | 'undocked' }) => {
+    const w = BrowserWindow.getFocusedWindow() || win;
+    if (!w) return { ok: false };
+    try {
+      w.webContents.openDevTools({ mode: (opts && opts.mode) || 'right' });
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, error: String(e) };
+    }
+  });
+  ipcMain.handle('py:window:toggleDevTools', () => {
+    const w = BrowserWindow.getFocusedWindow() || win;
+    if (!w) return { ok: false };
+    try {
+      if (w.webContents.isDevToolsOpened()) w.webContents.closeDevTools();
+      else w.webContents.openDevTools({ mode: 'right' });
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, error: String(e) };
+    }
   });
 }
 
@@ -185,6 +339,26 @@ ipcMain.handle("py:writeFileBytes", async (_event, opts?: { filePath: string; da
   if (!filePath) return { ok: false, error: "No filePath" };
   await fs.writeFile(filePath, dataBase64, { encoding: 'base64' });
   return { ok: true };
+});
+
+// IPC: system clipboard write/read (string)
+ipcMain.handle('py:clipboardWrite', async (_event, opts?: { text: string }) => {
+  try {
+    if (!opts || typeof opts.text !== 'string') return { ok: false, error: 'No text' };
+    clipboard.writeText(opts.text);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: String(e) };
+  }
+});
+
+ipcMain.handle('py:clipboardRead', async () => {
+  try {
+    const text = clipboard.readText();
+    return { ok: true, text };
+  } catch (e) {
+    return { ok: false, error: String(e) };
+  }
 });
 
 // IPC: Delete a file

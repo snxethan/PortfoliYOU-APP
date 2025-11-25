@@ -42,7 +42,7 @@ function TextViewComp(p: { text: string; variant?: TextVariant; align?: TextAlig
 
     const html = useMemo(() => {
         if ((p.format || 'plain') !== 'markdown') return null;
-        const raw = marked.parse(p.text || '', { mangle: false, headerIds: false });
+        const raw = marked.parse(p.text || '');
         const safe = DOMPurify.sanitize(String(raw));
         return safe;
     }, [p.text, p.format]);

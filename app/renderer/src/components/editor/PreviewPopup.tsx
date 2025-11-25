@@ -43,8 +43,9 @@ export default function PreviewPopup({
     applyThemeToElement(root, nextTheme);
     applyThemeToElement(body, nextTheme);
     if (pageBackground) {
-      body.style.backgroundColor = pageBackground;
-      root.style.setProperty('--bg', pageBackground);
+      try { root.style.backgroundColor = pageBackground; } catch { /* ignore */ }
+      try { body.style.backgroundColor = pageBackground; } catch { /* ignore */ }
+      try { root.style.setProperty('--bg', pageBackground); } catch { /* ignore */ }
     }
   };
 
@@ -68,10 +69,11 @@ export default function PreviewPopup({
     const doc = win.document;
     doc.open();
     const bg = pageBackground || '#ffffff';
+    // Ensure the document sets full-viewport sizing and initial theme tokens.
     doc.write(`<!doctype html><html><head><meta charset="utf-8" /><title>${title}</title>
 <style>
-  html, body { height: 100%; margin: 0; }
-  body { background: ${bg}; color: #111827; font: 14px/1.4 ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, Noto Sans, "Apple Color Emoji", "Segoe UI Emoji"; overflow-x: hidden; overflow-y: auto; }
+  html, body { height: 100%; width: 100%; margin: 0; }
+  body { color: #111827; font: 14px/1.4 ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, Noto Sans, "Apple Color Emoji", "Segoe UI Emoji"; overflow-x: hidden; overflow-y: auto; }
   :root {
     --bg: #ffffff;
     --surface: #ffffff;
@@ -82,7 +84,8 @@ export default function PreviewPopup({
     --primary: #06b6d4;
     --accent: #06b6d4;
   }
-  #__preview_root { min-height: 100%; display: flex; justify-content: center; align-items: flex-start; padding: 16px; box-sizing: border-box; }
+  /* Root container fills the viewport; children may be centered within it */
+  #__preview_root { min-height: 100vh; width: 100vw; display: flex; justify-content: center; align-items: flex-start; padding: 16px; box-sizing: border-box; }
 </style>
 </head><body><div id="__preview_root"></div></body></html>`);
     doc.close();

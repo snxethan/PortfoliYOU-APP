@@ -94,7 +94,7 @@ export default function ThemeSettingsModal({ open, onClose }: ThemeSettingsModal
       role="dialog"
       aria-modal="true"
     >
-      <div className="flex items-start justify-between gap-4 border-b border-[color:var(--border)] pb-4">
+      <div className="flex items-start justify-between gap-4 border-b border-[color:var(--border)] pb-4 modal-header-sticky">
         <div className="flex-1 min-w-0">
           <p className="text-xs uppercase tracking-wide text-[color:var(--fg-muted)]">Theme engine</p>
           {hasTheme ? (

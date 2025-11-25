@@ -49,15 +49,15 @@ function renderPreview(type: string) {
   );
 }
 
-function DraggablePaletteTile({ type, label, w, h, schemaVersion }: { type: string; label: string; w: number; h: number; schemaVersion?: number }) {
+function DraggablePaletteTile({ type, label, w, h, schemaVersion, description }: { type: string; label: string; w: number; h: number; schemaVersion?: number; description?: string }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: `palette:${type}`, data: { src: 'palette', type, w, h, label, schemaVersion } });
   return (
     <div
       ref={setNodeRef}
       {...listeners}
       {...attributes}
-      className={`aspect-square rounded-md bg-[color:var(--muted)]/30 border border-[color:var(--border)] cursor-grab flex flex-col items-stretch justify-between text-center ${isDragging ? 'opacity-60' : ''}`}
-      title={`Drag to canvas · ${w}x${h}`}
+      className={`aspect-square rounded-md bg-[color:var(--muted)]/30 border border-[color:var(--border)] cursor-grab flex flex-col items-stretch justify-between text-center transition hover-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--accent)] ${isDragging ? 'opacity-60' : ''}`}
+      title={description ? `${description} · ${w}x${h}` : `Drag to canvas · ${w}x${h}`}
       role="button"
       aria-label={`Add ${label} widget`}
       tabIndex={0}
@@ -121,7 +121,6 @@ function WidgetsPalette() {
   return (
     <div>
       <div className="flex items-center gap-2 text-sm font-medium mb-2">
-        <Boxes size={16} /> Widgets
       </div>
       <div className="mb-2">
         <div className="relative">
@@ -152,7 +151,7 @@ function WidgetsPalette() {
               </button>
               {isOpen && (
                 <div className="p-2">
-                  <div className="grid grid-cols-2 gap-2">
+                  <div className="grid gap-2" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))' }}>
                     {list.map(def => (
                       <DraggablePaletteTile
                         key={def.type}
@@ -161,6 +160,7 @@ function WidgetsPalette() {
                         w={def.grid?.w ?? 4}
                         h={def.grid?.h ?? 4}
                         schemaVersion={def.version}
+                        description={def.description}
                       />
                     ))}
                   </div>

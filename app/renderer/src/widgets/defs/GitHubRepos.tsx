@@ -220,7 +220,7 @@ function GitHubReposView(props: GitHubReposProps) {
             <div
                 role="list"
                 aria-label="Repository list"
-                className={`flex-1 overflow-auto ${layout === 'cards' ? 'grid grid-cols-1 gap-3 md:grid-cols-2' : 'flex flex-col gap-2'}`}
+                className={`flex-1 overflow-auto scrollable scrollable-container ${layout === 'cards' ? 'grid grid-cols-1 gap-3 md:grid-cols-2' : 'flex flex-col gap-2'}`}
             >
                 {loading && repos.length === 0 ? (
                     <SkeletonList layout={layout} count={maxItems} />

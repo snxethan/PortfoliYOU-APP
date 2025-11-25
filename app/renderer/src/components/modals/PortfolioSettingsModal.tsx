@@ -274,7 +274,7 @@ export default function PortfolioSettingsModal({ open, mode, projectId, cloudId,
 
     if (!open) return null;
 
-    const submitLabel = mode === "create" ? "Create & Save" : "Save changes";
+    const submitLabel = mode === "create" ? "Create & Save" : "Save";
 
     const handleSave = async () => {
         setFormError(null);
@@ -661,9 +661,8 @@ export default function PortfolioSettingsModal({ open, mode, projectId, cloudId,
                     {formError && <div className="text-sm text-red-500">{formError}</div>}
                 </div>
                 <div className="flex items-center justify-end gap-2 px-4 py-3 border-t border-[color:var(--border)]">
-                    <button className="btn btn-outline" onClick={onClose} disabled={savingDraft}>Cancel</button>
                     <button
-                        className="btn btn-primary"
+                        className="btn btn-outline btn-xs"
                         onClick={handleSave}
                         disabled={savingDraft}
                         data-testid={mode === "create" ? 'confirm-create-btn' : undefined}
