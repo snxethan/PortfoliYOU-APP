@@ -21,5 +21,15 @@ service firebase.storage {
       // Allow deletes by owner for convenience; functions also bypass rules via Admin SDK
       allow delete: if isOwner() && projectDoc().data.ownerUid == uid;
     }
+
+    // User assets (content-hash keyed)
+    match /users/{uid}/assets/{hash} {
+      function isOwner() {
+        return request.auth != null && request.auth.uid == uid;
+      }
+      allow read: if isOwner();
+      allow write: if isOwner();
+      allow delete: if isOwner();
+    }
   }
 }

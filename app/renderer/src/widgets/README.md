@@ -1,0 +1,57 @@
+# Widget SDK
+
+This folder provides a small SDK to define and develop widgets for the editor.
+
+## Runtime contracts
+
+- `WidgetDefinition<P>`: type, label, defaultProps, optional `grid` (w,h), optional `schema`, and a pure `render(props)`.
+- `WidgetInstance<P>`: id, type, props. Use `WidgetRenderer` to render lazily via the registry.
+
+## Registry
+
+- Register widgets with lazy loading in `widgets/loader.ts`:
+
+```ts
+WidgetsRegistry.register(
+  {
+    type: 'text',
+    label: 'Text Block',
+    grid: { w: 4, h: 3 },
+    category: 'Content',
+    tags: ['content', 'copy'],
+    keywords: ['paragraph', 'body'],
+  },
+  () => import('./defs/Text').then(m => m.default)
+);
+```
+
+- Metadata shape: `type`, `label`, optional `grid`, optional `category`, optional `tags`, optional `keywords`.
+- Palette search considers all of the above metadata, so keep tags/keywords human-readable.
+- The palette lists `WidgetsRegistry.list()` metadata and does not load components until rendering.
+
+## SDK utilities
+
+- `validateProps(schema, props, defaults?)` → merges defaults, validates types, and returns `{ ok, errors, value }`.
+- `useWidgetConfig(def, incoming?)` → React hook to manage a widget's props with optional schema validation. Returns `{ config, set, patch, reset, errors }`.
+
+### Prop schema
+
+```ts
+const schema: PropSchema = {
+  text: { type: 'string', required: true, default: 'Edit me' },
+  align: { type: 'string', default: 'left', validate: v => ['left','center','right'].includes(String(v)) || 'align must be left|center|right' },
+};
+```
+
+## Templates
+
+See `widgets/templates/` for example `TextWidget` and `ImageWidget` templates including a basic Config Panel that uses `useWidgetConfig`.
+
+- `templates/TextWidget.tsx`
+- `templates/ImageWidget.tsx`
+
+These are examples and not automatically registered; copy and adapt when creating new widgets.
+
+## Developer Guide
+
+For a full step-by-step guide on adding a new widget to the registry and best practices (naming, schema, categories), see `docs/widgets-dev.md` at the repo root.
