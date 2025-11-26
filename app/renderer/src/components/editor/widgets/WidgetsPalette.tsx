@@ -1,6 +1,6 @@
 import { useDraggable } from '@dnd-kit/core';
 import type { LucideIcon } from 'lucide-react';
-import { Boxes, Search, ChevronDown, ChevronRight, Image as ImageIcon, Mail, Type as TypeIcon, Compass, GalleryHorizontalEnd, Layers, Frame, LayoutGrid, AppWindow, Play, Link2, Github } from 'lucide-react';
+import { /* Boxes */ Search, ChevronDown, ChevronRight, Image as ImageIcon, Mail, Type as TypeIcon, Compass, GalleryHorizontalEnd, Layers, Frame, LayoutGrid, AppWindow, Play, Link2, Github } from 'lucide-react';
 import React, { memo, useEffect, useMemo, useState } from 'react';
 
 import { WidgetsRegistry } from '../../../widgets/registry';

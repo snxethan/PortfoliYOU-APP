@@ -26,7 +26,7 @@ export interface WidgetDefinition<P = unknown> {
 }
 
 export type WidgetMigrationPayload<P = unknown> = {
-  props: unknown;
+  props: P;
   fromVersion: number;
   toVersion: number;
 };

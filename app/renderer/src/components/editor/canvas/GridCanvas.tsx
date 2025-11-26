@@ -1,9 +1,10 @@
 import { useMemo } from "react";
 import { useDroppable } from "@dnd-kit/core";
 
-import DraggableItem, { GridItem, GridMetrics } from "./DraggableItem";
 import type { Theme } from "../../../themes/types";
 import type { WidgetThemeSnapshot } from "../../../widgets/theme";
+
+import DraggableItem, { GridItem, GridMetrics } from "./DraggableItem";
 
 export default function GridCanvas({ pageWidth, zoom, cols, gap, rowH, items, onChange, scrollEl, viewportHeight, onDelete, onDuplicate, onItemMoveStart, onItemMoveEnd, onBringToFront, onSendToBack, onBringForward, onSendBackward, onTogglePin, onOpenModify, onDropAsset, showGrid, selectedId, onSelect, theme, themeSnapshot }: {
   pageWidth: number;

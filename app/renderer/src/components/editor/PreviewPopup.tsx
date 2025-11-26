@@ -68,7 +68,6 @@ export default function PreviewPopup({
     // Write minimal HTML + base styles and scroll behavior
     const doc = win.document;
     doc.open();
-    const bg = pageBackground || '#ffffff';
     // Ensure the document sets full-viewport sizing and initial theme tokens.
     doc.write(`<!doctype html><html><head><meta charset="utf-8" /><title>${title}</title>
 <style>

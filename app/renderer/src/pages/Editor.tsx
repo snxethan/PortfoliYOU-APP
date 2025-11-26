@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useLayoutEffect, lazy, Suspense } from "react";
-import { useNavigate } from "react-router-dom";
 import { ChevronsLeft, ChevronsRight, ChevronDown, ChevronRight, GripVertical } from "lucide-react";
 import { DndContext, PointerSensor, MouseSensor, TouchSensor, useSensor, useSensors, DragEndEvent, DragStartEvent, rectIntersection, DragOverlay, type Modifier } from "@dnd-kit/core";
 
@@ -40,7 +39,6 @@ export default function EditorPage() {
   const { selectedProject, createPage, deletePage, renamePage, getPageItems, setPageItems, setPageStarter, setPageBackground, activeTheme } = useProjects();
   const { add: notify } = useNotifications();
   const { openSettings } = usePortfolioSettings();
-  const navigate = useNavigate();
 
   const notifyWidgetChange = useCallback((action: 'create' | 'delete', label?: string) => {
     const title = (label && label.trim()) || 'Widget';
@@ -374,12 +372,12 @@ export default function EditorPage() {
               }
               return v;
             });
-          } catch (e) { return null; }
+          } catch { return null; }
         };
         const payload = src ? safeStringify(src) : '';
         if (payload !== null) {
-          if ((window as any).api?.clipboardWrite) {
-            (window as any).api.clipboardWrite({ text: marker + payload });
+          if (window.api?.clipboardWrite) {
+            void window.api.clipboardWrite({ text: marker + payload });
           } else {
             try { navigator.clipboard?.writeText(marker + payload); } catch { /* ignore */ }
           }
@@ -406,12 +404,12 @@ export default function EditorPage() {
               }
               return v;
             });
-          } catch (e) { return null; }
+          } catch { return null; }
         };
         const payload = src ? safeStringify(src) : '';
         if (payload !== null) {
-          if ((window as any).api?.clipboardWrite) {
-            (window as any).api.clipboardWrite({ text: marker + payload });
+          if (window.api?.clipboardWrite) {
+            void window.api.clipboardWrite({ text: marker + payload });
           } else {
             try { navigator.clipboard?.writeText(marker + payload); } catch { /* ignore */ }
           }
@@ -432,8 +430,8 @@ export default function EditorPage() {
       // Try system clipboard first
       let payloadText: string | null = null;
       try {
-        if ((window as any).api?.clipboardRead) {
-          const res = await (window as any).api.clipboardRead();
+        if (window.api?.clipboardRead) {
+          const res = await window.api.clipboardRead();
           if (res && res.ok && typeof res.text === 'string') payloadText = res.text;
         } else {
           try { payloadText = await navigator.clipboard?.readText(); } catch { payloadText = null; }
@@ -810,7 +808,7 @@ export default function EditorPage() {
           collisionDetection={rectIntersection}
           onDragStart={(event: DragStartEvent) => {
             const data = event.active.data.current as PaletteDrag;
-            try { console.debug('[py:dnd] dragstart activeId=', event.active.id, 'data=', data); } catch { }
+            try { console.debug('[py:dnd] dragstart activeId=', event.active.id, 'data=', data); } catch { /* ignore */ }
             if (data?.src === 'palette') {
               setActiveDrag(data);
               const pointerEvent = event.activatorEvent as PointerEvent | undefined;
@@ -823,7 +821,7 @@ export default function EditorPage() {
             }
           }}
           onDragMove={(event) => {
-            try { console.debug('[py:dnd] dragmove delta=', event.delta, 'activeId=', event.active?.id); } catch { }
+            try { console.debug('[py:dnd] dragmove delta=', event.delta, 'activeId=', event.active?.id); } catch { /* ignore */ }
             if (dragPointerStart.current) {
               dragPointerLast.current = {
                 x: dragPointerStart.current.x + event.delta.x,
@@ -838,9 +836,9 @@ export default function EditorPage() {
           }}
           onDragEnd={(event: DragEndEvent) => {
             const { active, over } = event;
-            try { console.debug('[py:dnd] dragend active=', active?.id, 'over=', over?.id); } catch { }
+            try { console.debug('[py:dnd] dragend active=', active?.id, 'over=', over?.id); } catch { /* ignore */ }
             if (!over) {
-              try { console.debug('[py:dnd] dragend: no droppable target'); } catch { }
+              try { console.debug('[py:dnd] dragend: no droppable target'); } catch { /* ignore */ }
               setActiveDrag(undefined);
               dragPointerStart.current = null;
               dragPointerLast.current = null;
@@ -904,7 +902,7 @@ export default function EditorPage() {
             className="h-full grid gap-0 min-h-[28rem] items-stretch"
             style={{
               gridTemplateColumns: paletteCollapsed ? 'minmax(0,1fr) 32px' : `minmax(0,1fr) ${Math.round(paletteWidth)}px`,
-              ...(canvasHeightPx ? { ['--canvas-h' as any]: `${canvasHeightPx}px` } : {}),
+              ...(canvasHeightPx ? ({ ['--canvas-h' as unknown as string]: `${canvasHeightPx}px` } as React.CSSProperties) : {}),
             }}
             onKeyDown={onKeyDown}
             tabIndex={0}

@@ -454,15 +454,15 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 					};
 					// Post message; transfer buffers to avoid copy
 					try {
-						const transfer = assetList.map(a => a.buffer);
-						(worker as any).postMessage(msg, transfer);
+						const transfer = assetList.map(a => a.buffer) as Transferable[];
+						(worker as Worker).postMessage(msg, transfer);
 					} catch (err) {
 						worker.terminate();
 						reject(err);
 					}
 				});
 				return base64;
-			} catch (err) {
+			} catch {
 				// fallback to in-thread path below
 			}
 		}

@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Layers, Pin, PinOff, Lock, Unlock, ChevronsUp, ChevronsDown, ChevronUp, ChevronDown, ChevronRight, X, Trash2 } from "lucide-react";
+import { Pin, PinOff, Lock, Unlock, ChevronsUp, ChevronsDown, ChevronUp, ChevronDown, ChevronRight, X, Trash2 } from "lucide-react";
 import { z } from "zod";
 
 import { useAssets } from "../../../providers/AssetsProvider";
@@ -243,7 +243,7 @@ export default function ModifyWidgetModal({
     // ensures the UI shows the proper controls (e.g. textColor color picker)
     // when editing nav-link widgets.
     const navStyle = (defType === 'nav-link')
-        ? String((formValues['style'] as string) ?? ((item.props as any)?.style as string) ?? 'link')
+        ? String((formValues['style'] as string) ?? ((item.props as unknown as Record<string, unknown>)?.style as string) ?? 'link')
         : undefined;
     const videoBackgroundColorValue = typeof formValues.backgroundColor === 'string' ? formValues.backgroundColor : '';
     const videoBackgroundColorSwatch = HEX_COLOR_RE.test(videoBackgroundColorValue) ? videoBackgroundColorValue : '#ffffff';

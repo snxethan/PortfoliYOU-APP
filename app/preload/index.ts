@@ -72,12 +72,12 @@ contextBridge.exposeInMainWorld("api", {
 		return ipcRenderer.invoke('py:window:toggleDevTools');
 	},
 	// Subscribe to window events emitted by main (returns an unsubscribe function)
-	onWindowEvent: (eventName: string, cb: (data: any) => void) => {
+	onWindowEvent: (eventName: string, cb: (data: unknown) => void) => {
 		const allowed = ['window-maximize', 'window-unmaximize', 'window-move-top', 'window-maximize-state'];
 		if (!allowed.includes(eventName)) return () => { };
-		const handler = (_: any, data: any) => cb(data);
-		ipcRenderer.on(eventName, handler);
-		return () => { ipcRenderer.removeListener(eventName, handler); };
+		const handler = (_: Electron.IpcRendererEvent, data: unknown) => cb(data);
+		ipcRenderer.on(eventName, handler as unknown as (...args: unknown[]) => void);
+		return () => { ipcRenderer.removeListener(eventName, handler as unknown as (...args: unknown[]) => void); };
 	},
 	// Clipboard
 	clipboardWrite: async (options: { text: string }) => {

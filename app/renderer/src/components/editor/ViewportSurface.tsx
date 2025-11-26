@@ -1,12 +1,13 @@
 import React, { useCallback, useMemo, useRef } from "react";
 
 import type { Theme } from "../../themes/types";
+import { themeToCssVars, FALLBACK_THEME } from "../../themes/utils";
+import { getWidgetThemeSnapshot, type WidgetThemeSnapshot } from "../../widgets/theme";
+
 import PreviewIframe from "./PreviewIframe";
 import PagePreview from "./PagePreview";
 import GridCanvas from "./canvas/GridCanvas";
 import type { GridItem } from "./canvas/GridCanvas";
-import { themeToCssVars, FALLBACK_THEME } from "../../themes/utils";
-import { getWidgetThemeSnapshot, type WidgetThemeSnapshot } from "../../widgets/theme";
 type ThemeVarsStyle = React.CSSProperties & Record<string, string>;
 
 export type ViewportSurfaceProps = {

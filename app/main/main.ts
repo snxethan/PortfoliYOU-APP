@@ -137,13 +137,13 @@ function create() {
           { role: 'zoomIn' },
           { role: 'zoomOut' },
           { type: 'separator' },
-          { role: 'toggleFullScreen' }
+          { role: 'togglefullscreen' }
         ]
       }
     ];
     const menu = Menu.buildFromTemplate(template);
     Menu.setApplicationMenu(menu);
-  } catch (e) {
+  } catch {
     // If menu setup fails, ignore — app still works but clipboard shortcuts might
     // rely on default behavior.
   }

@@ -151,9 +151,11 @@
 		@apply inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-[color:var(--accent)] text-black;
 	}
 
+
 	.section-title {
-		@apply text-lg font-semibold;
-		color: var(--fg-strong, var(--fg));
+		@apply text-xs uppercase font-semibold tracking-normal text-[color:var(--fg-muted)] mb-1;
+		letter-spacing: 0.02em;
+		color: var(--fg-muted);
 	}
 
 	.section-subtitle {

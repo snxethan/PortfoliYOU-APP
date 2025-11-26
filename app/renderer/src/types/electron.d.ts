@@ -21,7 +21,9 @@ declare global {
       windowToggleMaximize?: () => Promise<{ ok: boolean; maximized?: boolean }>;
       windowIsMaximized?: () => Promise<{ ok: boolean; maximized?: boolean }>;
       windowClose?: () => Promise<{ ok: boolean }>;
-      onWindowEvent?: (eventName: string, cb: (data: any) => void) => () => void;
+      onWindowEvent?: (eventName: string, cb: (data: unknown) => void) => () => void;
+      clipboardWrite?: (options: { text: string }) => Promise<{ ok: boolean; error?: string }>;
+      clipboardRead?: () => Promise<{ ok: boolean; text?: string; error?: string }>;
       openDevTools?: (options?: { mode?: 'right' | 'bottom' | 'undocked' }) => Promise<{ ok: boolean; error?: string }>;
       toggleDevTools?: () => Promise<{ ok: boolean; error?: string }>;
     };

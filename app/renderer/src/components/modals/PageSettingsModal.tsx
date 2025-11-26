@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { createPortal } from 'react-dom';
-import { Layers, X, RotateCcw } from 'lucide-react';
+import { X, RotateCcw } from 'lucide-react';
 
 export default function PageSettingsModal({
     title = "Page settings",

@@ -100,9 +100,9 @@ export default function HomePage() {
 			}
 		};
 		const onAccount = (ev: Event) => {
-			const detail = (ev as CustomEvent | undefined)?.detail as any;
+			const detail = (ev as CustomEvent | undefined)?.detail as unknown;
 			// If event originated from Home itself, ignore to avoid double-highlighting
-			if (detail && detail.origin === 'home') return;
+			if (detail && typeof (detail as Record<string, unknown>).origin === 'string' && (detail as Record<string, unknown>).origin === 'home') return;
 			accountRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
 			triggerPulse(setPulseAccount, 'acc');
 		};

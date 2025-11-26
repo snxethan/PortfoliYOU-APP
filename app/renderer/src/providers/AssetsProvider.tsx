@@ -82,7 +82,7 @@ export function AssetsProvider({ children }: { children: React.ReactNode }) {
                 const nextMeta = { ...meta, projectId: pid };
                 await idbPut(stores.STORE_META, hash, nextMeta);
                 results.push(nextMeta);
-            } catch (err) {
+            } catch {
                 // Fallback: write original meta and continue
                 await idbPut(stores.STORE_META, hash, meta);
                 results.push(meta);

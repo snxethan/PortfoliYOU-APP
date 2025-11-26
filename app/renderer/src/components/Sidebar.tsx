@@ -47,15 +47,15 @@ export default function Sidebar() {
       });
     };
     const onPulse = (ev: Event) => {
-      const detail = (ev as CustomEvent | undefined)?.detail as any;
+      const detail = (ev as CustomEvent | undefined)?.detail as unknown;
       // If event originated from the sidebar itself, ignore to avoid double-highlighting
-      if (detail && detail.origin === 'sidebar') return;
+      if (detail && typeof (detail as Record<string, unknown>).origin === 'string' && (detail as Record<string, unknown>).origin === 'sidebar') return;
       triggerPulse(setPulseAccount, 'acc');
     };
     window.addEventListener('py:highlight-account', onPulse);
     return () => { window.removeEventListener('py:highlight-account', onPulse); clearTimer('acc'); };
   }, []);
-  const zoomViewport = 'calc(100vh / var(--py-app-zoom, 1))';
+  // zoomViewport removed — unused
   return (
     <aside
       className="fixed left-0 top-9 bottom-0 border-r border-[color:var(--border)] bg-[color:var(--muted)] flex flex-col"

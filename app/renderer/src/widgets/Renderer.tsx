@@ -1,9 +1,10 @@
 import React, { useEffect, useMemo, useState } from 'react';
 
+import type { Theme } from '../themes/types';
+
 import { WidgetsRegistry } from './registry';
 import type { WidgetDefinition, WidgetInstance } from './types';
 import { WidgetContext, validateProps } from './sdk';
-import type { Theme } from '../themes/types';
 import { getWidgetThemeSnapshot, type WidgetThemeSnapshot } from './theme';
 
 type PreparedWidgetProps = {
