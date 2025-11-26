@@ -238,6 +238,10 @@ export default function ModifyWidgetModal({
     const videoBorderRadiusValue = typeof rawBorderRadius === 'number' && Number.isFinite(rawBorderRadius) ? rawBorderRadius : '';
     const videoBorderColorValue = (typeof formValues.borderColor === 'string' && /^#([0-9a-fA-F]{3}){1,2}$/.test(formValues.borderColor)) ? formValues.borderColor : '#e5e7eb';
     const videoBorderStyleValue = (typeof formValues.borderStyle === 'string' ? formValues.borderStyle : 'solid') as 'solid' | 'dashed' | 'dotted';
+    // Carousel uses `radius` instead of `borderRadius` in its schema
+    const carouselShapeValue = videoShapeValue;
+    const rawCarouselRadius = formValues.radius;
+    const carouselRadiusValue = typeof rawCarouselRadius === 'number' && Number.isFinite(rawCarouselRadius) ? rawCarouselRadius : '';
     // Derive navStyle from the current form values first, then fall back to the
     // original item props (in case the form hasn't been populated yet). This
     // ensures the UI shows the proper controls (e.g. textColor color picker)
@@ -881,7 +885,102 @@ export default function ModifyWidgetModal({
                                                         ))}
                                                     </select>
                                                 </div>
+                                                <div className="pt-3 border-t border-[color:var(--border)] space-y-2">
+                                                    <div className="text-[color:var(--fg-muted)] font-medium">Appearance</div>
+                                                    <div>
+                                                        <label className="block text-[color:var(--fg-muted)] text-xs mb-1">Shape</label>
+                                                        <div className="flex flex-wrap gap-2">
+                                                            {(['rectangle', 'rounded', 'circle'] as const).map((shape) => (
+                                                                <button
+                                                                    key={shape}
+                                                                    type="button"
+                                                                    className={`px-3 py-1.5 rounded border text-xs font-semibold transition ${videoShapeValue === shape ? 'bg-[color:var(--accent)]/20 border-[color:var(--accent)] text-[color:var(--accent)]' : 'border-[color:var(--border)] text-[color:var(--fg-muted)] bg-[color:var(--surface)]'}`}
+                                                                    onClick={() => setFieldValue('shape', shape)}
+                                                                    disabled={locked}
+                                                                >
+                                                                    {shape.charAt(0).toUpperCase() + shape.slice(1)}
+                                                                </button>
+                                                            ))}
+                                                        </div>
+                                                        {formErrors.shape && <div className="text-red-500 text-xs mt-1">{formErrors.shape}</div>}
+                                                    </div>
+                                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                                        <div>
+                                                            <label className="block text-[color:var(--fg-muted)] text-xs mb-1">Border width (px)</label>
+                                                            <input
+                                                                className="input w-full"
+                                                                type="number"
+                                                                min={0}
+                                                                max={48}
+                                                                step={1}
+                                                                value={videoBorderWidthValue === '' ? '' : videoBorderWidthValue}
+                                                                onChange={(e) => {
+                                                                    const raw = e.target.value;
+                                                                    setFieldValue('borderWidth', raw === '' ? undefined : Number(raw));
+                                                                }}
+                                                                onKeyDown={handleEnterSubmitComp}
+                                                                disabled={locked}
+                                                            />
+                                                            {formErrors.borderWidth && <div className="text-red-500 text-xs mt-1">{formErrors.borderWidth}</div>}
+                                                        </div>
+                                                        <div>
+                                                            <label className="block text-[color:var(--fg-muted)] text-xs mb-1">Border radius (px)</label>
+                                                            <input
+                                                                className="input w-full"
+                                                                type="number"
+                                                                min={0}
+                                                                max={240}
+                                                                step={1}
+                                                                value={videoBorderRadiusValue === '' ? '' : videoBorderRadiusValue}
+                                                                onChange={(e) => {
+                                                                    const raw = e.target.value;
+                                                                    setFieldValue('borderRadius', raw === '' ? undefined : Number(raw));
+                                                                }}
+                                                                onKeyDown={handleEnterSubmitComp}
+                                                                disabled={locked}
+                                                            />
+                                                            {formErrors.borderRadius && <div className="text-red-500 text-xs mt-1">{formErrors.borderRadius}</div>}
+                                                        </div>
+                                                    </div>
+                                                    <div>
+                                                        <label className="block text-[color:var(--fg-muted)] text-xs mb-1">Border style</label>
+                                                        <select
+                                                            className="input w-full"
+                                                            value={videoBorderStyleValue}
+                                                            onChange={(e) => setFieldValue('borderStyle', e.target.value)}
+                                                            disabled={locked}
+                                                        >
+                                                            <option value="solid">Solid</option>
+                                                            <option value="dashed">Dashed</option>
+                                                            <option value="dotted">Dotted</option>
+                                                        </select>
+                                                        {formErrors.borderStyle && <div className="text-red-500 text-xs mt-1">{formErrors.borderStyle}</div>}
+                                                    </div>
+                                                    <div>
+                                                        <label className="block text-[color:var(--fg-muted)] text-xs mb-1">Border color</label>
+                                                        <div className="flex items-center gap-2">
+                                                            <input
+                                                                type="color"
+                                                                className="rounded border border-[color:var(--border)] bg-[color:var(--muted)]/40 h-8 w-12 cursor-pointer"
+                                                                value={videoBorderColorValue}
+                                                                onChange={(e) => setFieldValue('borderColor', e.target.value)}
+                                                                disabled={locked}
+                                                                aria-label="Border color"
+                                                            />
+                                                            <input
+                                                                className="input flex-1 font-mono text-xs"
+                                                                value={typeof formValues.borderColor === 'string' ? formValues.borderColor : ''}
+                                                                onChange={(e) => setFieldValue('borderColor', e.target.value)}
+                                                                onKeyDown={handleEnterSubmitComp}
+                                                                placeholder="#e5e7eb"
+                                                                disabled={locked}
+                                                            />
+                                                        </div>
+                                                        {formErrors.borderColor && <div className="text-red-500 text-xs mt-1">{formErrors.borderColor}</div>}
+                                                    </div>
+                                                </div>
                                             </div>
+
                                         )}
                                     </div>
                                 )}
@@ -1180,6 +1279,8 @@ export default function ModifyWidgetModal({
                                                             if (slide.mediaType === 'video') return asset.type?.startsWith('video/');
                                                             return asset.type?.startsWith('image/');
                                                         });
+                                                        const assetHashForSlide = (typeof slide.source === 'string' && slide.source.startsWith('asset://')) ? slide.source.slice('asset://'.length) : '';
+                                                        const currentAsset = assetHashForSlide ? assets.list.find(a => a.hash === assetHashForSlide) : null;
                                                         return (
                                                             <div key={slide.id} className="border border-[color:var(--border)] rounded-md p-3 bg-[color:var(--surface)] shadow-sm space-y-2">
                                                                 <div className="flex items-center justify-between text-xs font-medium">
@@ -1213,26 +1314,66 @@ export default function ModifyWidgetModal({
                                                                         disabled={locked}
                                                                     />
                                                                 </div>
-                                                                {assetOptions.length > 0 && (
-                                                                    <div>
-                                                                        <label className="block text-[color:var(--fg-muted)] text-xs mb-1">Pick from assets</label>
-                                                                        <select
-                                                                            className="input w-full"
-                                                                            value=""
-                                                                            onChange={(e) => {
-                                                                                const hash = e.target.value;
-                                                                                if (!hash) return;
-                                                                                updateCarouselItem(slide.id, { source: `asset://${hash}` });
-                                                                            }}
-                                                                            disabled={locked}
-                                                                        >
-                                                                            <option value="">Select asset…</option>
-                                                                            {assetOptions.map((asset) => (
-                                                                                <option key={asset.hash} value={asset.hash}>{asset.name}</option>
-                                                                            ))}
-                                                                        </select>
+                                                                <div>
+                                                                    {/** always allow uploading a file for a slide (image or video) */}
+                                                                    <div className="flex items-center gap-2 mb-2">
+                                                                        <label className={`inline-flex items-center justify-center px-3 py-1.5 rounded border border-dashed border-[color:var(--border)] bg-[color:var(--muted)]/40 ${locked ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}>
+                                                                            <span className="font-semibold">Upload</span>
+                                                                            <input
+                                                                                type="file"
+                                                                                accept={slide.mediaType === 'video' ? 'video/*' : 'image/*'}
+                                                                                className="sr-only"
+                                                                                disabled={locked}
+                                                                                onChange={async (e) => {
+                                                                                    const file = e.target.files?.[0];
+                                                                                    e.currentTarget.value = '';
+                                                                                    if (!file) return;
+                                                                                    try {
+                                                                                        const metas = await assets.addFiles([file]);
+                                                                                        const meta = metas[0];
+                                                                                        if (meta?.hash) updateCarouselItem(slide.id, { source: `asset://${meta.hash}` });
+                                                                                    } catch (err) {
+                                                                                        console.error('Slide upload failed', err);
+                                                                                    }
+                                                                                }}
+                                                                            />
+                                                                        </label>
+                                                                        <span className="px-2 py-1 rounded border border-[color:var(--border)] bg-[color:var(--muted)]/20 text-[color:var(--fg-muted)]">{currentAsset?.name ?? ((typeof slide.source === 'string' && slide.source.startsWith('asset://')) ? `asset://${assetHashForSlide}` : (slide.source || 'No file chosen'))}</span>
                                                                     </div>
-                                                                )}
+                                                                    {slide.mediaType === 'image' && imageAssetOptions.length > 0 && (
+                                                                        <div>
+                                                                            <label className="block text-[color:var(--fg-muted)] text-xs mb-1">Pick from image assets</label>
+                                                                            <select
+                                                                                className="input w-full"
+                                                                                value={assetHashForSlide}
+                                                                                onChange={(e) => {
+                                                                                    const hash = e.target.value;
+                                                                                    if (!hash) return;
+                                                                                    updateCarouselItem(slide.id, { source: `asset://${hash}` });
+                                                                                }}
+                                                                                disabled={locked}
+                                                                            >
+                                                                                <option value="">Select an image asset…</option>
+                                                                                {imageAssetOptions.map((asset) => (
+                                                                                    <option key={asset.hash} value={asset.hash}>{asset.name}</option>
+                                                                                ))}
+                                                                            </select>
+                                                                        </div>
+                                                                    )}
+                                                                    {slide.mediaType === 'image' && (
+                                                                        <div className="mt-2">
+                                                                            <label className="block text-[color:var(--fg-muted)] text-xs mb-1">Paste image link</label>
+                                                                            <input
+                                                                                className="input w-full"
+                                                                                type="url"
+                                                                                placeholder="https://example.com/image.jpg"
+                                                                                value={typeof slide.source === 'string' && !slide.source.startsWith('asset://') ? slide.source : ''}
+                                                                                onChange={(e) => updateCarouselItem(slide.id, { source: e.target.value })}
+                                                                                disabled={locked}
+                                                                            />
+                                                                        </div>
+                                                                    )}
+                                                                </div>
                                                                 {slide.mediaType === 'image' && (
                                                                     <div>
                                                                         <label className="block text-[color:var(--fg-muted)] text-xs mb-1">Alt text</label>
@@ -1242,7 +1383,55 @@ export default function ModifyWidgetModal({
                                                                 {slide.mediaType === 'video' && (
                                                                     <div>
                                                                         <label className="block text-[color:var(--fg-muted)] text-xs mb-1">Poster image (optional)</label>
-                                                                        <input className="input w-full" value={slide.poster || ''} onChange={(e) => updateCarouselItem(slide.id, { poster: e.target.value })} placeholder="asset://hash or URL" disabled={locked} />
+                                                                        <div className="flex items-center gap-2 mb-2">
+                                                                            <label className={`inline-flex items-center justify-center px-3 py-1.5 rounded border border-dashed border-[color:var(--border)] bg-[color:var(--muted)]/40 ${locked ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}>
+                                                                                <span className="font-semibold">Upload</span>
+                                                                                <input
+                                                                                    type="file"
+                                                                                    accept="image/*"
+                                                                                    className="sr-only"
+                                                                                    disabled={locked}
+                                                                                    onChange={async (e) => {
+                                                                                        const file = e.target.files?.[0];
+                                                                                        e.currentTarget.value = '';
+                                                                                        if (!file) return;
+                                                                                        try {
+                                                                                            const metas = await assets.addFiles([file]);
+                                                                                            const meta = metas[0];
+                                                                                            if (meta?.hash) updateCarouselItem(slide.id, { poster: `asset://${meta.hash}` });
+                                                                                        } catch (err) {
+                                                                                            console.error('Poster upload failed', err);
+                                                                                        }
+                                                                                    }}
+                                                                                />
+                                                                            </label>
+                                                                            <span className="px-2 py-1 rounded border border-[color:var(--border)] bg-[color:var(--muted)]/20 text-[color:var(--fg-muted)]">{(typeof slide.poster === 'string' && slide.poster.startsWith('asset://')) ? slide.poster.slice('asset://'.length) : (slide.poster || 'No poster')}</span>
+                                                                        </div>
+                                                                        {imageAssetOptions.length > 0 && (
+                                                                            <div>
+                                                                                <label className="block text-[color:var(--fg-muted)] text-xs mb-1">Pick from assets</label>
+                                                                                <select
+                                                                                    className="input w-full"
+                                                                                    value={(() => {
+                                                                                        const p = slide.poster;
+                                                                                        if (typeof p === 'string' && p.startsWith('asset://')) return p.slice('asset://'.length);
+                                                                                        return '';
+                                                                                    })()}
+                                                                                    disabled={locked}
+                                                                                    onChange={(e) => {
+                                                                                        const hash = e.target.value;
+                                                                                        if (!hash) return;
+                                                                                        updateCarouselItem(slide.id, { poster: `asset://${hash}` });
+                                                                                    }}
+                                                                                >
+                                                                                    <option value="">Select an image asset…</option>
+                                                                                    {imageAssetOptions.map((asset) => (
+                                                                                        <option key={asset.hash} value={asset.hash}>{asset.name}</option>
+                                                                                    ))}
+                                                                                </select>
+                                                                            </div>
+                                                                        )}
+                                                                        <input className="input w-full mt-2" value={slide.poster || ''} onChange={(e) => updateCarouselItem(slide.id, { poster: e.target.value })} placeholder="asset://hash or URL" disabled={locked} />
                                                                     </div>
                                                                 )}
                                                                 <div>
@@ -1252,6 +1441,121 @@ export default function ModifyWidgetModal({
                                                             </div>
                                                         );
                                                     })}
+                                                </div>
+                                                <div className="pt-3 border-t border-[color:var(--border)] space-y-2">
+                                                    <div className="text-[color:var(--fg-muted)] font-medium">Appearance</div>
+                                                    <div>
+                                                        <label className="block text-[color:var(--fg-muted)] text-xs mb-1">Background color</label>
+                                                        <div className="flex items-center gap-2">
+                                                            <input
+                                                                type="color"
+                                                                className="rounded border border-[color:var(--border)] bg-[color:var(--muted)]/40 h-8 w-12 cursor-pointer"
+                                                                value={videoBackgroundColorSwatch}
+                                                                onChange={(e) => setFieldValue('backgroundColor', e.target.value)}
+                                                                disabled={locked}
+                                                                aria-label="Background color"
+                                                            />
+                                                            <input
+                                                                className="input flex-1 font-mono text-xs"
+                                                                value={videoBackgroundColorValue}
+                                                                onChange={(e) => setFieldValue('backgroundColor', e.target.value)}
+                                                                onKeyDown={handleEnterSubmitComp}
+                                                                placeholder="var(--surface)"
+                                                                disabled={locked}
+                                                            />
+                                                        </div>
+                                                    </div>
+                                                    <div>
+                                                        <label className="block text-[color:var(--fg-muted)] text-xs mb-1">Shape</label>
+                                                        <div className="flex flex-wrap gap-2">
+                                                            {(['rectangle', 'rounded', 'circle'] as const).map((shape) => (
+                                                                <button
+                                                                    key={shape}
+                                                                    type="button"
+                                                                    className={`px-3 py-1.5 rounded border text-xs font-semibold transition ${carouselShapeValue === shape ? 'bg-[color:var(--accent)]/20 border-[color:var(--accent)] text-[color:var(--accent)]' : 'border-[color:var(--border)] text-[color:var(--fg-muted)] bg-[color:var(--surface)]'}`}
+                                                                    onClick={() => setFieldValue('shape', shape)}
+                                                                    disabled={locked}
+                                                                >
+                                                                    {shape.charAt(0).toUpperCase() + shape.slice(1)}
+                                                                </button>
+                                                            ))}
+                                                        </div>
+                                                        {formErrors.shape && <div className="text-red-500 text-xs mt-1">{formErrors.shape}</div>}
+                                                    </div>
+                                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                                        <div>
+                                                            <label className="block text-[color:var(--fg-muted)] text-xs mb-1">Border width (px)</label>
+                                                            <input
+                                                                className="input w-full"
+                                                                type="number"
+                                                                min={0}
+                                                                max={48}
+                                                                step={1}
+                                                                value={videoBorderWidthValue === '' ? '' : videoBorderWidthValue}
+                                                                onChange={(e) => {
+                                                                    const raw = e.target.value;
+                                                                    setFieldValue('borderWidth', raw === '' ? undefined : Number(raw));
+                                                                }}
+                                                                onKeyDown={handleEnterSubmitComp}
+                                                                disabled={locked}
+                                                            />
+                                                            {formErrors.borderWidth && <div className="text-red-500 text-xs mt-1">{formErrors.borderWidth}</div>}
+                                                        </div>
+                                                        <div>
+                                                            <label className="block text-[color:var(--fg-muted)] text-xs mb-1">Radius (px)</label>
+                                                            <input
+                                                                className="input w-full"
+                                                                type="number"
+                                                                min={0}
+                                                                max={240}
+                                                                step={1}
+                                                                value={carouselRadiusValue === '' ? '' : carouselRadiusValue}
+                                                                onChange={(e) => {
+                                                                    const raw = e.target.value;
+                                                                    setFieldValue('radius', raw === '' ? undefined : Number(raw));
+                                                                }}
+                                                                onKeyDown={handleEnterSubmitComp}
+                                                                disabled={locked}
+                                                            />
+                                                            {formErrors.radius && <div className="text-red-500 text-xs mt-1">{formErrors.radius}</div>}
+                                                        </div>
+                                                    </div>
+                                                    <div>
+                                                        <label className="block text-[color:var(--fg-muted)] text-xs mb-1">Border style</label>
+                                                        <select
+                                                            className="input w-full"
+                                                            value={videoBorderStyleValue}
+                                                            onChange={(e) => setFieldValue('borderStyle', e.target.value)}
+                                                            disabled={locked}
+                                                        >
+                                                            <option value="solid">Solid</option>
+                                                            <option value="dashed">Dashed</option>
+                                                            <option value="dotted">Dotted</option>
+                                                        </select>
+                                                        {formErrors.borderStyle && <div className="text-red-500 text-xs mt-1">{formErrors.borderStyle}</div>}
+                                                    </div>
+                                                    <div>
+                                                        <label className="block text-[color:var(--fg-muted)] text-xs mb-1">Border color</label>
+                                                        <div className="flex items-center gap-2">
+                                                            <input
+                                                                type="color"
+                                                                className="rounded border border-[color:var(--border)] bg-[color:var(--muted)]/40 h-8 w-12 cursor-pointer"
+                                                                value={videoBorderColorValue}
+                                                                onChange={(e) => setFieldValue('borderColor', e.target.value)}
+                                                                disabled={locked}
+                                                                aria-label="Border color"
+                                                            />
+                                                            <input
+                                                                className="input flex-1 font-mono text-xs"
+                                                                value={typeof formValues.borderColor === 'string' ? formValues.borderColor : ''}
+                                                                onChange={(e) => setFieldValue('borderColor', e.target.value)}
+                                                                onKeyDown={handleEnterSubmitComp}
+                                                                placeholder="#e5e7eb"
+                                                                disabled={locked}
+                                                            />
+                                                        </div>
+                                                        {formErrors.borderColor && <div className="text-red-500 text-xs mt-1">{formErrors.borderColor}</div>}
+                                                    </div>
                                                 </div>
                                                 {carouselError && (
                                                     <div className="text-red-500 text-xs">{carouselError}</div>

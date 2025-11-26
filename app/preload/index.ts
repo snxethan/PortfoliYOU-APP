@@ -15,6 +15,13 @@ contextBridge.exposeInMainWorld("api", {
 	openFileDialog: async (options: { filters?: { name: string; extensions: string[] }[] }) => {
 		return ipcRenderer.invoke("py:openFileDialog", options);
 	},
+	// Open a folder picker and return selected directory
+	openFolderDialog: async () => {
+		return ipcRenderer.invoke("py:openFolderDialog");
+	},
+	openPath: async (options: { path: string }) => {
+		return ipcRenderer.invoke('py:openPath', options);
+	},
 	// Open a file dialog and read the file as base64 bytes
 	openFileDialogBytes: async (options: { filters?: { name: string; extensions: string[] }[] }) => {
 		return ipcRenderer.invoke("py:openFileDialogBytes", options);
@@ -42,6 +49,22 @@ contextBridge.exposeInMainWorld("api", {
 	// Request taskbar/dock attention (flash) for notifications
 	flashFrame: async (options?: { durationMs?: number; urgent?: boolean }) => {
 		return ipcRenderer.invoke("py:flashFrame", options || {});
+	},
+	// Build static site from project JSON + assets (assets base64 map)
+	buildStaticSite: async (options: { project: unknown; assets: Record<string, string>; outputDir?: string }) => {
+		return ipcRenderer.invoke('py:buildStaticSite', options || {});
+	},
+	// Zip a directory and return base64 ZIP
+	zipDir: async (options: { dir: string }) => {
+		return ipcRenderer.invoke('py:zipDir', options || {});
+	},
+	// Embed a built folder (dist-site) into a PortfoliYOU project archive
+	embedDistIntoProject: async (options: { projectFilePath?: string; distDir?: string; defaultName?: string }) => {
+		return ipcRenderer.invoke('py:embedDistIntoProject', options || {});
+	},
+	// Resolve a .portfoliyou file for a given path (file or directory)
+	findProjectFile: async (options: { path?: string }) => {
+		return ipcRenderer.invoke('py:findProjectFile', options || {});
 	},
 	stopFlashFrame: async () => {
 		return ipcRenderer.invoke("py:stopFlashFrame");

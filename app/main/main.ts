@@ -322,6 +322,16 @@ ipcMain.handle("py:openFileDialogBytes", async (_event, opts: { filters?: { name
   return { canceled: false, filePath, dataBase64 };
 });
 
+// IPC: Open folder picker (select or create a directory)
+ipcMain.handle('py:openFolderDialog', async () => {
+  const result = await dialog.showOpenDialog({
+    title: 'Select export folder',
+    properties: ['openDirectory', 'createDirectory'],
+  });
+  if (result.canceled || !result.filePaths?.[0]) return { canceled: true };
+  return { canceled: false, filePath: result.filePaths[0] };
+});
+
 // IPC: Write directly to file path
 ipcMain.handle("py:writeFile", async (_event, opts?: { filePath: string; data: string; encoding?: 'utf8' | 'base64' }) => {
   const filePath = opts?.filePath ?? "";
@@ -385,6 +395,20 @@ ipcMain.handle("py:showItemInFolder", async (_event, opts?: { filePath: string }
   }
 });
 
+// IPC: Open a folder or file path with the OS default handler (useful to open folders)
+ipcMain.handle('py:openPath', async (_event, opts?: { path: string }) => {
+  const p = opts?.path ?? '';
+  if (!p) return { ok: false, error: 'No path' };
+  try {
+    const res = await shell.openPath(p);
+    // shell.openPath returns empty string on success
+    if (typeof res === 'string' && res.length > 0) return { ok: false, error: res };
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: String(e) };
+  }
+});
+
 // IPC: Rename/move a file
 ipcMain.handle("py:renameFile", async (_event, opts?: { fromPath: string; toPath: string }) => {
   const fromPath = opts?.fromPath ?? "";
@@ -393,6 +417,145 @@ ipcMain.handle("py:renameFile", async (_event, opts?: { fromPath: string; toPath
   try {
     await fs.rename(fromPath, toPath);
     return { ok: true };
+  } catch (e) {
+    return { ok: false, error: String(e) };
+  }
+});
+
+// IPC: Build static site
+ipcMain.handle('py:buildStaticSite', async (_event, opts?: { project: unknown; assets?: Record<string, string>; outputDir?: string; useTempOutput?: boolean }) => {
+  try {
+    const { buildStaticSite } = await import('./staticCompiler');
+    // cast to any to avoid compile-time type mismatches across the IPC boundary
+    const res = await buildStaticSite(opts as any);
+    return res;
+  } catch (e) {
+    return { ok: false, error: String(e) };
+  }
+});
+
+// IPC: Embed a built folder (e.g. dist-site) into a PortfoliYOU project archive (.portfoliyou)
+ipcMain.handle('py:embedDistIntoProject', async (_event, opts?: { projectFilePath?: string; distDir?: string; defaultName?: string }) => {
+  try {
+    const projectFilePath = opts?.projectFilePath || '';
+    const distDir = opts?.distDir || '';
+    const defaultName = opts?.defaultName || 'project.portfoliyou';
+    if (!distDir) return { ok: false, error: 'No distDir' };
+    const JSZip = await import('jszip');
+    const zip = new JSZip.default();
+
+    // If an existing project file was provided and exists, load it first so we merge
+    let targetPath: string | undefined;
+    if (projectFilePath) {
+      try {
+        const buf = await fs.readFile(projectFilePath);
+        const existing = await JSZip.default.loadAsync(buf);
+        // Merge existing into our zip object by copying entries
+        existing.forEach((relativePath: string, file: any) => {
+          // We'll let dist-site additions overwrite any existing entries with same path later
+          if (file.dir) {
+            zip.folder(relativePath);
+          } else {
+            // read as node buffer asynchronously when generating final
+            zip.file(relativePath, file.async ? file.async('nodebuffer') : file);
+          }
+        });
+        targetPath = projectFilePath;
+      } catch (e) {
+        // If loading fails, continue with empty zip and allow save-as
+        targetPath = undefined;
+      }
+    }
+
+    // Helper to recursively add files from distDir into zip under 'dist-site' folder
+    async function addFolderToZip(folderPath: string, zipFolder: any, baseRoot: string) {
+      const entries = await fs.readdir(folderPath, { withFileTypes: true });
+      for (const ent of entries) {
+        const full = path.join(folderPath, ent.name);
+        if (ent.isDirectory()) {
+          const child = zipFolder.folder(ent.name);
+          await addFolderToZip(full, child, baseRoot);
+        } else if (ent.isFile()) {
+          const buf = await fs.readFile(full);
+          zipFolder.file(ent.name, buf);
+        }
+      }
+    }
+
+    // Add dist-site directory into a folder named 'dist-site' at zip root
+    const stats = await fs.stat(distDir).catch(() => null);
+    if (!stats || !stats.isDirectory()) return { ok: false, error: 'distDir not a directory' };
+    const distFolder = zip.folder('dist-site');
+    await addFolderToZip(distDir, distFolder, distDir);
+
+    // If we have a target path, overwrite existing file; otherwise prompt save dialog
+    const content = await zip.generateAsync({ type: 'nodebuffer' });
+    if (targetPath) {
+      await fs.writeFile(targetPath, content);
+      return { ok: true, filePath: targetPath };
+    } else {
+      const result = await dialog.showSaveDialog({
+        title: 'Save PortfoliYOU project with embedded build',
+        defaultPath: defaultName,
+        filters: [{ name: 'PortfoliYOU', extensions: ['portfoliyou', 'zip'] }],
+      });
+      if (result.canceled || !result.filePath) return { canceled: true };
+      await fs.writeFile(result.filePath, content);
+      return { ok: true, filePath: result.filePath };
+    }
+  } catch (e) {
+    return { ok: false, error: String(e) };
+  }
+});
+
+// IPC: Try to resolve a .portfoliyou file for a given path.
+ipcMain.handle('py:findProjectFile', async (_event, opts?: { path?: string }) => {
+  try {
+    const p = opts?.path || '';
+    if (!p) return { ok: false, error: 'No path' };
+    const stat = await fs.stat(p).catch(() => null);
+    // If it's a file and already a .portfoliyou, return it
+    if (stat && stat.isFile() && p.toLowerCase().endsWith('.portfoliyou')) return { ok: true, filePath: p };
+    // If it's a directory, search for any .portfoliyou file inside
+    let dir = '';
+    if (stat && stat.isDirectory()) dir = p;
+    else dir = path.dirname(p);
+    const entries = await fs.readdir(dir).catch(() => []);
+    for (const e of entries) {
+      if (e.toLowerCase().endsWith('.portfoliyou')) {
+        return { ok: true, filePath: path.join(dir, e) };
+      }
+    }
+    return { ok: false };
+  } catch (e) {
+    return { ok: false, error: String(e) };
+  }
+});
+
+// IPC: Zip a directory and return base64
+ipcMain.handle('py:zipDir', async (_event, opts?: { dir: string }) => {
+  try {
+    const dir = opts?.dir || '';
+    if (!dir) return { ok: false, error: 'No dir' };
+    const JSZip = await import('jszip');
+    const zip = new JSZip.default();
+    // Recursively add files
+    async function addFolder(folderPath: string, zipFolder: any) {
+      const entries = await fs.readdir(folderPath, { withFileTypes: true });
+      for (const ent of entries) {
+        const full = path.join(folderPath, ent.name);
+        if (ent.isDirectory()) {
+          const child = zipFolder.folder(ent.name);
+          await addFolder(full, child);
+        } else if (ent.isFile()) {
+          const buf = await fs.readFile(full);
+          zipFolder.file(ent.name, buf);
+        }
+      }
+    }
+    await addFolder(dir, zip);
+    const content = await zip.generateAsync({ type: 'base64' });
+    return { ok: true, dataBase64: content };
   } catch (e) {
     return { ok: false, error: String(e) };
   }
