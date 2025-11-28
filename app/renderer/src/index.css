@@ -33,6 +33,11 @@
 		--accent-700: #ea580c;
 
 
+		/* Semantic success / danger colors (used by preview stop and status badges) */
+		--success: #10b981;
+		--danger: #ef4444;
+
+
 		--focus: 0 0 0 3px rgba(6, 182, 212, 0.35);
 		--widget-bg: #10192b;
 		--widget-fg: #e6f0ff;
@@ -505,6 +510,7 @@
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
+	line-height: 0;
 	/* slightly larger hit area so corner clicks hit the control */
 	width: 40px;
 	height: 40px;
@@ -512,6 +518,38 @@
 	border: 1px solid transparent;
 	background: transparent;
 	color: var(--fg);
+}
+
+.window-control svg {
+	display: block;
+	width: 12px;
+	height: 12px;
+	max-width: 100%;
+	max-height: 100%;
+	margin: 0;
+	/* vertical-align not needed for block-level SVG */
+}
+
+/* Slight visual nudge for the close icon to sit visually centered
+   relative to the other icons. This compensates for differing glyph shapes. */
+.window-control--close svg {
+	/* no visual nudge here — keep icons visually consistent */
+	transform: none;
+}
+
+/* Keyboard focus should show the same highlight as hover */
+.window-control:focus,
+.window-control:focus-visible {
+	outline: none;
+	background: color-mix(in oklab, var(--muted) 75%, var(--accent) 10%);
+	border-color: color-mix(in oklab, var(--border) 85%, transparent);
+}
+
+.window-control--close:focus,
+.window-control--close:focus-visible {
+	outline: none;
+	background: #c2410c;
+	color: #fff;
 }
 
 .window-control:hover {

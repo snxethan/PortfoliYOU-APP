@@ -20,6 +20,11 @@ export interface WidgetDefinition<P = unknown> {
     h: number;
   };
   render: (props: P) => ReactNode;  // pure render function
+  // Optional helper to produce CSS used when compiling a static site.
+  // If provided, it should return either a full CSS string (may contain selectors)
+  // or a declaration block (e.g. "color: red; font-size: 16px;") which the
+  // static compiler will scope to the widget instance selector.
+  getStaticCss?: (props: P, instanceId?: string) => string | Promise<string>;
   schema?: PropSchema;   // legacy optional prop schema for validation tools
   zodSchema?: z.ZodObject<z.ZodRawShape>; // preferred: zod schema for properties UI/validation
   migrate?: WidgetMigrateFn<P>; // optional migration hook when stored version lags

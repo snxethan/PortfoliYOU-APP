@@ -111,14 +111,39 @@ export function NotificationStack() {
       ) : null}
       {visible.map(n => {
         const Wrapper: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-          if (n.href) {
+          if (!n.href) return <>{children}</>;
+          // If href looks like a local file path, open via native API rather than anchor.
+          const isLocalPath = typeof n.href === 'string' && (n.href.startsWith('file://') || /^[a-zA-Z]:\\/.test(n.href) || n.href.startsWith('\\') || n.href.startsWith('/'));
+          if (isLocalPath) {
             return (
-              <a href={n.href} target="_blank" rel="noreferrer" className="no-underline">
+              <div
+                role="button"
+                tabIndex={0}
+                onClick={async (e) => {
+                  e.preventDefault();
+                  try {
+                    // prefer openPath -> opens folder or file
+                    if ((window as any).api?.openPath) {
+                      await (window as any).api.openPath({ path: n.href.replace(/^file:\/\//, '') });
+                    } else if ((window as any).api?.showItemInFolder) {
+                      await (window as any).api.showItemInFolder({ filePath: n.href.replace(/^file:\/\//, '') });
+                    } else {
+                      // fallback: try anchor navigation
+                      window.open(n.href, '_blank');
+                    }
+                  } catch { /* ignore */ }
+                }}
+                className="cursor-pointer"
+              >
                 {children}
-              </a>
+              </div>
             );
           }
-          return <>{children}</>;
+          return (
+            <a href={n.href} target="_blank" rel="noreferrer" className="no-underline">
+              {children}
+            </a>
+          );
         };
         return (
           <div key={n.id} className={`surface py-fade-in border ${typeClasses(n.type)} pointer-events-auto shadow-lg`}>
@@ -136,9 +161,35 @@ export function NotificationStack() {
                 ) : null}
                 {n.href ? (
                   <div className="mt-1">
-                    <a href={n.href} target="_blank" rel="noreferrer" className="text-xs link-accent">
-                      {n.ctaLabel || 'Open link'}
-                    </a>
+                    {(() => {
+                      const isLocalPath = typeof n.href === 'string' && (n.href.startsWith('file://') || /^[a-zA-Z]:\\/.test(n.href) || n.href.startsWith('\\') || n.href.startsWith('/'));
+                      if (isLocalPath) {
+                        return (
+                          <button
+                            type="button"
+                            className="text-xs link-accent"
+                            onClick={async (e) => {
+                              try {
+                                if ((window as any).api?.openPath) {
+                                  await (window as any).api.openPath({ path: n.href.replace(/^file:\/\//, '') });
+                                } else if ((window as any).api?.showItemInFolder) {
+                                  await (window as any).api.showItemInFolder({ filePath: n.href.replace(/^file:\/\//, '') });
+                                } else {
+                                  window.open(n.href, '_blank');
+                                }
+                              } catch { /* ignore */ }
+                            }}
+                          >
+                            {n.ctaLabel || 'Open'}
+                          </button>
+                        );
+                      }
+                      return (
+                        <a href={n.href} target="_blank" rel="noreferrer" className="text-xs link-accent">
+                          {n.ctaLabel || 'Open link'}
+                        </a>
+                      );
+                    })()}
                   </div>
                 ) : null}
               </div>

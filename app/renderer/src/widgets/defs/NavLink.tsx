@@ -129,6 +129,12 @@ const def: WidgetDefinition<NavLinkProps> = {
         fontSize: z.number().min(8).max(128).optional(),
     }),
     render: (props) => <NavLinkView {...props} />,
+    getStaticCss: (props) => {
+        const font = props?.font === 'serif' ? 'ui-serif, Georgia, serif' : props?.font === 'mono' ? 'ui-monospace, SFMono-Regular, Menlo, Monaco, monospace' : 'ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Inter, sans-serif';
+        const fs = props?.fontSize ? `${props.fontSize}px` : '14px';
+        if (props?.style === 'button') return `a { display:inline-block; padding:6px 10px; border-radius:8px; background:${props?.color || 'var(--accent)'}; color:${props?.textColor || 'var(--widget-fg)'}; font-family:${font}; font-size:${fs}; }`;
+        return `a { color: ${props?.color || 'var(--accent)'}; text-decoration: ${props?.underline ? 'underline' : 'none'}; font-family:${font}; font-size:${fs}; font-weight:600 }`;
+    },
 };
 
 export default def;

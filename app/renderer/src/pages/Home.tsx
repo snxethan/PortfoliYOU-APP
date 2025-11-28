@@ -144,7 +144,7 @@ export default function HomePage() {
 			<section>
 				<div id="py-list" ref={listRef} className={`surface border border-[color:var(--border)] rounded-2xl p-6 space-y-4 shadow-lg shadow-black/20 ${pulseList ? 'highlight-pulse' : ''}`}>
 					<div className="flex flex-col gap-1">
-						<p className="text-xs uppercase tracking-wide text-[color:var(--fg-muted)]">Portfolio workspace</p>
+						<p className="section-title">Portfolio workspace</p>
 						<p className="text-sm text-[color:var(--fg-muted)]">Create new work, manage local files, and keep cloud projects in sync.</p>
 					</div>
 					<div id="py-quickstart" ref={quickstartRef} className={`${pulseQuickstart ? 'highlight-pulse' : ''}`}>

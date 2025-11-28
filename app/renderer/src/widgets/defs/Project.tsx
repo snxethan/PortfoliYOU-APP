@@ -79,6 +79,12 @@ const def: WidgetDefinition<ProjectWidgetProps> = {
     defaultProps: { title: 'My Project', description: 'Short description', headingLevel: 'h3', font: 'system', fontSize: undefined, link: undefined, image: undefined },
     grid: { w: 6, h: 4 },
     render: (props) => <ProjectView {...props} />,
+    getStaticCss: (props) => {
+        const font = props?.font === 'serif' ? 'serif' : props?.font === 'mono' ? 'monospace' : 'system-ui, -apple-system, Segoe UI, Roboto, Inter, sans-serif';
+        const size = props?.fontSize ? `${props.fontSize}px` : undefined;
+        const imgRule = props?.image ? '.proj-img img { width:100%; height:260px; object-fit:cover; border-radius:8px; }' : '';
+        return `color: var(--widget-fg); font-family: ${font}; ${size ? `font-size: ${size};` : ''} ${imgRule}`;
+    },
     zodSchema: z.object({
         title: z.string().min(1, 'Title is required'),
         description: z.string().optional(),

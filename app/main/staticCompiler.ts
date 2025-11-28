@@ -13,10 +13,20 @@ function escapeHtml(s: string) {
     return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-function renderWidgetToHtml(widget: any, assetsBase: string, placeholderUrl: string, pageFilenameMap?: Record<string, string>) {
+function renderWidgetToHtml(widget: any, assetsBase: string, placeholderUrl: string, pageFilenameMap?: Record<string, string>, collectCss?: (s: string) => void, themeColors?: any) {
     const type = widget?.type || 'unknown';
     const props = widget?.props || {};
     try {
+        // helper to scope CSS to this widget instance
+        const id = widget?.widgetId || widget?.id || String(Math.random()).slice(2);
+        const pushCss = (s: string) => {
+            if (!s || !collectCss) return;
+            const trimmed = String(s).trim();
+            if (!trimmed) return;
+            // if contains selector blocks, include as-is; otherwise scope declarations
+            if (/[{}]/.test(trimmed)) collectCss(trimmed);
+            else collectCss(`.widget-instance-${id} { ${trimmed} }`);
+        };
         switch (type) {
             case 'text': {
                 const text = escapeHtml(String(props.text || ''));
@@ -24,7 +34,12 @@ function renderWidgetToHtml(widget: any, assetsBase: string, placeholderUrl: str
                     return `<div class="widget widget-text"><div>${text}</div></div>`;
                 }
                 const variant = props.variant === 'h2' ? 'h2' : props.variant === 'h3' ? 'h3' : 'p';
-                return `<div class="widget widget-text"><${variant}>${text}</${variant}></div>`;
+                // collect text-specific CSS (alignment + variant sizing)
+                pushCss(`text-align: ${props.align || 'left'}; color: var(--widget-fg); font-family: var(--heading-font);`);
+                if (props.variant === 'h2') pushCss('font-size: 28px; font-weight: 700;');
+                else if (props.variant === 'h3') pushCss('font-size: 20px; font-weight: 600;');
+                else pushCss('font-size: 16px;');
+                return `<div class="widget widget-text widget-instance-${id}"><${variant}>${text}</${variant}></div>`;
             }
             case 'image': {
                 const src = String(props.src || '');
@@ -33,7 +48,10 @@ function renderWidgetToHtml(widget: any, assetsBase: string, placeholderUrl: str
                 if (src.startsWith('asset://')) url = path.posix.join(assetsBase, src.slice('asset://'.length));
                 else if (src.startsWith('assets/')) url = path.posix.join(assetsBase, src.slice('assets/'.length));
                 else if (src) url = src;
-                return `<div class="widget widget-image"><img src="${url}" alt="${alt}" loading="lazy"/></div>`;
+                // image-specific CSS (object-fit)
+                pushCss(`display:block`);
+                if (props.fit) pushCss(`max-width:100%`);
+                return `<div class="widget widget-image widget-instance-${id}"><img src="${url}" alt="${alt}" loading="lazy"/></div>`;
             }
             case 'project': {
                 const title = escapeHtml(String(props.title || 'Project'));
@@ -43,7 +61,10 @@ function renderWidgetToHtml(widget: any, assetsBase: string, placeholderUrl: str
                     const imgSrc = props.image.startsWith('asset://') ? path.posix.join(assetsBase, props.image.slice('asset://'.length)) : props.image;
                     imgHtml = `<div class="proj-img"><img src="${imgSrc}" alt="${escapeHtml(props.imageAlt || '')}"/></div>`;
                 }
-                return `<article class="widget widget-project">${imgHtml}<h3>${title}</h3><p>${desc}</p></article>`;
+                // project card styling
+                pushCss(`color: var(--widget-fg);`);
+                if (props.image) pushCss('.proj-img img { width:100%; height:260px; object-fit:cover; border-radius:8px; }');
+                return `<article class="widget widget-project widget-instance-${id}">${imgHtml}<h3>${title}</h3><p>${desc}</p></article>`;
             }
             case 'link':
             case 'nav-link': {
@@ -55,14 +76,16 @@ function renderWidgetToHtml(widget: any, assetsBase: string, placeholderUrl: str
                     href = pageFilenameMap[targetId];
                 }
                 if (!href) href = '#';
-                return `<div class="widget widget-link"><a href="${escapeHtml(href)}">${label}</a></div>`;
+                pushCss(`color: var(--accent);`);
+                return `<div class="widget widget-link widget-instance-${id}"><a href="${escapeHtml(href)}">${label}</a></div>`;
             }
             case 'video': {
                 const src = String(props.src || '');
                 let url = '';
                 if (src.startsWith('asset://')) url = path.posix.join(assetsBase, src.slice('asset://'.length));
                 else url = src;
-                return `<div class="widget widget-video"><video controls src="${url}">Your browser does not support video</video></div>`;
+                pushCss('max-width:100%');
+                return `<div class="widget widget-video widget-instance-${id}"><video controls src="${url}">Your browser does not support video</video></div>`;
             }
             case 'carousel': {
                 const slides = Array.isArray(props.slides) ? props.slides : [];
@@ -71,13 +94,14 @@ function renderWidgetToHtml(widget: any, assetsBase: string, placeholderUrl: str
                     const url = src.startsWith('asset://') ? path.posix.join(assetsBase, src.slice('asset://'.length)) : src;
                     return `<div class="slide"><img src="${url}" alt="${escapeHtml(String(s.alt || ''))}"/></div>`;
                 }).join('\n');
-                return `<div class="widget widget-carousel"><div class="slides">${inner}</div></div>`;
+                pushCss('.slides{display:flex;gap:8px;overflow:hidden} .slide img{width:100%;height:220px;object-fit:cover;border-radius:6px}');
+                return `<div class="widget widget-carousel widget-instance-${id}"><div class="slides">${inner}</div></div>`;
             }
             default:
-                return `<div class="widget widget-unknown"><pre>${escapeHtml(JSON.stringify(props || {}, null, 2))}</pre></div>`;
+                return `<div class="widget widget-unknown widget-instance-${id}"><pre>${escapeHtml(JSON.stringify(props || {}, null, 2))}</pre></div>`;
         }
     } catch (e) {
-        return `<div class="widget widget-error">[render error: ${escapeHtml(String(e))}]</div>`;
+        return `<div class="widget widget-error widget-instance-${widget?.widgetId || widget?.id}">[render error: ${escapeHtml(String(e))}]</div>`;
     }
 }
 
@@ -143,9 +167,14 @@ export async function buildStaticSite(payload: ProjectPayload & { useTempOutput?
             await fs.writeFile(placeholderPath, tinyPng);
         }
 
-        // Basic site CSS - lightweight and deterministic
-        const css = `:root{--bg:#fff;--fg:#111;--muted:#666;--border:#e6e6e6}body{font-family:Inter,ui-sans-serif,system-ui,Segoe UI,Roboto,Helvetica,Arial;margin:0;color:var(--fg);background:var(--bg)}.container{max-width:900px;margin:0 auto;padding:24px}.widget{margin-bottom:18px}.widget img{max-width:100%;height:auto;border-radius:6px}.widget-project .proj-img img{width:100%;height:240px;object-fit:cover;border-radius:6px}`;
-        await fs.writeFile(path.join(out, 'site.css'), css, 'utf8');
+        // Build site CSS from project theme when available (keeps compiled pages styled like the editor)
+        const theme = (project && project.themes && project.themes[project.activeThemeId]) || null;
+        const colors = (theme && theme.colors) || { background: '#ffffff', surface: '#f7f9fc', primary: '#0ea5e9', secondary: '#0f172a', accent: '#f97316', text: '#0f172a', muted: '#475569', border: '#e2e8f0', widgetBackground: '#ffffff', widgetText: '#0f172a' };
+        const typography = (theme && theme.typography) || { heading: 'Inter, system-ui, sans-serif', body: 'Inter, system-ui, sans-serif', scale: 1 };
+
+        const baseCss = `:root{--bg:${colors.background};--fg:${colors.text};--muted:${colors.muted};--border:${colors.border};--accent:${colors.accent};--primary:${colors.primary};--surface:${colors.surface};--widget-bg:${colors.widgetBackground};--widget-fg:${colors.widgetText};--heading-font:${typography.heading};--body-font:${typography.body};--font-scale:${typography.scale}}body{font-family:var(--body-font),Inter,system-ui,Segoe UI,Roboto,Helvetica,Arial;margin:0;color:var(--fg);background:var(--bg);-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}a{color:var(--accent)}.container{max-width:1100px;margin:0 auto;padding:36px}.widget{margin-bottom:22px;background:var(--widget-bg);color:var(--widget-fg);padding:18px;border-radius:10px;border:1px solid var(--border);box-shadow:0 6px 18px rgba(0,0,0,0.04)}.widget img{max-width:100%;height:auto;border-radius:6px;display:block}.widget-text h2,.widget-text h3{font-family:var(--heading-font);margin:0 0 8px 0}.widget-text p{margin:0}.widget-project .proj-img img{width:100%;height:260px;object-fit:cover;border-radius:8px}.widget-link a{color:var(--accent);text-decoration:underline}.widget-video video{max-width:100%;border-radius:6px}.widget-carousel .slides{display:flex;gap:8px;overflow:hidden}.widget-carousel .slide img{width:100%;height:220px;object-fit:cover;border-radius:6px}.proj-img{margin-bottom:10px}.widget-project h3{margin:8px 0 6px 0}.widget-project p{margin:0;color:var(--muted)}.widget-unknown, .widget-error{font-family:monospace;background:transparent;border:1px dashed var(--border);padding:12px;border-radius:6px;white-space:pre-wrap}`;
+
+        const collectedCss: string[] = [];
 
         const pages = Array.isArray(project.pageOrder) ? project.pageOrder : Object.keys(project.pages || {});
         const pagesMap = project.pages || {};
@@ -180,12 +209,53 @@ export async function buildStaticSite(payload: ProjectPayload & { useTempOutput?
         for (const pid of pages) {
             const pg = pagesMap[pid] || { title: String(pid), widgets: [] };
             const widgets = Array.isArray(pg.widgets) ? pg.widgets.map((wid: string) => project.widgets?.[wid]).filter(Boolean) : [];
-            const body = widgets.map((w: any) => renderWidgetToHtml(w, assetsBase, path.posix.join(assetsBase, placeholderName), pageFilenameMap)).join('\n');
+
+            // Use the same canvas defaults as the editor so compiled pages mirror the canvas layout
+            const COLS = 12;
+            const GAP = 12; // px
+            const ROW_H = 32; // px
+            const CONTAINER_MAX_WIDTH = 1100; // matches .container max-width in base CSS
+            const CONTAINER_PADDING = 36; // left+right padding used in .container
+            const innerWidth = Math.max(0, CONTAINER_MAX_WIDTH - (CONTAINER_PADDING * 2));
+            const colW = COLS > 0 ? Math.floor((innerWidth - GAP * (COLS - 1)) / COLS) : 0;
+
+            // Compute content rows to determine canvas height
+            const contentRows = widgets.length === 0 ? 12 : Math.max(12, ...widgets.map((w: any) => {
+                const layout = w?.layout || w || {};
+                return (typeof layout.y === 'number' ? layout.y : (typeof w?.y === 'number' ? w.y : 0)) + (typeof layout.h === 'number' ? layout.h : (typeof w?.h === 'number' ? w.h : 1));
+            }));
+            const height = contentRows * ROW_H + (contentRows - 1) * GAP;
+
+            // Build absolutely-positioned widget wrappers so compiled pages match the canvas
+            const widgetBodies = widgets.map((w: any, index: number) => {
+                const layout = w?.layout || w || {};
+                const lx = typeof layout.x === 'number' ? layout.x : (typeof w?.x === 'number' ? w.x : 0);
+                const ly = typeof layout.y === 'number' ? layout.y : (typeof w?.y === 'number' ? w.y : 0);
+                const lw = typeof layout.w === 'number' ? layout.w : (typeof w?.w === 'number' ? w.w : 1);
+                const lh = typeof layout.h === 'number' ? layout.h : (typeof w?.h === 'number' ? w.h : 1);
+                const lz = typeof layout.z === 'number' ? layout.z : (typeof w?.z === 'number' ? w.z : index);
+
+                const left = lx * (colW + GAP);
+                const top = ly * (ROW_H + GAP);
+                const wPx = lw * colW + (lw - 1) * GAP;
+                const hPx = lh * ROW_H + (lh - 1) * GAP;
+                const z = 100 + (typeof lz === 'number' ? lz : index);
+
+                const inner = renderWidgetToHtml(w, assetsBase, path.posix.join(assetsBase, placeholderName), pageFilenameMap, (s: string) => collectedCss.push(s), colors);
+                return `<div class="page-widget-wrapper" style="position:absolute;left:${left}px;top:${top}px;width:${wPx}px;height:${hPx}px;z-index:${z};">${inner}</div>`;
+            }).join('\n');
+
             const title = escapeHtml(String(pg.title || project.portfolioMeta?.siteTitle || 'Portfolio'));
-            const html = `<!doctype html>\n<html lang="en">\n<head>\n  <meta charset="utf-8" />\n  <meta name="viewport" content="width=device-width,initial-scale=1" />\n  <title>${title}</title>\n  <link rel="stylesheet" href="/site.css" />\n</head>\n<body>\n  <div class="container">\n    <h1>${title}</h1>\n    ${body}\n  </div>\n  <script src="/site.js"></script>\n</body>\n</html>`;
+            const pageBg = pg.backgroundColor || colors.background;
+            const html = `<!doctype html>\n<html lang="en">\n<head>\n  <meta charset="utf-8" />\n  <meta name="viewport" content="width=device-width,initial-scale=1" />\n  <title>${title}</title>\n  <link rel="stylesheet" href="/site.css" />\n</head>\n<body style="background:${pageBg};">\n  <div class="container">\n    <h1>${title}</h1>\n    <div class=\"page-canvas\" style=\"position:relative;height:${height}px;max-width:${innerWidth}px;margin:0 auto;\">\n      ${widgetBodies}\n    </div>\n  </div>\n  <script src="/site.js"></script>\n</body>\n</html>`;
+
             // Use slugified filename
             await fs.writeFile(path.join(out, pageFilenameMap[pid]), html, 'utf8');
         }
+
+        // After building all pages, write aggregated CSS (base + collected widget CSS)
+        const finalCss = [baseCss, ...collectedCss].join('\n\n');
+        await fs.writeFile(path.join(out, 'site.css'), finalCss, 'utf8');
 
         // Copy first page to index.html for root
         if (pages.length > 0) {

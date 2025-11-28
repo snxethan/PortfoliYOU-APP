@@ -109,6 +109,13 @@ contextBridge.exposeInMainWorld("api", {
 	clipboardRead: async () => {
 		return ipcRenderer.invoke('py:clipboardRead');
 	},
+	// Preview server controls
+	previewStartServer: async (options: { distDir: string }) => {
+		return ipcRenderer.invoke('py:preview:startServer', options || {});
+	},
+	previewStopServer: async () => {
+		return ipcRenderer.invoke('py:preview:stopServer');
+	},
 }); // exposes a safe API to the renderer process
 
 

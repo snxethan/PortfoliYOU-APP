@@ -11,7 +11,7 @@ import type { Theme } from "../../themes/types";
 
 const INVALID_FILENAME = /[\\/:*?"<>|]/g;
 
-type SectionKey = "portfolio" | "cloud" | "theme";
+type SectionKey = "portfolio" | "cloud" | "theme" | "build";
 
 type Draft = {
     siteTitle: string;
@@ -232,11 +232,26 @@ export default function PortfolioSettingsModal({ open, mode, projectId, cloudId,
     const [errors, setErrors] = useState<Record<string, string>>({});
     const [formError, setFormError] = useState<string | null>(null);
     const [savingDraft, setSavingDraft] = useState(false);
+    // Build settings local state (moved to top-level to preserve hook order)
+    const [includeAssetsState, setIncludeAssetsState] = useState<boolean>(() => {
+        const current = (project?.portfolioMeta as any)?.buildSettings || {};
+        return !!current.includeAssets;
+    });
+    const [basePathState, setBasePathState] = useState<string>(() => {
+        const current = (project?.portfolioMeta as any)?.buildSettings || {};
+        return current.basePath || "";
+    });
+    React.useEffect(() => {
+        const current = (project?.portfolioMeta as any)?.buildSettings || {};
+        setIncludeAssetsState(!!current.includeAssets);
+        setBasePathState(current.basePath || "");
+    }, [project?.id, project?.portfolioMeta]);
 
     const initialExpanded = useMemo<Record<SectionKey, boolean>>(() => ({
         portfolio: defaultSection === "portfolio",
         cloud: defaultSection === "cloud",
         theme: defaultSection === "theme",
+        build: defaultSection === "build",
     }), [defaultSection]);
     const [expanded, setExpanded] = useState<Record<SectionKey, boolean>>(initialExpanded);
     useEffect(() => setExpanded(initialExpanded), [initialExpanded]);
@@ -412,6 +427,37 @@ export default function PortfolioSettingsModal({ open, mode, projectId, cloudId,
                 Social preview image URL
                 <input className={`input mt-1 w-full ${errors.socialImageUrl ? 'input-error' : ''}`} value={draft.socialImageUrl} onChange={e => setDraft(prev => ({ ...prev, socialImageUrl: e.target.value }))} placeholder="https://.../preview.png" />
                 {errors.socialImageUrl && <span className="text-xs text-red-500 mt-1 block">{errors.socialImageUrl}</span>}
+            </label>
+        </div>
+    );
+
+    const toggleIncludeAssets = async () => {
+        if (!project) return;
+        const next = !includeAssetsState;
+        setIncludeAssetsState(next);
+        try {
+            await updateProjectMetadata(project.id, { metadata: ({ ...(project.portfolioMeta || {}), buildSettings: { ...(project.portfolioMeta as any)?.buildSettings, includeAssets: next, basePath: basePathState || undefined } } as any) });
+        } catch { /* ignore */ }
+    };
+
+    const setBase = async (v: string) => {
+        if (!project) return;
+        setBasePathState(v);
+        try {
+            await updateProjectMetadata(project.id, { metadata: ({ ...(project.portfolioMeta || {}), buildSettings: { ...(project.portfolioMeta as any)?.buildSettings, includeAssets: includeAssetsState, basePath: v || undefined } } as any) });
+        } catch { /* ignore */ }
+    };
+
+    const renderBuildBody = () => (
+        <div className="space-y-3">
+            <label className="flex items-center space-x-2">
+                <input type="checkbox" checked={includeAssetsState} onChange={() => void toggleIncludeAssets()} />
+                <span className="text-[color:var(--fg-muted)]">Include uploaded assets in builds</span>
+            </label>
+            <label className="block text-xs uppercase tracking-wide">
+                Base path (optional)
+                <input className="input mt-1 w-full" value={basePathState} onChange={e => void setBase(e.target.value)} placeholder="/base/path" />
+                <div className="text-xs text-[color:var(--fg-muted)] mt-1">Optional base path for the generated site.</div>
             </label>
         </div>
     );
@@ -656,6 +702,7 @@ export default function PortfolioSettingsModal({ open, mode, projectId, cloudId,
                 </div>
                 <div className="p-4 space-y-4 max-h-[70vh] overflow-y-auto">
                     {renderSection("portfolio", "Portfolio", mode === "create" ? "Draft" : "Details", renderPortfolioFields())}
+                    {renderSection("build", "Build", undefined, renderBuildBody())}
                     {showCloudSection && renderSection("cloud", "Cloud", cloudStatus, renderCloudBody())}
                     {renderSection("theme", "Theme", activeTheme ? activeTheme.name : "Unavailable", renderThemeBody())}
                     {formError && <div className="text-sm text-red-500">{formError}</div>}

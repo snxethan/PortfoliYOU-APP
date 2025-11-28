@@ -639,6 +639,10 @@ export default function EditorPage() {
       )}
 
       <section className="surface p-0 overflow-hidden">
+        {/* Workspace label */}
+        <div className="px-4 pb-2">
+          <p className="text-xs uppercase tracking-wide text-[color:var(--fg-muted)]">Portfolio Editor workspace</p>
+        </div>
         {/* Top bar */}
         <EditorTopBar
           previewMode={previewMode}
@@ -797,8 +801,10 @@ export default function EditorPage() {
             }}
           />
         )}
-
-        {/* Workspace */}
+        {/* Canvas label */}
+        <div className="px-4 pb-2">
+          <p className="text-xs uppercase tracking-wide text-[color:var(--fg-muted)]">Portfolio Canvas</p>
+        </div>
         <DndContext
           sensors={useSensors(
             useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),

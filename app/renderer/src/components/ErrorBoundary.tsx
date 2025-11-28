@@ -1,5 +1,5 @@
 import React from "react";
-import { X, RotateCw } from 'lucide-react';
+import { X, RotateCw, Copy, Terminal } from 'lucide-react';
 
 import FrameBar from "./FrameBar";
 
@@ -31,14 +31,42 @@ export default class ErrorBoundary extends React.Component<Props, State> {
               {/* Top-right action icons */}
               <div style={{ position: 'absolute', right: 8, top: 8, display: 'flex', gap: 8 }}>
                 <button
-                  title="Reload"
+                  title="Copy error and stack"
+                  className="btn btn-ghost p-2 w-9 h-9 inline-flex items-center justify-center rounded-md"
+                  onClick={() => {
+                    try {
+                      const err = this.state.error;
+                      let errText = '';
+                      if (err instanceof Error) {
+                        errText = `${err.name}: ${err.message}`;
+                        if (err.stack) errText += `\n\n${err.stack}`;
+                      } else {
+                        errText = String(err);
+                      }
+                      const comp = this.state.componentStack ? `\n\nComponent stack:\n${this.state.componentStack}` : '';
+                      const full = `${errText}${comp}`;
+                      try { window.api?.clipboardWrite?.({ text: full }); } catch { navigator.clipboard?.writeText?.(full).catch(() => { }); }
+                    } catch { /* ignore */ }
+                  }}
+                >
+                  <Copy size={16} />
+                </button>
+                <button
+                  title="Toggle DevTools"
+                  className="btn btn-ghost p-2 w-9 h-9 inline-flex items-center justify-center rounded-md"
+                  onClick={() => { try { window.api?.toggleDevTools?.(); } catch { /* ignore */ } }}
+                >
+                  <Terminal size={16} />
+                </button>
+                <button
+                  title="Refresh Application"
                   className="btn btn-ghost p-2 w-9 h-9 inline-flex items-center justify-center rounded-md"
                   onClick={() => { try { window.location.reload(); } catch { /* ignore */ } }}
                 >
                   <RotateCw size={16} />
                 </button>
                 <button
-                  title="Close"
+                  title="Close Application"
                   className="btn btn-ghost p-2 w-9 h-9 inline-flex items-center justify-center rounded-md"
                   onClick={() => { try { window.api?.windowClose?.(); } catch { /* ignore */ } }}
                 >
@@ -52,20 +80,16 @@ export default class ErrorBoundary extends React.Component<Props, State> {
                 <pre className="text-xs whitespace-pre-wrap text-[color:var(--fg-muted)]">{String(this.state.error)}</pre>
               </div>
               {this.state.componentStack && (
-                <div className="mt-3">
-                  <div className="text-xs font-semibold">Component stack</div>
-                  <pre className="text-xs whitespace-pre-wrap text-[color:var(--fg-muted)]">{this.state.componentStack}</pre>
+                <div className="mt-3 relative">
+                  <div className="flex items-center justify-between">
+                    <div className="text-xs font-semibold">Component stack</div>
+                      {/* Removed duplicate copy button here; top-right copy copies error + stack */}
+                  </div>
+                  <pre className="text-xs whitespace-pre-wrap text-[color:var(--fg-muted)] mt-2">{this.state.componentStack}</pre>
                 </div>
               )}
 
-              <div className="mt-4 flex gap-2">
-                <button
-                  className="btn btn-outline"
-                  onClick={() => { try { window.api?.toggleDevTools?.(); } catch { /* ignore */ } }}
-                >
-                  Toggle DevTools
-                </button>
-              </div>
+              <div className="mt-4 flex gap-2" />
             </div>
           </div>
         </>

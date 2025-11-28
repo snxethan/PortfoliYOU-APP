@@ -29,19 +29,84 @@ export async function compileStaticSite(
         await fs.writeFile(placeholderPath, Buffer.alloc(0)); // Empty file for now
     }
 
-    // 2. Generate CSS (basic stub, extend as needed)
-    const css = `body { font-family: system-ui, sans-serif; margin: 0; padding: 0; }`;
-    await fs.writeFile(path.join(outputDir, 'site.css'), css);
+    // 2. Generate HTML for each page and collect per-widget CSS (if widgets expose it)
+    const pageOutputs: Array<{ filename: string; html: string }> = [];
+    const collectedCss: string[] = [];
 
-    // 3. Generate HTML for each page
+    async function renderWidgetToHtml(widget: Widget): Promise<string> {
+        // Resolve widget definition so we can ask for static CSS
+        let def: any = undefined;
+        try {
+            def = await WidgetsRegistry.ensure(widget.type);
+        } catch (e) {
+            // ignore loader failures and fallback to registry.get
+            def = WidgetsRegistry.get(widget.type);
+        }
+
+        // Normalize props and asset paths
+        let props: any = {};
+        if (typeof widget.props === 'object' && widget.props !== null) props = { ...widget.props };
+        if (typeof props.src === 'string' && props.src.startsWith('asset://')) {
+            const hash = props.src.slice('asset://'.length);
+            props.src = `/assets/${hash}`;
+        }
+
+        // Ask widget for static CSS if it exposes getStaticCss
+        try {
+            if (def && typeof def.getStaticCss === 'function') {
+                const raw = await def.getStaticCss(props, widget.widgetId || widget.id || String(Math.random()).slice(2));
+                if (raw && typeof raw === 'string') {
+                    const trimmed = raw.trim();
+                    if (trimmed.length > 0) {
+                        // If the returned CSS looks like a full stylesheet (contains a selector block), include as-is.
+                        // Otherwise treat it as declarations and scope them to the instance selector.
+                        if (/[{}]/.test(trimmed)) {
+                            collectedCss.push(trimmed);
+                        } else {
+                            const sel = `.widget-instance-${widget.widgetId || widget.id}`;
+                            collectedCss.push(`${sel} { ${trimmed} }`);
+                        }
+                    }
+                }
+            }
+        } catch (e) {
+            // ignore CSS generation errors
+        }
+
+        // Render widget markup (use provided render function if available)
+        if (def && typeof def.render === 'function') {
+            try {
+                const el = def.render(props);
+                const inner = ReactDOMServer.renderToStaticMarkup(el as any);
+                // Wrap each widget with an instance-scoped class so per-instance CSS can target it
+                return `<div class="widget widget-instance-${widget.widgetId || widget.id}">${inner}</div>`;
+            } catch (e) {
+                return `<div class="widget widget-instance-${widget.widgetId || widget.id}">[render error: ${String(e)}]</div>`;
+            }
+        }
+
+        // Fallback: basic JSON dump
+        return `<div class="widget widget-instance-${widget.widgetId || widget.id}"><pre>${escapeHtml(JSON.stringify(widget.props || {}, null, 2))}</pre></div>`;
+    }
+
     for (const pageId of project.pageOrder) {
         const page = project.pages[pageId];
         if (!page) continue;
         const widgets = (page.widgets || []).map(wid => project.widgets[wid]).filter(Boolean);
-        const widgetEls = widgets.map(widget => renderWidget(widget, project));
-        const html = renderPageHtml(page, widgetEls, project);
-        const outPath = path.join(outputDir, `${pageId}.html`);
-        await fs.writeFile(outPath, html);
+        const widgetHtmls = await Promise.all(widgets.map(w => renderWidgetToHtml(w)));
+        const html = renderPageHtml(page, widgetHtmls.map(h => ({ toString: () => h })) as any, project);
+        pageOutputs.push({ filename: `${pageId}.html`, html });
+    }
+
+    // 3. Write aggregated CSS (base + widget-specific)
+    const baseCss = `body { font-family: system-ui, sans-serif; margin: 0; padding: 0; }`;
+    const fullCss = [baseCss, ...collectedCss].join('\n\n');
+    await fs.writeFile(path.join(outputDir, 'site.css'), fullCss, 'utf8');
+
+    // 4. Emit page files
+    for (const p of pageOutputs) {
+        const outPath = path.join(outputDir, p.filename);
+        await fs.writeFile(outPath, p.html, 'utf8');
     }
 
     // 4. Write index.html (first page)

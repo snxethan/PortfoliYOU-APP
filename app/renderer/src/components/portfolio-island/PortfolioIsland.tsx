@@ -1,6 +1,6 @@
 import { useNavigate, useLocation } from "react-router-dom";
 import React, { useMemo, useState, useCallback } from "react";
-import { Cloud, UploadCloud, Wrench, X, Save, FolderOpen, Pin, PinOff, Palette, Settings2 } from "lucide-react";
+import { Cloud, UploadCloud, Wrench, X, Save, FolderOpen, Pin, PinOff, Palette, Settings2, Play, Square, Copy, ExternalLink, Eye } from "lucide-react";
 
 import { useAuth } from "../../providers/AuthProvider";
 import { useProjects } from "../../providers/ProjectsProvider";
@@ -24,15 +24,17 @@ export default function PortfolioIsland(): JSX.Element | null {
   });
   const savedText = useMemo(() => lastSavedAt ? new Date(lastSavedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : null, [lastSavedAt]);
   const hasSelection = !!selectedProjectId;
-  // Hide the island on the Home page when there's no selected portfolio
-  if (location.pathname === '/' && !hasSelection) return null;
+  // When on the Home page with no selected portfolio, keep the island mounted
+  // but visually hide it to avoid changing hook order during quick selection changes.
+  const shouldVisuallyHide = location.pathname === '/' && !hasSelection;
   // When pinned, keep the island positioned beneath the fixed FrameBar (36px / top-9)
   const containerClass = (pinned ? "sticky top-9 z-50 " : "") + "px-4 pt-4";
-  const labelClass = "text-[11px] uppercase tracking-wide text-[color:var(--fg-muted)]";
-  const segmentClass = "flex items-center gap-2 rounded-full border border-[color:var(--border)] bg-[color:var(--surface)]/60 px-3 py-1.5 shadow-sm flex-wrap";
-  const actionBtnClass = "btn btn-ghost btn-sm flex items-center gap-1 text-[11px]";
+  // Match quick-settings/editor styles: header labels use 10px, content/actions use 12px
+  const labelClass = "text-[10px] uppercase tracking-wide text-[color:var(--fg-muted)]";
+  const segmentClass = "flex items-center gap-2 rounded-full border border-[color:var(--border)] bg-[color:var(--surface)]/60 px-3 py-1.5 shadow-sm flex-wrap text-[12px]";
+  const actionBtnClass = "btn btn-ghost btn-sm flex items-center gap-1 text-[12px]";
   const statusChip = (
-    <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-[color:var(--border)] bg-[color:var(--muted)]/30 text-[11px] font-semibold text-[color:var(--fg-muted)]">
+    <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-[color:var(--border)] bg-[color:var(--muted)]/30 text-[12px] font-semibold text-[color:var(--fg-muted)]">
       {saving ? (
         <>
           <span className="w-3 h-3 border-2 border-[color:var(--border)] border-t-[color:var(--accent)] rounded-full animate-spin"></span>
@@ -45,6 +47,24 @@ export default function PortfolioIsland(): JSX.Element | null {
       )}
     </div>
   );
+
+  // Preview server state (updated via global event dispatched by Deploy page)
+  const [previewRunningState, setPreviewRunningState] = useState(false);
+  const [previewLocalState, setPreviewLocalState] = useState<string | null>(null);
+  const [previewLanState, setPreviewLanState] = useState<string | null>(null);
+  React.useEffect(() => {
+    const handler = (e: any) => {
+      try {
+        const d = e?.detail || {};
+        setPreviewRunningState(!!d.running);
+        setPreviewLocalState(d.localUrl || null);
+        if (d.lanUrl && !d.lanUrl.startsWith('http://127.') && !d.lanUrl.startsWith('http://localhost')) setPreviewLanState(d.lanUrl);
+        else setPreviewLanState(null);
+      } catch { /* ignore */ }
+    };
+    window.addEventListener('py:preview:state', handler as EventListener);
+    return () => window.removeEventListener('py:preview:state', handler as EventListener);
+  }, []);
 
   const pct = Math.round(opacity * 100);
   const islandStyle = useMemo(() => {
@@ -67,7 +87,7 @@ export default function PortfolioIsland(): JSX.Element | null {
   }, [navigate, selectedProjectId]);
 
   return (
-    <div className={`portfolio-island ${containerClass}`}>
+    <div className={`portfolio-island ${containerClass} ${shouldVisuallyHide ? 'opacity-0 pointer-events-none h-0 overflow-hidden' : ''}`}>
       <div
         className={`surface border border-[color:var(--border)] rounded-2xl px-3 py-3 shadow-lg bg-[color:var(--surface)]/80 transition ${hasSelection ? 'ring-2 ring-[color:var(--accent)]/50 ring-offset-2 ring-offset-[color:var(--bg,transparent)]' : ''}`}
         style={islandStyle}
@@ -87,6 +107,62 @@ export default function PortfolioIsland(): JSX.Element | null {
           <span className="hidden sm:inline-block w-px h-6 bg-[color:var(--border)]" aria-hidden="true"></span>
 
           {statusChip}
+
+          <div className={segmentClass}>
+            <span className={labelClass}>Preview</span>
+            {!previewRunningState ? (
+              <button
+                type="button"
+                title="Start local preview"
+                aria-label="Start preview"
+                className="btn btn-accent btn-sm flex items-center gap-2 text-[12px] font-semibold shadow-lg shadow-[color:var(--accent)]/25"
+                disabled={!hasSelection}
+                onClick={async () => {
+                  if (!hasSelection) return;
+                  window.dispatchEvent(new CustomEvent('py:preview-start-request'));
+                  navigate('/deploy');
+                }}
+              >
+                <Play size={14} />
+                <span>Start</span>
+              </button>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  title="Stop preview (handled by Deployer)"
+                  aria-label="Stop preview"
+                  className="btn btn-danger btn-sm flex items-center gap-2 text-[12px] font-semibold"
+                  onClick={() => {
+                    try { window.dispatchEvent(new CustomEvent('py:preview-stop-request')); } catch { /* ignore */ }
+                  }}
+                >
+                  <Square size={14} className="text-[color:var(--danger)]" aria-hidden="true" />
+                  <span>Stop</span>
+                </button>
+
+                {previewLocalState && (
+                  <>
+                    <a title="Open preview in browser" aria-label="Open preview" href={previewLocalState} target="_blank" rel="noreferrer" className={actionBtnClass}>
+                      <Eye size={14} />
+                      <span>Open</span>
+                    </a>
+                    {previewLanState ? (
+                      <a title="Open LAN preview" aria-label="Open LAN preview" href={previewLanState} target="_blank" rel="noreferrer" className={actionBtnClass}>
+                        <ExternalLink size={14} />
+                        <span>Open LAN</span>
+                      </a>
+                    ) : (
+                      <button type="button" title="Open LAN preview (not available)" aria-label="Open LAN preview" className={actionBtnClass} disabled>
+                        <ExternalLink size={14} />
+                        <span>Open LAN</span>
+                      </button>
+                    )}
+                  </>
+                )}
+              </>
+            )}
+          </div>
 
           {user && selectedProject?._synced && (
             <div className="inline-flex items-center gap-1 px-3 py-1 rounded-full border border-[color:var(--border)] bg-[color:var(--muted)]/30 text-[11px] text-[color:var(--accent)]">
@@ -142,7 +218,11 @@ export default function PortfolioIsland(): JSX.Element | null {
                 className={`btn btn-ghost p-2 w-9 h-9 inline-flex items-center justify-center rounded-md text-[color:var(--fg-muted)]`}
                 disabled={!hasSelection}
                 title="Close current portfolio"
-                onClick={() => { clearSelection(); navigate('/'); }}
+                onClick={() => {
+                  try { window.dispatchEvent(new CustomEvent('py:preview-stop-request')); } catch { /* ignore */ }
+                  clearSelection();
+                  navigate('/');
+                }}
               >
                 <X size={16} />
               </button>
@@ -158,6 +238,7 @@ export default function PortfolioIsland(): JSX.Element | null {
               className={actionBtnClass}
               disabled={!hasSelection}
               onClick={() => handleOpenSettings('portfolio')}
+              title="Open portfolio settings"
             >
               <Settings2 size={14} />
               Settings
@@ -178,6 +259,7 @@ export default function PortfolioIsland(): JSX.Element | null {
                 className={`${actionBtnClass} ${selectedProject?._synced ? 'text-[color:var(--accent)]' : ''}`}
                 disabled={!hasSelection}
                 onClick={() => handleOpenSettings('cloud')}
+                title="Open cloud settings"
               >
                 <Cloud size={14} />
                 Cloud
@@ -192,6 +274,7 @@ export default function PortfolioIsland(): JSX.Element | null {
               className={actionBtnClass}
               disabled={!hasSelection}
               onClick={() => handleNavigate('/editor')}
+              title="Open editor workspace"
             >
               <Wrench size={14} />
               EDITOR
@@ -201,8 +284,9 @@ export default function PortfolioIsland(): JSX.Element | null {
               className={actionBtnClass}
               disabled={!hasSelection}
               onClick={() => handleNavigate('/deploy')}
+              title="Open deploy workspace"
             >
-              <UploadCloud size={14} />
+              <ExternalLink size={14} />
               DEPLOY
             </button>
           </div>
@@ -218,15 +302,32 @@ export default function PortfolioIsland(): JSX.Element | null {
                   await window.api.showItemInFolder({ filePath: selectedProject._filePath });
                 }
               }}
+              title="Open project folder"
             >
               <FolderOpen size={14} />
               Open
             </button>
             <button
               type="button"
+              className="btn btn-accent btn-sm flex items-center gap-2 text-[12px] font-semibold shadow-lg shadow-[color:var(--accent)]/25"
+              disabled={!hasSelection}
+              onClick={() => {
+                if (!hasSelection) return;
+                // request export and navigate to Deploy
+                window.dispatchEvent(new CustomEvent('py:export-request'));
+                navigate('/deploy');
+              }}
+              title="Export project"
+            >
+              <ExternalLink size={14} />
+              Export
+            </button>
+            <button
+              type="button"
               className={actionBtnClass}
               disabled={!hasSelection}
               onClick={() => selectedProjectId && saveProject(selectedProjectId)}
+              title="Save project"
             >
               <Save size={14} />
               Save
@@ -237,6 +338,7 @@ export default function PortfolioIsland(): JSX.Element | null {
               disabled={!hasSelection}
               aria-pressed={autosaveEnabled}
               onClick={() => setAutosaveEnabled(!autosaveEnabled)}
+              title={autosaveEnabled ? 'Disable autosave' : 'Enable autosave'}
             >
               <span className="relative inline-flex items-center justify-center">
                 <Save size={14} />

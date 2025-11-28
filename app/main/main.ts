@@ -10,6 +10,7 @@ import http from "node:http";
 import fs from "node:fs/promises";
 
 import { app, BrowserWindow, shell, ipcMain, dialog, Menu, clipboard } from "electron";
+import { startStaticServer, stopStaticServer, isServerRunning } from './staticServer';
 
 const isDev = !!process.env.VITE_DEV_SERVER_URL;
 let win: BrowserWindow | null = null;
@@ -269,6 +270,15 @@ app.on("activate", () => {
   if (BrowserWindow.getAllWindows().length === 0) create();
 });
 
+// Ensure static server is stopped when app is quitting
+app.on('will-quit', async () => {
+  try {
+    if (isServerRunning()) {
+      await stopStaticServer();
+    }
+  } catch { /* ignore */ }
+});
+
 // IPC: Save a file to disk
 ipcMain.handle("py:saveFile", async (_event, opts: { defaultPath?: string; data: string; encoding?: 'utf8' | 'base64' }) => {
   const { defaultPath, data, encoding } = opts || {};
@@ -429,6 +439,28 @@ ipcMain.handle('py:buildStaticSite', async (_event, opts?: { project: unknown; a
     // cast to any to avoid compile-time type mismatches across the IPC boundary
     const res = await buildStaticSite(opts as any);
     return res;
+  } catch (e) {
+    return { ok: false, error: String(e) };
+  }
+});
+
+// IPC: Start a local static server to preview a built `dist-site` folder
+ipcMain.handle('py:preview:startServer', async (_event, opts?: { distDir?: string }) => {
+  try {
+    const distDir = opts?.distDir || '';
+    if (!distDir) return { ok: false, error: 'No distDir' };
+    const res = await startStaticServer(distDir);
+    return { ok: true, localUrl: res.localUrl, lanUrl: res.lanUrl, port: res.port };
+  } catch (e) {
+    return { ok: false, error: String(e) };
+  }
+});
+
+// IPC: Stop the preview static server
+ipcMain.handle('py:preview:stopServer', async () => {
+  try {
+    const res = await stopStaticServer();
+    return { ok: res.ok, stopped: res.stopped };
   } catch (e) {
     return { ok: false, error: String(e) };
   }

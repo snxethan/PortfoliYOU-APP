@@ -9,7 +9,7 @@ const EditorPage = lazy(() => import("./pages/Editor"));
 const DeployPage = lazy(() => import("./pages/Deploy"));
 import ProtectedRoute from "./components/auth/ProtectedRoute";
 import { ProjectsProvider, useProjects } from "./providers/ProjectsProvider";
-import { AssetsProvider } from "./providers/AssetsProvider";
+import { AssetsProvider, useAssets } from "./providers/AssetsProvider";
 import { NotificationsProvider } from "./providers/NotificationsProvider";
 import { PortfolioSettingsProvider } from "./providers/PortfolioSettingsProvider";
 import NotificationsUI from "./components/notifications/Notifications";
@@ -38,7 +38,7 @@ export default function App() {
       <div className="flex items-center justify-center min-h-screen bg-[color:var(--bg)]">
         <div className="flex flex-col items-center gap-4">
           <div className="w-12 h-12 border-4 border-[color:var(--border)] border-t-[color:var(--primary)] rounded-full animate-spin"></div>
-          <p className="text-sm text-[color:var(--fg-muted)]">Initializing...</p>
+          <p className="text-sm text-[color:var(--fg-muted)]">A Portfolio for you, by you.</p>
         </div>
       </div>
     );
@@ -52,6 +52,7 @@ export default function App() {
             <AssetsProvider>
               <PortfolioSettingsProvider>
                 <SaveHotkeys />
+                <GlobalPreviewStarter />
                 <GlobalZoomControls />
                 <NotificationsUI />
                 <div className="min-h-screen" style={{ paddingTop: 36 }}>
@@ -197,6 +198,82 @@ function GlobalZoomControls() {
     window.addEventListener('wheel', handler, opts);
     return () => window.removeEventListener('wheel', handler, opts);
   }, [adjustZoom, isEditorRoute]);
+
+  return null;
+}
+
+function GlobalPreviewStarter() {
+  const { selectedProject } = useProjects();
+  const { list: assetList } = useAssets();
+  const [starting, setStarting] = useState(false);
+
+  useEffect(() => {
+    let mounted = true;
+    const handler = async (e: any) => {
+      if (!mounted) return;
+      if (!selectedProject) return;
+      if (starting) return;
+      setStarting(true);
+      try {
+        // initialize global buffers
+        try { (window as any).__py_preview_log = (window as any).__py_preview_log || []; } catch { /* ignore */ }
+        try { (window as any).__py_preview_state = (window as any).__py_preview_state || { running: false }; } catch { /* ignore */ }
+        window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'info', message: 'Building preview...', persistent: false } }));
+        const assetsBase64: Record<string, string> = {};
+        if (assetList && assetList.length) {
+          try {
+            const mod = await import('./lib/assetsStore');
+            const idbGet = (mod as any).idbGet as (store: string, key: string) => Promise<Blob | undefined>;
+            for (const asset of assetList) {
+              if (!asset.hash) continue;
+              try {
+                const blob = await idbGet('blobs', asset.hash);
+                if (!blob) continue;
+                const ab = await (blob as Blob).arrayBuffer();
+                const bytes = new Uint8Array(ab);
+                let binary = '';
+                const chunk = 0x8000;
+                for (let i = 0; i < bytes.length; i += chunk) binary += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + chunk)));
+                assetsBase64[asset.hash] = btoa(binary);
+              } catch { /* ignore asset error */ }
+            }
+          } catch { /* ignore assets read */ }
+        }
+
+        const buildRes = await (window as any).api?.buildStaticSite?.({ project: selectedProject, assets: assetsBase64, useTempOutput: true });
+        if (!buildRes || !buildRes.ok) {
+          const err = 'Preview build failed: ' + (buildRes?.error || 'unknown');
+          try { (window as any).__py_preview_log.push(err); window.dispatchEvent(new CustomEvent('py:preview:log', { detail: { line: err } })); } catch { }
+          window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'error', message: err, persistent: false } }));
+          setStarting(false);
+          return;
+        }
+        try { const msg = `Preview build output: ${buildRes.path}`; (window as any).__py_preview_log.push(msg); window.dispatchEvent(new CustomEvent('py:preview:log', { detail: { line: msg } })); } catch { }
+
+        const startRes = await (window as any).api?.previewStartServer?.({ distDir: buildRes.path });
+        if (!startRes || !startRes.ok) {
+          const err = 'Failed to start preview server: ' + (startRes?.error || 'unknown');
+          try { (window as any).__py_preview_log.push(err); window.dispatchEvent(new CustomEvent('py:preview:log', { detail: { line: err } })); } catch { }
+          window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'error', message: err, persistent: false } }));
+          setStarting(false);
+          return;
+        }
+
+        try { const msg = `Preview running: ${startRes.localUrl} (LAN: ${startRes.lanUrl})`; (window as any).__py_preview_log.push(msg); window.dispatchEvent(new CustomEvent('py:preview:log', { detail: { line: msg } })); } catch { }
+        window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'success', message: 'Local preview started', href: startRes.localUrl, ctaLabel: 'Open', persistent: false } }));
+        // persist and broadcast state for late-mounted UIs
+        try { (window as any).__py_preview_state = { running: true, localUrl: startRes.localUrl, lanUrl: startRes.lanUrl }; } catch { }
+        window.dispatchEvent(new CustomEvent('py:preview:state', { detail: { running: true, localUrl: startRes.localUrl, lanUrl: startRes.lanUrl } }));
+      } catch (err) {
+        window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'error', message: 'Preview start failed', persistent: false } }));
+      } finally {
+        if (mounted) setStarting(false);
+      }
+    };
+
+    window.addEventListener('py:preview-start-request', handler as EventListener);
+    return () => { mounted = false; window.removeEventListener('py:preview-start-request', handler as EventListener); };
+  }, [selectedProject, assetList, starting]);
 
   return null;
 }

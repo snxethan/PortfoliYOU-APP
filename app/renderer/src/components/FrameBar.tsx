@@ -97,7 +97,7 @@ export default function FrameBar() {
                 <button className="window-control" title={maximized ? 'Restore' : 'Maximize'} onClick={onToggleMax} aria-label={maximized ? 'Restore window' : 'Maximize window'}>
                     {dragToTop ? <IconFullscreen /> : (maximized ? <IconRestore /> : <IconMax />)}
                 </button>
-                <button className="window-control window-control--close" title="Close" onClick={onClose} aria-label="Close window">
+                <button className="window-control window-control--close" title="Close Application" onClick={onClose} aria-label="Close Application">
                     <IconClose />
                 </button>
             </div>

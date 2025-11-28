@@ -22,11 +22,11 @@ export default function AccountDashboard({
         <div className={`surface border border-[color:var(--border)] rounded-2xl p-4 space-y-4 shadow-lg shadow-black/14 bg-[color:var(--surface)]/80 ${highlight ? 'highlight-pulse' : ''}`}>
             <div className="flex items-center justify-between gap-3">
                 <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-full bg-[color:var(--muted)]/40 border border-[color:var(--border)] flex items-center justify-center text-sm font-semibold">
+                    {/* <div className="w-10 h-10 rounded-full bg-[color:var(--muted)]/40 border border-[color:var(--border)] flex items-center justify-center text-sm font-semibold">
                         {userDisplay ? userDisplay.charAt(0).toUpperCase() : "U"}
-                    </div>
+                    </div> */}
                     <div>
-                        <p className="text-xs uppercase tracking-wide text-[color:var(--fg-muted)]">Account</p>
+                        <p className="section-title">Account dashboard</p>
                         <p className="text-sm text-[color:var(--fg)] mt-0.5 leading-tight truncate max-w-[18rem]">
                             <span className="font-medium">{userDisplay}</span>
                         </p>

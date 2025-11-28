@@ -58,34 +58,24 @@ export default function EditorTopBar(props: EditorTopBarProps) {
 
     const groupClass = "flex items-center gap-2 md:gap-3 px-2.5 py-1.5 rounded-lg border border-[color:var(--border)] bg-[color:var(--surface)]/70 shadow-sm";
     const groupLabelClass = "text-[10px] uppercase tracking-wide text-[color:var(--fg-muted)]";
-    const previewDisabledClass = previewMode ? "opacity-60 pointer-events-none" : "";
+    const previewDisabledClass = "";
 
     return (
         <div className="flex flex-col gap-2.5 px-4 py-3 border-b border-[color:var(--border)] bg-[color:var(--muted)]/40">
             <div className="flex flex-wrap items-stretch gap-2 md:gap-3">
-                <div className={groupClass}>
+                <div className={`${groupClass}`}>
                     <span className={groupLabelClass}>Mode</span>
-                    <button
-                        type="button"
-                        className="btn btn-ghost btn-sm flex items-center gap-2 border border-[color:var(--accent)] bg-[color:var(--accent)]/10 text-[color:var(--fg)]"
-                        title="Toggle between editing mode and display preview"
-                        onClick={togglePreviewMode}
-                        role="switch"
-                        aria-checked={previewMode}
-                    >
-                        {previewMode ? <Eye size={14} /> : <Pencil size={14} />}
-                        <span className="text-sm font-semibold tracking-wide">
-                            {previewMode ? 'Displaying' : 'Editing'}
-                        </span>
-                    </button>
-                    <button
-                        className="btn btn-ghost btn-xs flex items-center gap-1.5 px-2"
-                        title="Open webpage (popup)"
-                        onClick={onOpenWebpage}
-                    >
-                        <Eye size={16} />
-                        Preview
-                    </button>
+                    <div className="flex items-center gap-1">
+                        <button
+                            className={`btn btn-accent btn-sm flex items-center gap-2 text-[12px] font-semibold shadow-lg shadow-[color:var(--accent)]/25 ${previewMode ? 'nav-active' : ''}`}
+                            onClick={togglePreviewMode}
+                            title={previewMode ? 'Switch to editing mode' : 'Switch to display mode'}
+                            aria-pressed={previewMode}
+                        >
+                            {previewMode ? <Eye size={14} /> : <Pencil size={14} />}
+                            <span className="ml-1">{previewMode ? 'Displaying' : 'Editing'}</span>
+                        </button>
+                    </div>
                 </div>
 
                 <div className={`${groupClass} flex-wrap ${previewDisabledClass}`}>

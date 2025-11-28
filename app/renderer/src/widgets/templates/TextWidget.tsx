@@ -26,6 +26,12 @@ export const TextWidgetDef: WidgetDefinition<{ text: string; align?: 'left' | 'c
             </div>
         );
     },
+    // Provide static CSS declarations scoped per-instance for compiled sites
+    getStaticCss: (props) => {
+        const align = props?.align || 'left';
+        const variantSize = props?.variant === 'h2' ? '28px' : props?.variant === 'h3' ? '20px' : '16px';
+        return `text-align: ${align}; color: var(--widget-fg); font-family: var(--heading-font); font-size: ${variantSize};`;
+    },
 };
 
 // 3) Optional: Config panel example using useWidgetConfig
