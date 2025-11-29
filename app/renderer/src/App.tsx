@@ -58,7 +58,24 @@ export default function App() {
                 <div className="min-h-screen" style={{ paddingTop: 36 }}>
                   <FrameBar />
                   <Sidebar />
-                  <div style={{ marginLeft: 'var(--sidebar-w,15rem)' }} className="min-h-0">
+                  <div
+                    style={{ marginLeft: 'var(--sidebar-w,15rem)' }}
+                    className="min-h-0"
+                    onPointerDown={(e) => {
+                      try {
+                        const el = e.currentTarget as HTMLElement | null;
+                        if (!el) return;
+                        const rect = el.getBoundingClientRect();
+                        const localX = e.clientX - rect.left;
+                        // If pointer is within 48px of the left edge (adjacent to the sidebar), start sidebar resize
+                        if (localX >= 0 && localX <= 48) {
+                          window.dispatchEvent(new CustomEvent('py:sidebar-begin-resize', { detail: { startX: e.clientX } }));
+                        }
+                      } catch {
+                        /* ignore */
+                      }
+                    }}
+                  >
                     <div className="min-h-screen flex flex-col">
                       <PortfolioIsland />
                       <main className="flex-1">

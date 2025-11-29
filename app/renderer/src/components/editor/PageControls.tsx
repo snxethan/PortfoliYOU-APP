@@ -53,7 +53,7 @@ export default function PageControls({
     const panelLabelClass = "text-[10px] uppercase tracking-wide text-[color:var(--fg-muted)]";
 
     return (
-        <div className="px-4 py-3 border-b border-[color:var(--border)] bg-[color:var(--bg)]">
+        <div className="px-0 py-0">
             <div className="w-full max-w-2xl mx-auto">
                 <div className="grid gap-2 md:gap-3 md:grid-cols-2">
                     <div className={panelClass}>

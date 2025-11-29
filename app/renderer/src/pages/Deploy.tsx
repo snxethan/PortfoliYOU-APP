@@ -21,6 +21,11 @@ export default function DeployPage() {
 				g.push(line);
 				// NOTE: do NOT re-dispatch 'py:preview:log' here — that causes a feedback loop
 			} catch { /* ignore */ }
+
+			// Also persist technical logs to disk via the main process
+			try {
+				void (window as any).api?.appendLog?.({ line });
+			} catch { /* ignore */ }
 			return next;
 		});
 	}
@@ -316,8 +321,8 @@ export default function DeployPage() {
 		<div className="p-6 space-y-6">
 			<section className="surface border border-[color:var(--border)] rounded-2xl p-6 shadow-lg shadow-black/20">
 				<div className="flex flex-col gap-1">
-					<p className="text-xs uppercase tracking-wide text-[color:var(--fg-muted)]">Portfolio Deployer workspace</p>
-					<p className="text-sm text-[color:var(--fg-muted)]">Preview, build and export your portfolio from a single workspace.</p>
+					<p className="section-title">Portfolio Deployer workspace</p>
+					<p className="text-sm text-[color:var(--fg-muted)]">Preview, build and export your portfolio in a single workspace.</p>
 				</div>
 				<div className="mt-4 space-y-4">
 					{/* 1) Build Log (non-collapsible) */}
@@ -410,12 +415,13 @@ export default function DeployPage() {
 									</button>
 									<button
 										type="button"
-										className="btn btn-ghost btn-xs p-2"
-										title="Build settings"
-										disabled={!selectedProjectId}
-										onClick={() => selectedProjectId && openSettings({ projectId: selectedProjectId, section: 'build' })}
+										className="btn btn-ghost btn-xs p-2 flex items-center gap-2"
+										title={selectedProject || selectedProjectId ? 'Build settings' : 'Open a project to modify build settings'}
+										disabled={!selectedProject && !selectedProjectId}
+										onClick={() => openSettings({ projectId: selectedProjectId || (selectedProject as any)?.id, section: 'build' })}
 									>
 										<Settings size={16} />
+										<span className="text-sm hidden sm:inline">Build settings</span>
 									</button>
 								</div>
 							</div>

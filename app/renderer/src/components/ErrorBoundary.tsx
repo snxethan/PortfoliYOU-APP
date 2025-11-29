@@ -83,7 +83,7 @@ export default class ErrorBoundary extends React.Component<Props, State> {
                 <div className="mt-3 relative">
                   <div className="flex items-center justify-between">
                     <div className="text-xs font-semibold">Component stack</div>
-                      {/* Removed duplicate copy button here; top-right copy copies error + stack */}
+                    {/* Removed duplicate copy button here; top-right copy copies error + stack */}
                   </div>
                   <pre className="text-xs whitespace-pre-wrap text-[color:var(--fg-muted)] mt-2">{this.state.componentStack}</pre>
                 </div>

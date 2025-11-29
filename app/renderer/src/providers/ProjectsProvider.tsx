@@ -676,11 +676,17 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 			const mergedSource: Partial<PortfolioMeta> = { ...(existing.portfolioMeta || { siteTitle: existing.name }), ...(payload.metadata || {}) };
 			mergedSource.siteTitle = mergedSource.siteTitle ?? normalizedName;
 			const hydrated = hydratePortfolioMeta(mergedSource, normalizedName);
+			// Preserve any additional metadata keys (e.g. buildSettings) that hydratePortfolioMeta
+			// doesn't explicitly include. We trim/normalize core fields via `hydrated`, then
+			// merge through any other keys from the merged source so we don't drop nested data.
+			const extraMeta = { ...(mergedSource as any) } as Record<string, any>;
+			delete extraMeta.siteTitle; delete extraMeta.tagline; delete extraMeta.description; delete extraMeta.author; delete extraMeta.websiteUrl; delete extraMeta.iconEmoji; delete extraMeta.iconImageUrl; delete extraMeta.socialImageUrl;
+			const finalMeta = { ...hydrated, ...extraMeta } as PortfolioMeta & Record<string, any>;
 			const updated: LocalProject = {
 				...existing,
 				name: hydrated.siteTitle,
 				description: hydrated.description || existing.description || "",
-				portfolioMeta: hydrated,
+				portfolioMeta: finalMeta,
 				updatedAt: now(),
 			} as LocalProject;
 			let nextList = [...projects];

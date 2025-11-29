@@ -116,6 +116,10 @@ contextBridge.exposeInMainWorld("api", {
 	previewStopServer: async () => {
 		return ipcRenderer.invoke('py:preview:stopServer');
 	},
+	// Append a line to the main-process preview log file
+	appendLog: async (opts: { line?: string }) => {
+		return ipcRenderer.invoke('py:appendLog', opts || {});
+	},
 }); // exposes a safe API to the renderer process
 
 

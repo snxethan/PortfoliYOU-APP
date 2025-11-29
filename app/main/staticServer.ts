@@ -112,8 +112,15 @@ export async function startStaticServer(dir: string, host = '0.0.0.0') {
     });
 
     return new Promise<{ ok: true; port: number; localUrl: string; lanUrl: string }>((resolve, reject) => {
-        server!.on('error', (err) => reject(err));
+        const onError = (err: any) => {
+            // Clean up global server state to avoid leaving a stale reference
+            try { server = null; servingDir = null; } catch { /* ignore */ }
+            reject(err);
+        };
+        server!.on('error', onError);
         server!.listen(0, host, () => {
+            // Remove the error listener now that listen succeeded
+            try { server!.removeListener('error', onError); } catch { /* ignore */ }
             const addr = server!.address();
             let port = 0;
             if (addr && typeof addr === 'object') port = addr.port;

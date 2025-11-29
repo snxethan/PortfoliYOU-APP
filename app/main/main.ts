@@ -279,6 +279,26 @@ app.on('will-quit', async () => {
   } catch { /* ignore */ }
 });
 
+// Global error handlers: log and attempt to stop static server to avoid leaving a stuck process
+process.on('uncaughtException', async (err) => {
+  try {
+    const msg = `uncaughtException: ${err && (err as any).stack ? (err as any).stack : String(err)}`;
+    try { await appendPreviewLog(msg); } catch { /* ignore */ }
+    if (isServerRunning()) {
+      try { await stopStaticServer(); } catch { /* ignore */ }
+    }
+  } catch { /* ignore */ }
+});
+process.on('unhandledRejection', async (reason) => {
+  try {
+    const msg = `unhandledRejection: ${reason && (reason as any).stack ? (reason as any).stack : String(reason)}`;
+    try { await appendPreviewLog(msg); } catch { /* ignore */ }
+    if (isServerRunning()) {
+      try { await stopStaticServer(); } catch { /* ignore */ }
+    }
+  } catch { /* ignore */ }
+});
+
 // IPC: Save a file to disk
 ipcMain.handle("py:saveFile", async (_event, opts: { defaultPath?: string; data: string; encoding?: 'utf8' | 'base64' }) => {
   const { defaultPath, data, encoding } = opts || {};
@@ -465,6 +485,37 @@ ipcMain.handle('py:preview:stopServer', async () => {
     return { ok: false, error: String(e) };
   }
 });
+
+// IPC: Append a line to the application preview log file (userData/logs/preview.log)
+ipcMain.handle('py:appendLog', async (_event, opts?: { line?: string }) => {
+  try {
+    const line = opts?.line || '';
+    const logsDir = path.join(app.getPath('userData'), 'logs');
+    await fs.mkdir(logsDir, { recursive: true });
+    const logFile = path.join(logsDir, 'preview.log');
+    const ts = new Date().toISOString();
+    const entry = `[${ts}] ${line}\n`;
+    await fs.appendFile(logFile, entry, 'utf8');
+    return { ok: true, filePath: logFile };
+  } catch (e) {
+    return { ok: false, error: String(e) };
+  }
+});
+
+// Internal helper used by main process code to record preview logs (kept alongside IPC handler)
+async function appendPreviewLog(line?: string) {
+  try {
+    const logsDir = path.join(app.getPath('userData'), 'logs');
+    await fs.mkdir(logsDir, { recursive: true });
+    const logFile = path.join(logsDir, 'preview.log');
+    const ts = new Date().toISOString();
+    const entry = `[${ts}] ${line || ''}\n`;
+    await fs.appendFile(logFile, entry, 'utf8');
+    return { ok: true, filePath: logFile };
+  } catch (e) {
+    return { ok: false, error: String(e) };
+  }
+}
 
 // IPC: Embed a built folder (e.g. dist-site) into a PortfoliYOU project archive (.portfoliyou)
 ipcMain.handle('py:embedDistIntoProject', async (_event, opts?: { projectFilePath?: string; distDir?: string; defaultName?: string }) => {

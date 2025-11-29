@@ -55,6 +55,68 @@ export default function Sidebar() {
     window.addEventListener('py:highlight-account', onPulse);
     return () => { window.removeEventListener('py:highlight-account', onPulse); clearTimer('acc'); };
   }, []);
+
+  // Listen for external resize-start events and also start resize when user pointerdowns
+  // near the right edge of the sidebar (so dragging from the content edge works).
+  useEffect(() => {
+    function beginResizeFromEvent(e: any) {
+      try {
+        const detail = e?.detail || {};
+        const startX = typeof detail.startX === 'number' ? detail.startX : undefined;
+        if (typeof startX === 'number') {
+          if (collapsed) setCollapsed(false);
+          const startW = sidebarWidth;
+          const handleMove = (move: PointerEvent) => {
+            const delta = move.clientX - startX;
+            const next = Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, startW + delta));
+            setSidebarWidth(next);
+            try { localStorage.setItem('py_sidebar_w', String(Math.round(next))); } catch { /* ignore */ }
+          };
+          const handleUp = () => {
+            window.removeEventListener('pointermove', handleMove);
+            window.removeEventListener('pointerup', handleUp);
+          };
+          window.addEventListener('pointermove', handleMove);
+          window.addEventListener('pointerup', handleUp);
+        }
+      } catch { /* ignore */ }
+    }
+    window.addEventListener('py:sidebar-begin-resize', beginResizeFromEvent as EventListener);
+
+    const THRESHOLD = 48; // px from sidebar right edge into the content area
+    function onGlobalPointerDown(ev: PointerEvent) {
+      try {
+        if (ev.button !== 0) return; // only primary button
+        const clientX = ev.clientX;
+        const collapsedPx = 44; // approx 2.75rem
+        const sidebarRight = collapsed ? collapsedPx : sidebarWidth;
+        // if pointer is just to the right of the sidebar (within threshold), begin resize
+        if (clientX >= sidebarRight && clientX <= sidebarRight + THRESHOLD) {
+          if (collapsed) setCollapsed(false);
+          const startX = clientX;
+          const startW = collapsed ? Math.max(SIDEBAR_MIN, sidebarWidth) : sidebarWidth;
+          const handleMove = (move: PointerEvent) => {
+            const delta = move.clientX - startX;
+            const next = Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, startW + delta));
+            setSidebarWidth(next);
+            try { localStorage.setItem('py_sidebar_w', String(Math.round(next))); } catch { /* ignore */ }
+          };
+          const handleUp = () => {
+            window.removeEventListener('pointermove', handleMove);
+            window.removeEventListener('pointerup', handleUp);
+          };
+          window.addEventListener('pointermove', handleMove);
+          window.addEventListener('pointerup', handleUp);
+        }
+      } catch { /* ignore */ }
+    }
+    window.addEventListener('pointerdown', onGlobalPointerDown as EventListener);
+
+    return () => {
+      window.removeEventListener('py:sidebar-begin-resize', beginResizeFromEvent as EventListener);
+      window.removeEventListener('pointerdown', onGlobalPointerDown as EventListener);
+    };
+  }, [collapsed, sidebarWidth]);
   // zoomViewport removed — unused
   return (
     <aside

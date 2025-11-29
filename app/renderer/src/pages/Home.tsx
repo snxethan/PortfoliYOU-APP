@@ -117,7 +117,6 @@ export default function HomePage() {
 		};
 	}, [hasAny, recent.length]);
 
-	// Legacy notification logic removed; unified notifications come from NotificationsProvider
 
 	// Unified layout below handles both empty and non-empty states.
 
@@ -145,7 +144,7 @@ export default function HomePage() {
 				<div id="py-list" ref={listRef} className={`surface border border-[color:var(--border)] rounded-2xl p-6 space-y-4 shadow-lg shadow-black/20 ${pulseList ? 'highlight-pulse' : ''}`}>
 					<div className="flex flex-col gap-1">
 						<p className="section-title">Portfolio workspace</p>
-						<p className="text-sm text-[color:var(--fg-muted)]">Create new work, manage local files, and keep cloud projects in sync.</p>
+						<p className="text-sm text-[color:var(--fg-muted)]">Create, manage, and load your portfolios in a single workspace.</p>
 					</div>
 					<div id="py-quickstart" ref={quickstartRef} className={`${pulseQuickstart ? 'highlight-pulse' : ''}`}>
 						<QuickstartPanel

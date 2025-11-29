@@ -246,18 +246,33 @@ export default function EditorPage() {
   });
   const paletteMinWidth = 260;
   const paletteMaxWidth = 520;
+  // Allow the palette to be reduced smaller while still enforcing a sensible minimum
+  // Lowered from 260 to 200 to allow smaller dashboards when requested.
+  // Adjust this value if you want a different minimum width.
+  // NOTE: keep in sync with UI expectations.
+
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const _paletteMinHint = 200;
   function togglePalette() {
     setPaletteCollapsed(prev => !prev);
   }
-  const beginResizePalette = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
-    if (paletteCollapsed) return;
-    event.preventDefault();
-    event.stopPropagation();
-    const startX = event.clientX;
-    const startWidth = paletteWidth;
+  const paletteRef = useRef<HTMLDivElement | null>(null);
+
+  const beginResizePalette = useCallback((event: React.PointerEvent | PointerEvent) => {
+    const ev = event as PointerEvent;
+    try { ev.preventDefault?.(); } catch { /* ignore */ }
+    try { ev.stopPropagation?.(); } catch { /* ignore */ }
+    // If the palette is collapsed, expand it before resizing and use a sensible start width
+    if (paletteCollapsed) {
+      setPaletteCollapsed(false);
+    }
+    const startX = ev.clientX;
+    const startWidth = Math.max(paletteMinWidth, paletteWidth || 200);
     const handleMove = (move: PointerEvent) => {
+      // For a right-side sidebar, moving pointer left should increase palette width,
+      // so compute delta relative to the startX accordingly.
       const delta = startX - move.clientX;
-      const next = Math.min(paletteMaxWidth, Math.max(paletteMinWidth, startWidth + delta));
+      const next = Math.min(paletteMaxWidth, Math.max(paletteMinWidth, Math.round(startWidth + delta)));
       setPaletteWidth(next);
       try { localStorage.setItem('py_palette_w', String(Math.round(next))); } catch { /* ignore */ }
     };
@@ -631,465 +646,535 @@ export default function EditorPage() {
 
 
   return (
-    <div className="p-4 space-y-5">
+    <div className="p-6 space-y-6">
       {!selectedProject && (
         <div className="surface p-4 border border-[color:var(--border)] text-sm text-[color:var(--fg-muted)]">
           No portfolio selected. Go to Home and open one.
         </div>
       )}
 
-      <section className="surface p-0 overflow-hidden">
+      <section className="surface border border-[color:var(--border)] rounded-2xl p-6 shadow-lg shadow-black/20 overflow-hidden">
         {/* Workspace label */}
-        <div className="px-4 pb-2">
-          <p className="text-xs uppercase tracking-wide text-[color:var(--fg-muted)]">Portfolio Editor workspace</p>
-        </div>
-        {/* Top bar */}
-        <EditorTopBar
-          previewMode={previewMode}
-          togglePreviewMode={togglePreviewMode}
-          gap={gap}
-          setGap={setGap}
-          showGrid={showGrid}
-          toggleGrid={toggleGrid}
-          activeView={activeView}
-          setDesktopView={setDesktopView}
-          setMobileView={setMobileView}
-          pageWidth={pageWidth}
-          pageHeight={pageHeight}
-          heightMode={heightMode}
-          setHeightMode={applyHeightMode}
-          zoom={zoom}
-          onZoomIn={zoomIn}
-          onZoomOut={zoomOut}
-          onResetZoom={resetZoom}
-          canUndo={canUndo}
-          canRedo={canRedo}
-          undo={undo}
-          redo={redo}
-          onOpenWebpage={openWebpage}
-        />
+        <p className="section-title">Portfolio Editor workspace</p>
+        <p className="text-sm text-[color:var(--fg-muted)]">Edit, manage and build your portfolio in a single workspace.</p>
 
-        {/* Page management section */}
-        {selectedProject && (
-          <PageControls
-            isCloud={!!(selectedProject as unknown as { _cloudId?: string })._cloudId}
-            pageOrder={selectedProject.pageOrder || []}
-            pages={selectedProject.pages}
-            currentPageId={currentPageId}
-            pageBackground={pageBackground}
-            themeBackground={themeBackground}
-            onQuickBackgroundChange={(color) => {
-              if (!selectedProject || !currentPageId) return;
-              setPageBackground(selectedProject.id, currentPageId, color);
-            }}
-            onOpenThemeSettings={selectedProject ? () => openSettings({ projectId: selectedProject.id, section: "theme" }) : undefined}
-            onSelectPage={(id) => {
-              setCurrentPageId(id);
-              if (selectedProject && id) {
-                try { localStorage.setItem(`py_current_page_${selectedProject.id}`, id); } catch { /* ignore */ }
-                replaceItems(getPageItems(selectedProject.id, id) as GridItem[]);
-              } else {
-                replaceItems([]);
-              }
-            }}
-            onCreatePage={() => {
-              if (!selectedProject) return;
-              const prevId = currentPageId;
-              const id = createPage(selectedProject.id) || null;
-              if (id) {
-                setCurrentPageId(id);
-                try { localStorage.setItem(`py_current_page_${selectedProject.id}`, id); } catch { /* ignore */ }
-                replaceItems([]);
-                setHistory(h => {
-                  const entry: HistoryEntry = {
-                    label: 'Create page',
-                    undo: (items) => items,
-                    redo: (items) => items,
-                    onUndo: () => {
-                      deletePage(selectedProject.id, id);
-                      const backId = prevId || (selectedProject.pageOrder?.[0] || null);
-                      if (backId) {
-                        setCurrentPageId(backId);
-                        const loaded = getPageItems(selectedProject.id, backId) as GridItem[];
-                        replaceItems(loaded);
-                      }
-                    },
-                    onRedo: () => {
-                      const newId = createPage(selectedProject.id);
-                      if (newId) {
-                        setCurrentPageId(newId);
-                        replaceItems([]);
-                      }
-                    }
-                  };
-                  return [...h, entry];
-                });
-                setRedoStack([]);
-              }
-            }}
-            onRenameInline={(newName: string) => {
-              if (!selectedProject || !currentPageId) return;
-              const oldTitle = selectedProject.pages[currentPageId]?.title || 'Untitled';
-              const trimmed = (newName || '').trim();
-              if (!trimmed || trimmed === oldTitle) return;
-              // history entry
-              setHistory(h => {
-                const entry: HistoryEntry = {
-                  label: 'Rename page',
-                  undo: (items) => items,
-                  redo: (items) => items,
-                  onUndo: () => { renamePage(selectedProject.id, currentPageId, oldTitle); },
-                  onRedo: () => { renamePage(selectedProject.id, currentPageId, trimmed); },
-                } as HistoryEntry;
-                return [...h, entry];
-              });
-              setRedoStack([]);
-              renamePage(selectedProject.id, currentPageId, trimmed);
-              try { localStorage.setItem(`py_current_page_${selectedProject.id}`, currentPageId); } catch { /* ignore */ }
-              try { replaceItems(getPageItems(selectedProject.id, currentPageId) as GridItem[]); } catch { /* ignore */ }
-            }}
-            onOpenSettings={() => {
-              if (!selectedProject || !currentPageId) return;
-              const oldTitle = selectedProject.pages[currentPageId]?.title || 'Untitled';
-              setRenameOldTitle(oldTitle);
-              setRenameInitialStarter(Boolean(selectedProject.pages[currentPageId]?.starter));
-              setRenameModalOpen(true);
-            }}
-            onDeleteCurrentPage={() => {
-              if (!selectedProject || !currentPageId) return;
-              const total = selectedProject.pageOrder?.length ?? 0;
-              if (total <= 1) return;
-              const title = selectedProject.pages[currentPageId]?.title || 'Untitled';
-              const ok = window.confirm(`Delete page "${title}"? This cannot be undone.`);
-              if (!ok) return;
-              const snapItems = getPageItems(selectedProject.id, currentPageId) as GridItem[];
-              const removedId = currentPageId;
-              const remaining = (selectedProject.pageOrder || []).filter(id => id !== currentPageId);
-              const nextId = remaining[0] || null;
-              deletePage(selectedProject.id, removedId);
-              setCurrentPageId(nextId);
-              if (nextId) replaceItems(getPageItems(selectedProject.id, nextId) as GridItem[]); else replaceItems([]);
-              setHistory(h => {
-                let restoredId: string | null = null;
-                const entry: HistoryEntry = {
-                  label: 'Delete page',
-                  undo: (items) => items,
-                  redo: (items) => items,
-                  onUndo: () => {
-                    const nid = createPage(selectedProject.id);
-                    if (nid) {
-                      restoredId = nid;
-                      renamePage(selectedProject.id, nid, title);
-                      setPageItems(selectedProject.id, nid, serializeGridItems(snapItems));
-                      setCurrentPageId(nid);
-                      replaceItems(getPageItems(selectedProject.id, nid) as GridItem[]);
-                    }
-                  },
-                  onRedo: () => {
-                    const target = restoredId || removedId;
-                    if (target) {
-                      deletePage(selectedProject.id, target);
-                      const fallback = (selectedProject.pageOrder?.[0]) || null;
-                      setCurrentPageId(fallback);
-                      if (fallback) replaceItems(getPageItems(selectedProject.id, fallback) as GridItem[]);
-                    }
-                  },
-                };
-                return [...h, entry];
-              });
-              setRedoStack([]);
-            }}
-          />
-        )}
-        {/* Canvas label */}
-        <div className="px-4 pb-2">
-          <p className="text-xs uppercase tracking-wide text-[color:var(--fg-muted)]">Portfolio Canvas</p>
-        </div>
-        <DndContext
-          sensors={useSensors(
-            useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
-            useSensor(MouseSensor),
-            useSensor(TouchSensor, { activationConstraint: { delay: 150, tolerance: 5 } }),
-          )}
-          collisionDetection={rectIntersection}
-          onDragStart={(event: DragStartEvent) => {
-            const data = event.active.data.current as PaletteDrag;
-            try { console.debug('[py:dnd] dragstart activeId=', event.active.id, 'data=', data); } catch { /* ignore */ }
-            if (data?.src === 'palette') {
-              setActiveDrag(data);
-              const pointerEvent = event.activatorEvent as PointerEvent | undefined;
-              if (pointerEvent && typeof pointerEvent.clientX === 'number' && typeof pointerEvent.clientY === 'number') {
-                dragPointerStart.current = { x: pointerEvent.clientX, y: pointerEvent.clientY };
-                dragPointerLast.current = { x: pointerEvent.clientX, y: pointerEvent.clientY };
-              } else {
-                dragPointerStart.current = null;
-              }
-            }
-          }}
-          onDragMove={(event) => {
-            try { console.debug('[py:dnd] dragmove delta=', event.delta, 'activeId=', event.active?.id); } catch { /* ignore */ }
-            if (dragPointerStart.current) {
-              dragPointerLast.current = {
-                x: dragPointerStart.current.x + event.delta.x,
-                y: dragPointerStart.current.y + event.delta.y,
-              };
-            } else {
-              const pointerEvent = event.activatorEvent as PointerEvent | undefined;
-              if (pointerEvent && typeof pointerEvent.clientX === 'number' && typeof pointerEvent.clientY === 'number') {
-                dragPointerLast.current = { x: pointerEvent.clientX, y: pointerEvent.clientY };
-              }
-            }
-          }}
-          onDragEnd={(event: DragEndEvent) => {
-            const { active, over } = event;
-            try { console.debug('[py:dnd] dragend active=', active?.id, 'over=', over?.id); } catch { /* ignore */ }
-            if (!over) {
-              try { console.debug('[py:dnd] dragend: no droppable target'); } catch { /* ignore */ }
-              setActiveDrag(undefined);
-              dragPointerStart.current = null;
-              dragPointerLast.current = null;
-              dragOverlaySize.current = null;
-              return;
-            }
-            const data = active.data.current as { src?: string; type?: string; label?: string; w?: number; h?: number; schemaVersion?: number } | undefined;
-            if (data?.src === 'palette' && over.id === 'grid-canvas') {
-              const overRect = over.rect;
-              const initial = active.rect.current.initial;
-              if (!initial) return;
-              const pointerRef = dragPointerLast.current || dragPointerStart.current;
-              const pointerX = pointerRef ? pointerRef.x : initial.left + initial.width / 2 + event.delta.x;
-              const pointerY = pointerRef ? pointerRef.y : initial.top + initial.height / 2 + event.delta.y;
-              const relX = pointerX - overRect.left;
-              const relY = pointerY - overRect.top;
-
-              // Compute grid coordinates using same math, then quantize to micro-step based on gap
-              const effectiveZoom = zoom || 1;
-              const colW = Math.floor(pageWidth / COLS);
-              const baseUnit = Math.max(1, colW + gap);
-              const baseX = baseUnit;
-              const baseY = baseUnit; // square grid: row unit equals column unit
-              const w = data.w ?? 4;
-              const h = data.h ?? 4;
-              const adjX = relX / effectiveZoom;
-              const adjY = relY / effectiveZoom;
-              let x = Math.floor(adjX / baseX);
-              let y = Math.floor(adjY / baseY);
-              x = Math.max(0, Math.min(x, COLS - w));
-              y = Math.max(0, y);
-              const id = typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : Math.random().toString(36).slice(2, 9);
-              const ad = active.data.current as unknown as { type?: string };
-              const schemaVersion = typeof data.schemaVersion === 'number' ? data.schemaVersion : 1;
-              const newItem: GridItem = { id, x, y, w, h, title: data.label ?? 'Widget', z: 0, type: ad?.type, props: {}, schemaVersion, pinned: false, locked: false };
-              commitUpdate(`Add ${newItem.title}`, (prev) => {
-                const norm = normalizeZ(prev);
-                const maxZ = norm.length; // new item will be top
-                return [...norm, { ...newItem, z: maxZ }];
-              });
-              notifyWidgetChange('create', newItem.title);
-            }
-            // Clear drag overlay when drop completes
-            setActiveDrag(undefined);
-            dragPointerStart.current = null;
-            dragPointerLast.current = null;
-            dragOverlaySize.current = null;
-          }}
-          onDragCancel={() => {
-            setActiveDrag(undefined);
-            dragPointerStart.current = null;
-            dragPointerLast.current = null;
-            dragOverlaySize.current = null;
-          }}
-        >
-          {/* Visible drag preview while dragging from the palette */}
-          <DragOverlay dropAnimation={null} modifiers={[dragOverlayCursorAlign]}>
-            <DragOverlayPreview activeDrag={activeDrag} onMeasure={(size) => { dragOverlaySize.current = size; }} />
-          </DragOverlay>
-          <div
-            className="h-full grid gap-0 min-h-[28rem] items-stretch"
-            style={{
-              gridTemplateColumns: paletteCollapsed ? 'minmax(0,1fr) 32px' : `minmax(0,1fr) ${Math.round(paletteWidth)}px`,
-              ...(canvasHeightPx ? ({ ['--canvas-h' as unknown as string]: `${canvasHeightPx}px` } as React.CSSProperties) : {}),
-            }}
-            onKeyDown={onKeyDown}
-            tabIndex={0}
-          >
-            {/* Canvas or Preview inside a page-like viewport */}
-            <div className="h-full min-h-0" ref={canvasWrapperRef}>
-              <ViewportSurface
+        <div className="mt-4 space-y-4">
+          {/* Editor Settings subsection */}
+          <div className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)]/90 p-4">
+            <div>
+              <p className="text-xs uppercase tracking-wide text-[color:var(--fg-muted)]">Editor Settings</p>
+              <p className="text-sm text-[color:var(--fg-muted)]">Controls for canvas, zoom and editor preferences.</p>
+            </div>
+            <div className="mt-4">
+              <EditorTopBar
+                previewMode={previewMode}
+                togglePreviewMode={togglePreviewMode}
+                gap={gap}
+                setGap={setGap}
+                showGrid={showGrid}
+                toggleGrid={toggleGrid}
+                activeView={activeView}
+                setDesktopView={setDesktopView}
+                setMobileView={setMobileView}
                 pageWidth={pageWidth}
                 pageHeight={pageHeight}
-                setPageWidth={setPageWidth}
-                setPageHeight={setPageHeight}
                 heightMode={heightMode}
-                previewMode={previewMode}
-                cols={COLS}
-                rowH={DEFAULT_ROW_H}
-                gap={gap}
-                items={items}
-                onItemsChange={replaceItems}
-                showGrid={showGrid}
-                selectedId={selectedId}
-                onSelect={setSelectedId}
-                onDelete={(id) => {
-                  let removedTitle: string | undefined;
-                  commitUpdate("Delete item", (prev) => {
-                    const tgt = prev.find(i => i.id === id);
-                    if (!tgt) return prev;
-                    removedTitle = tgt.title;
-                    return prev.filter((it) => it.id !== id);
-                  });
-                  if (removedTitle) notifyWidgetChange('delete', removedTitle);
-                }}
-                onDuplicate={(id) => {
-                  let duplicateTitle: string | undefined;
-                  commitUpdate("Duplicate item", (prev) => {
-                    const src = prev.find((it) => it.id === id);
-                    if (!src) return prev;
-                    duplicateTitle = src.title + " copy";
-                    const nid = typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : Math.random().toString(36).slice(2, 9);
-                    const nx = Math.min(COLS - src.w, src.x + 1);
-                    const ny = src.y + 1;
-                    const norm = normalizeZ(prev);
-                    const maxZ = norm.length; // place duplicate on top
-                    return [...norm, { ...src, id: nid, x: nx, y: ny, title: duplicateTitle, z: maxZ }];
-                  });
-                  if (duplicateTitle) notifyWidgetChange('create', duplicateTitle);
-                }}
-                onMoveStart={() => { /* no-op */ }}
-                onMoveEnd={(prevItem, nextItem) => {
-                  if (
-                    prevItem.x === nextItem.x &&
-                    prevItem.y === nextItem.y &&
-                    prevItem.w === nextItem.w &&
-                    prevItem.h === nextItem.h
-                  ) {
-                    return;
-                  }
-                  const label = `Move ${nextItem.title}`;
-                  setHistory(h => {
-                    const entry: HistoryEntry = {
-                      label,
-                      undo: (items) => items.map(it => it.id === nextItem.id ? { ...it, x: prevItem.x, y: prevItem.y } : it),
-                      redo: (items) => items.map(it => it.id === nextItem.id ? { ...it, x: nextItem.x, y: nextItem.y } : it),
-                    };
-                    const nh = [...h, entry];
-                    return nh.length > MAX_HISTORY ? nh.slice(nh.length - MAX_HISTORY) : nh;
-                  });
-                  setRedoStack([]);
-                  persistItems();
-                }}
-                onBringToFront={bringToFront}
-                onSendToBack={sendToBack}
-                onBringForward={bringForward}
-                onSendBackward={sendBackward}
-                onTogglePin={togglePin}
-                onOpenModify={openModify}
-                onDropAsset={(id, hash) => {
-                  // Only handle for Image widgets: set src to asset://hash
-                  commitUpdate('Set image from asset', (prev) => prev.map(it => it.id === id && it.type === 'image' ? { ...it, props: { ...(it.props as Record<string, unknown>), src: `asset://${hash}` } } : it));
-                }}
-                onNavigatePage={(pid) => {
-                  if (!selectedProject) return;
-                  setCurrentPageId(pid);
-                  try { localStorage.setItem(`py_current_page_${selectedProject.id}`, pid); } catch { /* ignore */ }
-                }}
-                currentPageId={currentPageId || undefined}
+                setHeightMode={applyHeightMode}
                 zoom={zoom}
-                minZoom={MIN_ZOOM}
-                maxZoom={MAX_ZOOM}
-                onZoomChange={applyZoom}
-                pageBackground={effectivePageBackground}
-                theme={activeTheme}
-                themeSnapshot={widgetThemeSnapshot}
+                onZoomIn={zoomIn}
+                onZoomOut={zoomOut}
+                onResetZoom={resetZoom}
+                canUndo={canUndo}
+                canRedo={canRedo}
+                undo={undo}
+                redo={redo}
+                onOpenWebpage={openWebpage}
               />
             </div>
-
-            {/* Widget Sidebar (collapsible) */}
-            <aside className={`relative surface p-4 border border-[color:var(--border)] rounded-2xl shadow-lg bg-[color:var(--surface)]/80 overflow-hidden ${previewMode ? 'opacity-50 pointer-events-none' : ''} flex flex-col palette-full-height`}>
-              {paletteCollapsed ? (
-                <div
-                  role="button"
-                  tabIndex={0}
-                  onClick={togglePalette}
-                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); togglePalette(); } }}
-                  className="absolute inset-0 flex items-center justify-center cursor-pointer z-20"
-                  title="Expand widget sidebar"
-                >
-                  <ChevronsLeft size={16} />
-                </div>
-              ) : (
-                <div className="h-full flex flex-col relative">
-                  <div
-                    className="absolute left-0 top-0 bottom-0 w-4 cursor-ew-resize z-10 flex items-center justify-center text-[color:var(--fg-muted)] no-touch-action"
-                    onPointerDown={beginResizePalette}
-                    role="presentation"
-                  >
-                    <span className="sr-only">Resize sidebar</span>
-                    <div className="rounded-full border border-[color:var(--border)] bg-[color:var(--surface)]/80 p-0.5 shadow-sm">
-                      <GripVertical size={12} />
-                    </div>
-                  </div>
-                  <div className="px-3 pt-4 pb-3 relative palette-header">
-                    <p className="text-xs uppercase tracking-wide text-[color:var(--fg-muted)]">Canvas Dashboard</p>
-                    <button
-                      className="absolute right-2 top-1 btn btn-ghost btn-xs p-1"
-                      title="Collapse palette"
-                      onClick={togglePalette}
-                      aria-label="Collapse widget palette"
-                    >
-                      <ChevronsRight size={14} />
-                    </button>
-                  </div>
-                  <div className="p-2 overflow-auto grow space-y-3 scrollable scrollable-container">
-                    <section className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)]/90 shadow-sm">
-                      <div className="px-4 pt-1 pb-1">
-                        <button
-                          className="w-full flex items-center justify-between gap-2 px-4 py-2 text-left"
-                          onClick={toggleWidgetsOpen}
-                          title={widgetsOpen ? 'Collapse widgets' : 'Expand widgets'}
-                        >
-                          <div className="flex items-center gap-2">
-                            {(widgetsOpen) ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-                            <p className="text-sm uppercase tracking-wide text-[color:var(--fg-muted)]">Widgets</p>
-                          </div>
-                          <div className="text-[color:var(--fg-muted)]" />
-                        </button>
-                      </div>
-                      {widgetsOpen && (
-                        <div className="p-3 pt-0">
-                          <Suspense fallback={<div className="text-xs text-[color:var(--fg-muted)] p-2">Loading widgets…</div>}>
-                            <WidgetsPalette />
-                          </Suspense>
-                        </div>
-                      )}
-                    </section>
-
-                    <section className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)]/90 shadow-sm">
-                      <div className="px-4 pt-1 pb-1">
-                        <button
-                          className="w-full flex items-center justify-between gap-2 px-4 py-2 text-left"
-                          onClick={toggleAssetsOpen}
-                          title={assetsOpen ? 'Collapse assets' : 'Expand assets'}
-                        >
-                          <div className="flex items-center gap-2">
-                            {assetsOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-                            <p className="text-sm uppercase tracking-wide text-[color:var(--fg-muted)]">Assets</p>
-                          </div>
-                          <div className="text-[color:var(--fg-muted)]" />
-                        </button>
-                      </div>
-                      {assetsOpen && (
-                        <div className="p-3 pt-0">
-                          <AssetsPanel hideHeader />
-                        </div>
-                      )}
-                    </section>
-                  </div>
-                </div>
-              )}
-            </aside>
           </div>
-        </DndContext>
+
+          {/* Page Settings subsection */}
+          {selectedProject && (
+            <div className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)]/90 p-4">
+              <div>
+                <p className="text-xs uppercase tracking-wide text-[color:var(--fg-muted)]">Page Settings</p>
+                <p className="text-sm text-[color:var(--fg-muted)]">Manage pages, backgrounds and quick page actions.</p>
+              </div>
+              <div className="mt-4">
+                <div className="max-w-3xl mx-auto">
+                  <PageControls
+                    isCloud={!!(selectedProject as unknown as { _cloudId?: string })._cloudId}
+                    pageOrder={selectedProject.pageOrder || []}
+                    pages={selectedProject.pages}
+                    currentPageId={currentPageId}
+                    pageBackground={pageBackground}
+                    themeBackground={themeBackground}
+                    onQuickBackgroundChange={(color) => {
+                      if (!selectedProject || !currentPageId) return;
+                      setPageBackground(selectedProject.id, currentPageId, color);
+                    }}
+                    onOpenThemeSettings={selectedProject ? () => openSettings({ projectId: selectedProject.id, section: "theme" }) : undefined}
+                    onSelectPage={(id) => {
+                      setCurrentPageId(id);
+                      if (selectedProject && id) {
+                        try { localStorage.setItem(`py_current_page_${selectedProject.id}`, id); } catch { /* ignore */ }
+                        replaceItems(getPageItems(selectedProject.id, id) as GridItem[]);
+                      } else {
+                        replaceItems([]);
+                      }
+                    }}
+                    onCreatePage={() => {
+                      if (!selectedProject) return;
+                      const prevId = currentPageId;
+                      const id = createPage(selectedProject.id) || null;
+                      if (id) {
+                        setCurrentPageId(id);
+                        try { localStorage.setItem(`py_current_page_${selectedProject.id}`, id); } catch { /* ignore */ }
+                        replaceItems([]);
+                        setHistory(h => {
+                          const entry: HistoryEntry = {
+                            label: 'Create page',
+                            undo: (items) => items,
+                            redo: (items) => items,
+                            onUndo: () => {
+                              deletePage(selectedProject.id, id);
+                              const backId = prevId || (selectedProject.pageOrder?.[0] || null);
+                              if (backId) {
+                                setCurrentPageId(backId);
+                                const loaded = getPageItems(selectedProject.id, backId) as GridItem[];
+                                replaceItems(loaded);
+                              }
+                            },
+                            onRedo: () => {
+                              const newId = createPage(selectedProject.id);
+                              if (newId) {
+                                setCurrentPageId(newId);
+                                replaceItems([]);
+                              }
+                            }
+                          };
+                          return [...h, entry];
+                        });
+                        setRedoStack([]);
+                      }
+                    }}
+                    onRenameInline={(newName: string) => {
+                      if (!selectedProject || !currentPageId) return;
+                      const oldTitle = selectedProject.pages[currentPageId]?.title || 'Untitled';
+                      const trimmed = (newName || '').trim();
+                      if (!trimmed || trimmed === oldTitle) return;
+                      // history entry
+                      setHistory(h => {
+                        const entry: HistoryEntry = {
+                          label: 'Rename page',
+                          undo: (items) => items,
+                          redo: (items) => items,
+                          onUndo: () => { renamePage(selectedProject.id, currentPageId, oldTitle); },
+                          onRedo: () => { renamePage(selectedProject.id, currentPageId, trimmed); },
+                        } as HistoryEntry;
+                        return [...h, entry];
+                      });
+                      setRedoStack([]);
+                      renamePage(selectedProject.id, currentPageId, trimmed);
+                      try { localStorage.setItem(`py_current_page_${selectedProject.id}`, currentPageId); } catch { /* ignore */ }
+                      try { replaceItems(getPageItems(selectedProject.id, currentPageId) as GridItem[]); } catch { /* ignore */ }
+                    }}
+                    onOpenSettings={() => {
+                      if (!selectedProject || !currentPageId) return;
+                      const oldTitle = selectedProject.pages[currentPageId]?.title || 'Untitled';
+                      setRenameOldTitle(oldTitle);
+                      setRenameInitialStarter(Boolean(selectedProject.pages[currentPageId]?.starter));
+                      setRenameModalOpen(true);
+                    }}
+                    onDeleteCurrentPage={() => {
+                      if (!selectedProject || !currentPageId) return;
+                      const total = selectedProject.pageOrder?.length ?? 0;
+                      if (total <= 1) return;
+                      const title = selectedProject.pages[currentPageId]?.title || 'Untitled';
+                      const ok = window.confirm(`Delete page "${title}"? This cannot be undone.`);
+                      if (!ok) return;
+                      const snapItems = getPageItems(selectedProject.id, currentPageId) as GridItem[];
+                      const removedId = currentPageId;
+                      const remaining = (selectedProject.pageOrder || []).filter(id => id !== currentPageId);
+                      const nextId = remaining[0] || null;
+                      deletePage(selectedProject.id, removedId);
+                      setCurrentPageId(nextId);
+                      if (nextId) replaceItems(getPageItems(selectedProject.id, nextId) as GridItem[]); else replaceItems([]);
+                      setHistory(h => {
+                        let restoredId: string | null = null;
+                        const entry: HistoryEntry = {
+                          label: 'Delete page',
+                          undo: (items) => items,
+                          redo: (items) => items,
+                          onUndo: () => {
+                            const nid = createPage(selectedProject.id);
+                            if (nid) {
+                              restoredId = nid;
+                              renamePage(selectedProject.id, nid, title);
+                              setPageItems(selectedProject.id, nid, serializeGridItems(snapItems));
+                              setCurrentPageId(nid);
+                              replaceItems(getPageItems(selectedProject.id, nid) as GridItem[]);
+                            }
+                          },
+                          onRedo: () => {
+                            const target = restoredId || removedId;
+                            if (target) {
+                              deletePage(selectedProject.id, target);
+                              const fallback = (selectedProject.pageOrder?.[0]) || null;
+                              setCurrentPageId(fallback);
+                              if (fallback) replaceItems(getPageItems(selectedProject.id, fallback) as GridItem[]);
+                            }
+                          },
+                        };
+                        return [...h, entry];
+                      });
+                      setRedoStack([]);
+                    }}
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+          {/* Portfolio Canvas subsection (contains canvas and dashboard) */}
+          <div className="mt-4 rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)]/90 p-4">
+            <div className="flex flex-col gap-1">
+              <p className="text-xs uppercase tracking-wide text-[color:var(--fg-muted)]">Portfolio Canvas</p>
+              <p className="text-sm text-[color:var(--fg-muted)]">Canvas and dashboard for arranging pages and widgets.</p>
+            </div>
+            <div className="mt-4">
+              <DndContext
+                sensors={useSensors(
+                  useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+                  useSensor(MouseSensor),
+                  useSensor(TouchSensor, { activationConstraint: { delay: 150, tolerance: 5 } }),
+                )}
+                collisionDetection={rectIntersection}
+                onDragStart={(event: DragStartEvent) => {
+                  const data = event.active.data.current as PaletteDrag;
+                  try { console.debug('[py:dnd] dragstart activeId=', event.active.id, 'data=', data); } catch { /* ignore */ }
+                  if (data?.src === 'palette') {
+                    setActiveDrag(data);
+                    const pointerEvent = event.activatorEvent as PointerEvent | undefined;
+                    if (pointerEvent && typeof pointerEvent.clientX === 'number' && typeof pointerEvent.clientY === 'number') {
+                      dragPointerStart.current = { x: pointerEvent.clientX, y: pointerEvent.clientY };
+                      dragPointerLast.current = { x: pointerEvent.clientX, y: pointerEvent.clientY };
+                    } else {
+                      dragPointerStart.current = null;
+                    }
+                  }
+                }}
+                onDragMove={(event) => {
+                  try { console.debug('[py:dnd] dragmove delta=', event.delta, 'activeId=', event.active?.id); } catch { /* ignore */ }
+                  if (dragPointerStart.current) {
+                    dragPointerLast.current = {
+                      x: dragPointerStart.current.x + event.delta.x,
+                      y: dragPointerStart.current.y + event.delta.y,
+                    };
+                  } else {
+                    const pointerEvent = event.activatorEvent as PointerEvent | undefined;
+                    if (pointerEvent && typeof pointerEvent.clientX === 'number' && typeof pointerEvent.clientY === 'number') {
+                      dragPointerLast.current = { x: pointerEvent.clientX, y: pointerEvent.clientY };
+                    }
+                  }
+                }}
+                onDragEnd={(event: DragEndEvent) => {
+                  const { active, over } = event;
+                  try { console.debug('[py:dnd] dragend active=', active?.id, 'over=', over?.id); } catch { /* ignore */ }
+                  if (!over) {
+                    try { console.debug('[py:dnd] dragend: no droppable target'); } catch { /* ignore */ }
+                    setActiveDrag(undefined);
+                    dragPointerStart.current = null;
+                    dragPointerLast.current = null;
+                    dragOverlaySize.current = null;
+                    return;
+                  }
+                  const data = active.data.current as { src?: string; type?: string; label?: string; w?: number; h?: number; schemaVersion?: number } | undefined;
+                  if (data?.src === 'palette' && over.id === 'grid-canvas') {
+                    const overRect = over.rect;
+                    const initial = active.rect.current.initial;
+                    if (!initial) return;
+                    const pointerRef = dragPointerLast.current || dragPointerStart.current;
+                    const pointerX = pointerRef ? pointerRef.x : initial.left + initial.width / 2 + event.delta.x;
+                    const pointerY = pointerRef ? pointerRef.y : initial.top + initial.height / 2 + event.delta.y;
+                    const relX = pointerX - overRect.left;
+                    const relY = pointerY - overRect.top;
+
+                    // Compute grid coordinates using same math, then quantize to micro-step based on gap
+                    const effectiveZoom = zoom || 1;
+                    const colW = Math.floor(pageWidth / COLS);
+                    const baseUnit = Math.max(1, colW + gap);
+                    const baseX = baseUnit;
+                    const baseY = baseUnit; // square grid: row unit equals column unit
+                    const w = data.w ?? 4;
+                    const h = data.h ?? 4;
+                    const adjX = relX / effectiveZoom;
+                    const adjY = relY / effectiveZoom;
+                    let x = Math.floor(adjX / baseX);
+                    let y = Math.floor(adjY / baseY);
+                    x = Math.max(0, Math.min(x, COLS - w));
+                    y = Math.max(0, y);
+                    const id = typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : Math.random().toString(36).slice(2, 9);
+                    const ad = active.data.current as unknown as { type?: string };
+                    const schemaVersion = typeof data.schemaVersion === 'number' ? data.schemaVersion : 1;
+                    const newItem: GridItem = { id, x, y, w, h, title: data.label ?? 'Widget', z: 0, type: ad?.type, props: {}, schemaVersion, pinned: false, locked: false };
+                    commitUpdate(`Add ${newItem.title}`, (prev) => {
+                      const norm = normalizeZ(prev);
+                      const maxZ = norm.length; // new item will be top
+                      return [...norm, { ...newItem, z: maxZ }];
+                    });
+                    notifyWidgetChange('create', newItem.title);
+                  }
+                  // Clear drag overlay when drop completes
+                  setActiveDrag(undefined);
+                  dragPointerStart.current = null;
+                  dragPointerLast.current = null;
+                  dragOverlaySize.current = null;
+                }}
+                onDragCancel={() => {
+                  setActiveDrag(undefined);
+                  dragPointerStart.current = null;
+                  dragPointerLast.current = null;
+                  dragOverlaySize.current = null;
+                }}
+              >
+                {/* Visible drag preview while dragging from the palette */}
+                <DragOverlay dropAnimation={null} modifiers={[dragOverlayCursorAlign]}>
+                  <DragOverlayPreview activeDrag={activeDrag} onMeasure={(size) => { dragOverlaySize.current = size; }} />
+                </DragOverlay>
+                <div
+                  className="h-full grid gap-0 min-h-[28rem] items-stretch"
+                  style={{
+                    gridTemplateColumns: paletteCollapsed ? 'minmax(0,1fr) 32px' : `minmax(0,1fr) ${Math.round(paletteWidth)}px`,
+                    ...(canvasHeightPx ? ({ ['--canvas-h' as unknown as string]: `${canvasHeightPx}px` } as React.CSSProperties) : {}),
+                  }}
+                  onKeyDown={onKeyDown}
+                  tabIndex={0}
+                >
+                  {/* Canvas or Preview inside a page-like viewport */}
+                  <div
+                    className="h-full min-h-0"
+                    ref={canvasWrapperRef}
+                    onPointerDown={(e) => {
+                      // allow starting a resize when clicking on the canvas near the right edge
+                      try {
+                        const el = canvasWrapperRef.current;
+                        if (!el) return;
+                        const rect = el.getBoundingClientRect();
+                        const distFromRight = rect.right - e.clientX;
+                        // if pointer is within 48px of the canvas right edge, start resize
+                        if (distFromRight <= 48 && distFromRight >= 0) {
+                          beginResizePalette(e as unknown as PointerEvent);
+                        }
+                      } catch { /* ignore */ }
+                    }}
+                  >
+                    <ViewportSurface
+                      pageWidth={pageWidth}
+                      pageHeight={pageHeight}
+                      setPageWidth={setPageWidth}
+                      setPageHeight={setPageHeight}
+                      heightMode={heightMode}
+                      previewMode={previewMode}
+                      cols={COLS}
+                      rowH={DEFAULT_ROW_H}
+                      gap={gap}
+                      items={items}
+                      onItemsChange={replaceItems}
+                      showGrid={showGrid}
+                      selectedId={selectedId}
+                      onSelect={setSelectedId}
+                      onDelete={(id) => {
+                        let removedTitle: string | undefined;
+                        commitUpdate("Delete item", (prev) => {
+                          const tgt = prev.find(i => i.id === id);
+                          if (!tgt) return prev;
+                          removedTitle = tgt.title;
+                          return prev.filter((it) => it.id !== id);
+                        });
+                        if (removedTitle) notifyWidgetChange('delete', removedTitle);
+                      }}
+                      onDuplicate={(id) => {
+                        let duplicateTitle: string | undefined;
+                        commitUpdate("Duplicate item", (prev) => {
+                          const src = prev.find((it) => it.id === id);
+                          if (!src) return prev;
+                          duplicateTitle = src.title + " copy";
+                          const nid = typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : Math.random().toString(36).slice(2, 9);
+                          const nx = Math.min(COLS - src.w, src.x + 1);
+                          const ny = src.y + 1;
+                          const norm = normalizeZ(prev);
+                          const maxZ = norm.length; // place duplicate on top
+                          return [...norm, { ...src, id: nid, x: nx, y: ny, title: duplicateTitle, z: maxZ }];
+                        });
+                        if (duplicateTitle) notifyWidgetChange('create', duplicateTitle);
+                      }}
+                      onMoveStart={() => { /* no-op */ }}
+                      onMoveEnd={(prevItem, nextItem) => {
+                        if (
+                          prevItem.x === nextItem.x &&
+                          prevItem.y === nextItem.y &&
+                          prevItem.w === nextItem.w &&
+                          prevItem.h === nextItem.h
+                        ) {
+                          return;
+                        }
+                        const label = `Move ${nextItem.title}`;
+                        setHistory(h => {
+                          const entry: HistoryEntry = {
+                            label,
+                            undo: (items) => items.map(it => it.id === nextItem.id ? { ...it, x: prevItem.x, y: prevItem.y } : it),
+                            redo: (items) => items.map(it => it.id === nextItem.id ? { ...it, x: nextItem.x, y: nextItem.y } : it),
+                          };
+                          const nh = [...h, entry];
+                          return nh.length > MAX_HISTORY ? nh.slice(nh.length - MAX_HISTORY) : nh;
+                        });
+                        setRedoStack([]);
+                        persistItems();
+                      }}
+                      onBringToFront={bringToFront}
+                      onSendToBack={sendToBack}
+                      onBringForward={bringForward}
+                      onSendBackward={sendBackward}
+                      onTogglePin={togglePin}
+                      onOpenModify={openModify}
+                      onDropAsset={(id, hash) => {
+                        // Only handle for Image widgets: set src to asset://hash
+                        commitUpdate('Set image from asset', (prev) => prev.map(it => it.id === id && it.type === 'image' ? { ...it, props: { ...(it.props as Record<string, unknown>), src: `asset://${hash}` } } : it));
+                      }}
+                      onNavigatePage={(pid) => {
+                        if (!selectedProject) return;
+                        setCurrentPageId(pid);
+                        try { localStorage.setItem(`py_current_page_${selectedProject.id}`, pid); } catch { /* ignore */ }
+                      }}
+                      currentPageId={currentPageId || undefined}
+                      zoom={zoom}
+                      minZoom={MIN_ZOOM}
+                      maxZoom={MAX_ZOOM}
+                      onZoomChange={applyZoom}
+                      pageBackground={effectivePageBackground}
+                      theme={activeTheme}
+                      themeSnapshot={widgetThemeSnapshot}
+                    />
+                  </div>
+
+                  {/* Widget Sidebar (collapsible) */}
+                  <aside
+                    className={`relative surface p-4 border border-[color:var(--border)] rounded-2xl shadow-lg bg-[color:var(--surface)]/80 overflow-hidden ${previewMode ? 'opacity-50 pointer-events-none' : ''} flex flex-col palette-full-height`}
+                    onPointerDown={(e) => {
+                      // allow starting a resize when pointer is near the left edge of the aside
+                      const el = paletteRef.current || (e.currentTarget as HTMLElement);
+                      const rect = el ? (el.getBoundingClientRect ? el.getBoundingClientRect() : null) : null;
+                      if (!rect) return;
+                      const localX = e.clientX - rect.left;
+                      // use an expanded threshold so users can start dragging from the outer section/header area
+                      if (localX <= 48) {
+                        beginResizePalette(e as unknown as PointerEvent);
+                      }
+                    }}
+                  >
+                    {paletteCollapsed ? (
+                      <div
+                        role="button"
+                        tabIndex={0}
+                        onClick={togglePalette}
+                        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); togglePalette(); } }}
+                        className="absolute inset-0 flex items-center justify-center cursor-pointer z-20"
+                        title="Expand widget sidebar"
+                      >
+                        <ChevronsLeft size={16} />
+                      </div>
+                    ) : (
+                      <div className="h-full flex flex-col relative">
+                        <div
+                          ref={paletteRef}
+                          className="absolute top-0 bottom-0 w-10 cursor-ew-resize z-10 flex items-center justify-center text-[color:var(--fg-muted)] no-touch-action"
+                          style={{ left: '-12px' }}
+                          onPointerDown={beginResizePalette}
+                          role="presentation"
+                          title="Resize dashboard"
+                        >
+                          <span className="sr-only">Resize sidebar</span>
+                          <div className="rounded-full border border-[color:var(--border)] bg-[color:var(--surface)]/80 p-1 shadow-sm">
+                            <GripVertical size={14} />
+                          </div>
+                        </div>
+                        <div
+                          className="px-3 pt-4 pb-3 relative palette-header"
+                          onPointerDown={(e) => {
+                            // start resize when pointer is near the left edge (wider hit area)
+                            const el = paletteRef.current || (e.currentTarget && (e.currentTarget as HTMLElement).closest('.palette-full-height') as HTMLElement | null);
+                            const rect = el ? el.getBoundingClientRect() : null;
+                            if (!rect) return;
+                            const localX = e.clientX - rect.left;
+                            // allow a larger area to initiate resize so it's convenient from the outer section
+                            if (localX <= 48) {
+                              beginResizePalette(e as unknown as PointerEvent);
+                            }
+                          }}
+                        >
+                          <p className="text-xs uppercase tracking-wide text-[color:var(--fg-muted)]">Canvas Dashboard</p>
+                          <button
+                            className="absolute right-2 top-1 btn btn-ghost btn-xs p-1"
+                            title="Collapse palette"
+                            onClick={togglePalette}
+                            aria-label="Collapse widget palette"
+                          >
+                            <ChevronsRight size={14} />
+                          </button>
+                        </div>
+                        <div className="p-2 overflow-auto grow space-y-3 scrollable scrollable-container">
+                          <section className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)]/90 shadow-sm">
+                            <div className="px-4 pt-1 pb-1">
+                              <button
+                                className="w-full flex items-center justify-between gap-2 px-4 py-2 text-left"
+                                onClick={toggleWidgetsOpen}
+                                title={widgetsOpen ? 'Collapse widgets' : 'Expand widgets'}
+                              >
+                                <div className="flex items-center gap-2">
+                                  {(widgetsOpen) ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                                  <p className="text-sm uppercase tracking-wide text-[color:var(--fg-muted)]">Widgets</p>
+                                </div>
+                                <div className="text-[color:var(--fg-muted)]" />
+                              </button>
+                            </div>
+                            {widgetsOpen && (
+                              <div className="p-3 pt-0">
+                                <Suspense fallback={<div className="text-xs text-[color:var(--fg-muted)] p-2">Loading widgets…</div>}>
+                                  <WidgetsPalette />
+                                </Suspense>
+                              </div>
+                            )}
+                          </section>
+
+                          <section className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)]/90 shadow-sm">
+                            <div className="px-4 pt-1 pb-1">
+                              <button
+                                className="w-full flex items-center justify-between gap-2 px-4 py-2 text-left"
+                                onClick={toggleAssetsOpen}
+                                title={assetsOpen ? 'Collapse assets' : 'Expand assets'}
+                              >
+                                <div className="flex items-center gap-2">
+                                  {assetsOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                                  <p className="text-sm uppercase tracking-wide text-[color:var(--fg-muted)]">Assets</p>
+                                </div>
+                                <div className="text-[color:var(--fg-muted)]" />
+                              </button>
+                            </div>
+                            {assetsOpen && (
+                              <div className="p-3 pt-0">
+                                <AssetsPanel hideHeader />
+                              </div>
+                            )}
+                          </section>
+                        </div>
+                      </div>
+                    )}
+                  </aside>
+                </div>
+              </DndContext>
+            </div>
+          </div>
+        </div>
       </section>
 
       {/* Preview now replaces canvas above when toggled */}
