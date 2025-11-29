@@ -14,7 +14,13 @@ export default function DeployPage() {
 
 	function appendLog(line: string) {
 		setBuildLog((prev) => {
-			const next = [...prev, line];
+			// Prefix each log line with a short timestamp for clarity
+			const ts = new Date();
+			const hh = String(ts.getHours()).padStart(2, '0');
+			const mm = String(ts.getMinutes()).padStart(2, '0');
+			const ss = String(ts.getSeconds()).padStart(2, '0');
+			const formatted = `[${hh}:${mm}:${ss}] ${line}`;
+			const next = [...prev, formatted];
 			try {
 				// keep a global buffer so other routes can pick up logs when they mount
 				const g = (window as any).__py_preview_log = (window as any).__py_preview_log || [];
@@ -43,6 +49,7 @@ export default function DeployPage() {
 	const [previewLanUrl, setPreviewLanUrl] = useState<string | null>(null);
 	const [previewStarting, setPreviewStarting] = useState(false);
 	const [exporting, setExporting] = useState(false);
+	const [exportedFilePath, setExportedFilePath] = useState<string | null>(null);
 	const [includeAssets, setIncludeAssets] = useState(true);
 	const [basePath, setBasePath] = useState<string | null>(null);
 
@@ -144,6 +151,7 @@ export default function DeployPage() {
 		if (!selectedProject) return;
 		setExporting(true);
 		setBuildLog([]);
+		setExportedFilePath(null);
 		appendLog('Starting export...');
 		try {
 			const assetsBase64: Record<string, string> = {};
@@ -203,8 +211,18 @@ export default function DeployPage() {
 					}
 				}
 
-				appendLog('⚠️ Falling back to ZIP export ⚠️');
-				const zipRes = await (window as any).api?.zipDir?.({ dir: buildRes.path });
+				appendLog('Preparing export folder for ZIP...');
+				const exportRes = await (window as any).api?.buildExportFolder?.({ distDir: buildRes.path, projectName: (selectedProject && selectedProject.name) || (selectedProject && (selectedProject as any).title) || 'portfolio' });
+				let zipSourceDir = buildRes.path;
+				if (!exportRes || !exportRes.ok) {
+					appendLog(' ⚠️ Export folder creation failed, falling back to raw build path: ' + (exportRes?.error || 'unknown'));
+				} else {
+					appendLog('✅ Export folder ready: ' + exportRes.path);
+					zipSourceDir = exportRes.path;
+				}
+
+				appendLog('⚠️ Creating ZIP from export folder ⚠️');
+				const zipRes = await (window as any).api?.zipDir?.({ dir: zipSourceDir });
 				if (!zipRes || !zipRes.ok) {
 					appendLog('❌ ZIP failed: ' + (zipRes?.error || 'unknown') + ' ❌');
 					window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'error', message: 'ZIP creation failed: ' + (zipRes?.error || 'unknown'), persistent: false } }));
@@ -213,7 +231,8 @@ export default function DeployPage() {
 				const saveRes = await (window as any).api?.saveFileBytes?.({ defaultPath: `${selectedProject.name || 'portfolio'}.zip`, dataBase64: zipRes.dataBase64 });
 				if (saveRes && saveRes.filePath) {
 					appendLog('✅ ZIP saved: ' + saveRes.filePath + ' ✅');
-					window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'success', message: 'ZIP saved: ' + saveRes.filePath, persistent: false } }));
+					setExportedFilePath(saveRes.filePath);
+					window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'success', message: 'ZIP saved: ' + saveRes.filePath, href: saveRes.filePath, ctaLabel: 'Reveal', persistent: false } }));
 				}
 			} catch (e) { appendLog('❌ Export fallback failed: ' + (e instanceof Error ? e.message : String(e)) + ' ❌'); }
 		} catch (e) {
@@ -228,6 +247,7 @@ export default function DeployPage() {
 		if (!selectedProject) return;
 		setPreviewStarting(true);
 		setBuildLog([]);
+		setExportedFilePath(null);
 		appendLog('Preparing local preview...');
 		try { window.dispatchEvent(new CustomEvent('py:preview:log', { detail: { line: 'Preparing local preview...', origin: 'deploy' } })); } catch { }
 		try {
@@ -329,15 +349,41 @@ export default function DeployPage() {
 					<div className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)]/90 p-4 relative">
 						<div className="flex items-start justify-between">
 							<div>
-								<p className="text-xs uppercase tracking-wide text-[color:var(--fg-muted)]">Build Log</p>
-								<p className="text-sm text-[color:var(--fg-muted)]">Live output from the compiler and preview lifecycle.</p>
+								<p className="text-xs uppercase tracking-wide text-[color:var(--fg-muted)]">Deployment Log</p>
+								<p className="text-sm text-[color:var(--fg-muted)]">Live output from build, preview and export operations (timestamps shown).</p>
 							</div>
-							<div>
+							<div className="flex items-center gap-2">
 								<button
 									type="button"
 									className="btn btn-ghost btn-xs p-1 flex items-center gap-1"
-									title="Clear build log"
-									onClick={() => { setBuildLog([]); window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'info', message: 'Build log cleared', persistent: false } })); }}
+									title="Copy build log"
+									onClick={async () => {
+										try {
+											const text = buildLog.join('\n');
+											if ((window as any).api?.clipboardWrite) {
+												await (window as any).api.clipboardWrite({ text });
+											} else if (navigator.clipboard && navigator.clipboard.writeText) {
+												await navigator.clipboard.writeText(text);
+											} else {
+												// fallback: create temporary textarea
+												const ta = document.createElement('textarea');
+												ta.value = text;
+												document.body.appendChild(ta);
+												ta.select();
+												document.execCommand('copy');
+												ta.remove();
+											}
+											window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'success', message: 'Logs copied to clipboard', persistent: false } }));
+										} catch { window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'warn', message: 'Could not copy logs', persistent: false } })); }
+									}}
+								>
+									<Copy size={14} />
+								</button>
+								<button
+									type="button"
+									className="btn btn-ghost btn-xs p-1 flex items-center gap-1"
+									title="Clear deployment log"
+									onClick={() => { setBuildLog([]); window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'info', message: 'Deployment log cleared', persistent: false } })); }}
 								>
 									<X size={14} />
 								</button>
@@ -345,11 +391,19 @@ export default function DeployPage() {
 						</div>
 						<div className="mt-3">
 							{buildLog.length ? (
-								<div ref={logRef} className="rounded font-mono text-sm p-3 overflow-auto mt-0 border" style={{ background: '#0b0b0b', color: 'var(--accent)', minHeight: '8rem', maxHeight: '20rem', whiteSpace: 'pre-wrap', borderColor: '#222' }}>
-									{buildLog.map((line, idx) => (<div key={idx} className="whitespace-pre-wrap" style={{ padding: '1px 0' }}>{line}</div>))}
+								<div ref={logRef} className="rounded font-mono text-sm p-3 overflow-auto mt-0 border" style={{ background: '#050505', color: 'var(--accent)', minHeight: '8rem', maxHeight: '20rem', whiteSpace: 'pre-wrap', borderColor: '#222' }}>
+									{buildLog.map((line, idx) => {
+										const isError = /❌|failed|error/i.test(line);
+										const isSuccess = /✅|succeeded|success/i.test(line);
+										const isWarn = /⚠️|warning|warn/i.test(line);
+										const colorClass = isError ? 'text-red-400' : isSuccess ? 'text-emerald-400' : isWarn ? 'text-yellow-300' : 'text-[color:var(--accent)]';
+										return (
+											<div key={idx} className={`whitespace-pre-wrap ${colorClass}`} style={{ padding: '1px 0' }}>{line}</div>
+										);
+									})}
 								</div>
 							) : (
-								<div className="rounded font-mono text-sm p-4 mt-0 border" style={{ background: '#0b0b0b', color: 'var(--accent)', minHeight: '8rem', maxHeight: '20rem', whiteSpace: 'pre-wrap', borderColor: '#222' }}>No build output yet. Start an export or preview to see logs.</div>
+								<div className="rounded font-mono text-sm p-4 mt-0 border" style={{ background: '#050505', color: 'var(--fg-muted)', minHeight: '8rem', maxHeight: '20rem', whiteSpace: 'pre-wrap', borderColor: '#222' }}>No deployment output yet. Start an export or preview to see live logs here.</div>
 							)}
 						</div>
 					</div>
@@ -413,6 +467,27 @@ export default function DeployPage() {
 									>
 										<ExternalLink size={16} /> <span>{exporting ? 'Exporting…' : 'Export'}</span>
 									</button>
+									{exportedFilePath && (
+										<button
+											type="button"
+											className="btn btn-ghost btn-sm p-2 flex items-center gap-2"
+											onClick={async () => {
+												try {
+													if ((window as any).api?.showItemInFolder) {
+														await (window as any).api.showItemInFolder({ filePath: exportedFilePath });
+													} else if ((window as any).api?.openPath) {
+														await (window as any).api.openPath({ path: exportedFilePath });
+													} else {
+														// fallback: open via file:// URL
+														window.open('file://' + exportedFilePath);
+													}
+												} catch { /* ignore */ }
+											}}
+											title="Reveal Exported ZIP in folder"
+										>
+											<ExternalLink size={14} /> <span className="hidden sm:inline text-sm">Open Folder</span>
+										</button>
+									)}
 									<button
 										type="button"
 										className="btn btn-ghost btn-xs p-2 flex items-center gap-2"

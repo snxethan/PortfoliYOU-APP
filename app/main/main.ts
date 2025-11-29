@@ -5,6 +5,7 @@
 
 import path from "node:path";
 import fsSync from "node:fs";
+import os from 'node:os';
 import https from "node:https";
 import http from "node:http";
 import fs from "node:fs/promises";
@@ -586,6 +587,93 @@ ipcMain.handle('py:embedDistIntoProject', async (_event, opts?: { projectFilePat
       await fs.writeFile(result.filePath, content);
       return { ok: true, filePath: result.filePath };
     }
+  } catch (e) {
+    return { ok: false, error: String(e) };
+  }
+});
+
+// IPC: Create an export-ready folder from a built `dist-site` folder.
+ipcMain.handle('py:buildExportFolder', async (_event, opts?: { distDir?: string; projectName?: string }) => {
+  try {
+    const distDir = opts?.distDir || '';
+    const projectName = (opts?.projectName || 'portfolio').replace(/[^a-z0-9\-_. ]/gi, '').trim() || 'portfolio';
+    if (!distDir) return { ok: false, error: 'No distDir' };
+    const stat = await fs.stat(distDir).catch(() => null);
+    if (!stat || !stat.isDirectory()) return { ok: false, error: 'distDir not a directory' };
+
+    // Create a temp export folder
+    const tmpBase = await fs.mkdtemp(path.join(os.tmpdir(), `portfoliyou-export-`));
+    const exportRoot = path.join(tmpBase, projectName);
+    await fs.mkdir(exportRoot, { recursive: true });
+
+    // Recursively copy files from distDir into exportRoot, normalize HTML references to relative paths,
+    // and organize site CSS/JS into `css/` and `js/` folders to produce a clear export layout compatible
+    // with static servers (nginx, Apache, S3) and offline usage.
+    async function copyAndProcess(src: string, dest: string) {
+      const entries = await fs.readdir(src, { withFileTypes: true });
+      for (const ent of entries) {
+        const full = path.join(src, ent.name);
+        // Determine destination mapping for specific filenames
+        let relativeTarget = ent.name;
+        const lower = ent.name.toLowerCase();
+
+        if (lower === 'site.css') {
+          relativeTarget = path.posix.join('css', 'site.css');
+        } else if (lower === 'site.js') {
+          relativeTarget = path.posix.join('js', 'site.js');
+        }
+
+        // Use path.join with dest for actual filesystem write, but ensure HTML replacements use posix (forward slashes)
+        const target = path.join(dest, // base dest folder
+          // If relativeTarget contains posix separators, split to platform parts
+          ...relativeTarget.split('/'));
+
+        if (ent.isDirectory()) {
+          await fs.mkdir(target, { recursive: true });
+          await copyAndProcess(full, target);
+        } else if (ent.isFile()) {
+          // HTML: adjust references and inject base tag for offline relative resolution
+          if (lower.endsWith('.html')) {
+            let txt = await fs.readFile(full, 'utf8');
+            // Replace absolute root references for our known local resources:
+            // /site.css -> css/site.css, /site.js -> js/site.js, /assets/... -> assets/...
+            txt = txt.replace(/(["'])\/(site\.css)\1/g, `$1css/site.css$1`);
+            txt = txt.replace(/(["'])\/(site\.js)\1/g, `$1js/site.js$1`);
+            txt = txt.replace(/(["'])\/(assets\/[\w\-./]+)\1/g, `$1assets/$2$1`);
+
+            // If the HTML references '/assets/...' but was served with a leading slash, the above ensures it points to local assets/
+            // Ensure a <base href="./"> exists to make relative links work when opening files from disk and when served from a subpath
+            if (!/\<base\s+href=/i.test(txt)) {
+              txt = txt.replace(/(<head[^>]*>)/i, `$1\n  <base href="./">`);
+            }
+
+            // Write modified HTML to the intended target (usually dest/index.html or page file)
+            await fs.mkdir(path.dirname(target), { recursive: true });
+            await fs.writeFile(target, txt, 'utf8');
+          } else {
+            // For other files, place CSS/JS into their mapped folders, otherwise copy as-is
+            const buf = await fs.readFile(full);
+            await fs.mkdir(path.dirname(target), { recursive: true });
+            await fs.writeFile(target, buf);
+          }
+        }
+      }
+    }
+
+    await copyAndProcess(distDir, exportRoot);
+
+    // Ensure there's a 404.html fallback for static hosts (useful for SPA hosting on Netlify/GitHub Pages with redirect)
+    try {
+      const indexPath = path.join(exportRoot, 'index.html');
+      const fallbackPath = path.join(exportRoot, '404.html');
+      const statIndex = await fs.stat(indexPath).catch(() => null);
+      if (statIndex && statIndex.isFile()) {
+        // Copy index -> 404 to allow single-page-app style routing on hosts that serve 404 for unknown paths
+        await fs.copyFile(indexPath, fallbackPath);
+      }
+    } catch { /* ignore */ }
+
+    return { ok: true, path: exportRoot };
   } catch (e) {
     return { ok: false, error: String(e) };
   }
