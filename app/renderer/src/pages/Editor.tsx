@@ -667,7 +667,7 @@ export default function EditorPage() {
             </div>
             <div className="mt-4">
               <div className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)]/90 p-4">
-                <div className="max-w-5xl mx-auto">
+                <div className="w-full">
                   <EditorSettings
                     previewMode={previewMode}
                     togglePreviewMode={togglePreviewMode}
@@ -705,136 +705,138 @@ export default function EditorPage() {
                 <p className="text-sm text-[color:var(--fg-muted)]">Manage pages, backgrounds and quick page actions.</p>
               </div>
               <div className="mt-4">
-                <div className="max-w-5xl mx-auto">
-                  <PageSettings
-                    isCloud={!!(selectedProject as unknown as { _cloudId?: string })._cloudId}
-                    pageOrder={selectedProject.pageOrder || []}
-                    pages={selectedProject.pages}
-                    currentPageId={currentPageId}
-                    pageBackground={pageBackground}
-                    themeBackground={themeBackground}
-                    onQuickBackgroundChange={(color) => {
-                      if (!selectedProject || !currentPageId) return;
-                      setPageBackground(selectedProject.id, currentPageId, color);
-                    }}
-                    onOpenThemeSettings={selectedProject ? () => openSettings({ projectId: selectedProject.id, section: "theme" }) : undefined}
-                    onSelectPage={(id) => {
-                      setCurrentPageId(id);
-                      if (selectedProject && id) {
-                        try { localStorage.setItem(`py_current_page_${selectedProject.id}`, id); } catch { /* ignore */ }
-                        replaceItems(getPageItems(selectedProject.id, id) as GridItem[]);
-                      } else {
-                        replaceItems([]);
-                      }
-                    }}
-                    onCreatePage={() => {
-                      if (!selectedProject) return;
-                      const prevId = currentPageId;
-                      const id = createPage(selectedProject.id) || null;
-                      if (id) {
+                <div className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)]/90 p-4">
+                  <div className="w-full">
+                    <PageSettings
+                      isCloud={!!(selectedProject as unknown as { _cloudId?: string })._cloudId}
+                      pageOrder={selectedProject.pageOrder || []}
+                      pages={selectedProject.pages}
+                      currentPageId={currentPageId}
+                      pageBackground={pageBackground}
+                      themeBackground={themeBackground}
+                      onQuickBackgroundChange={(color) => {
+                        if (!selectedProject || !currentPageId) return;
+                        setPageBackground(selectedProject.id, currentPageId, color);
+                      }}
+                      onOpenThemeSettings={selectedProject ? () => openSettings({ projectId: selectedProject.id, section: "theme" }) : undefined}
+                      onSelectPage={(id) => {
                         setCurrentPageId(id);
-                        try { localStorage.setItem(`py_current_page_${selectedProject.id}`, id); } catch { /* ignore */ }
-                        replaceItems([]);
+                        if (selectedProject && id) {
+                          try { localStorage.setItem(`py_current_page_${selectedProject.id}`, id); } catch { /* ignore */ }
+                          replaceItems(getPageItems(selectedProject.id, id) as GridItem[]);
+                        } else {
+                          replaceItems([]);
+                        }
+                      }}
+                      onCreatePage={() => {
+                        if (!selectedProject) return;
+                        const prevId = currentPageId;
+                        const id = createPage(selectedProject.id) || null;
+                        if (id) {
+                          setCurrentPageId(id);
+                          try { localStorage.setItem(`py_current_page_${selectedProject.id}`, id); } catch { /* ignore */ }
+                          replaceItems([]);
+                          setHistory(h => {
+                            const entry: HistoryEntry = {
+                              label: 'Create page',
+                              undo: (items) => items,
+                              redo: (items) => items,
+                              onUndo: () => {
+                                deletePage(selectedProject.id, id);
+                                const backId = prevId || (selectedProject.pageOrder?.[0] || null);
+                                if (backId) {
+                                  setCurrentPageId(backId);
+                                  const loaded = getPageItems(selectedProject.id, backId) as GridItem[];
+                                  replaceItems(loaded);
+                                }
+                              },
+                              onRedo: () => {
+                                const newId = createPage(selectedProject.id);
+                                if (newId) {
+                                  setCurrentPageId(newId);
+                                  replaceItems([]);
+                                }
+                              }
+                            };
+                            return [...h, entry];
+                          });
+                          setRedoStack([]);
+                        }
+                      }}
+                      onRenameInline={(newName: string) => {
+                        if (!selectedProject || !currentPageId) return;
+                        const oldTitle = selectedProject.pages[currentPageId]?.title || 'Untitled';
+                        const trimmed = (newName || '').trim();
+                        if (!trimmed || trimmed === oldTitle) return;
+                        // history entry
                         setHistory(h => {
                           const entry: HistoryEntry = {
-                            label: 'Create page',
+                            label: 'Rename page',
+                            undo: (items) => items,
+                            redo: (items) => items,
+                            onUndo: () => { renamePage(selectedProject.id, currentPageId, oldTitle); },
+                            onRedo: () => { renamePage(selectedProject.id, currentPageId, trimmed); },
+                          } as HistoryEntry;
+                          return [...h, entry];
+                        });
+                        setRedoStack([]);
+                        renamePage(selectedProject.id, currentPageId, trimmed);
+                        try { localStorage.setItem(`py_current_page_${selectedProject.id}`, currentPageId); } catch { /* ignore */ }
+                        try { replaceItems(getPageItems(selectedProject.id, currentPageId) as GridItem[]); } catch { /* ignore */ }
+                      }}
+                      onOpenSettings={() => {
+                        if (!selectedProject || !currentPageId) return;
+                        const oldTitle = selectedProject.pages[currentPageId]?.title || 'Untitled';
+                        setRenameOldTitle(oldTitle);
+                        setRenameInitialStarter(Boolean(selectedProject.pages[currentPageId]?.starter));
+                        setRenameModalOpen(true);
+                      }}
+                      onDeleteCurrentPage={() => {
+                        if (!selectedProject || !currentPageId) return;
+                        const total = selectedProject.pageOrder?.length ?? 0;
+                        if (total <= 1) return;
+                        const title = selectedProject.pages[currentPageId]?.title || 'Untitled';
+                        const ok = window.confirm(`Delete page "${title}"? This cannot be undone.`);
+                        if (!ok) return;
+                        const snapItems = getPageItems(selectedProject.id, currentPageId) as GridItem[];
+                        const removedId = currentPageId;
+                        const remaining = (selectedProject.pageOrder || []).filter(id => id !== currentPageId);
+                        const nextId = remaining[0] || null;
+                        deletePage(selectedProject.id, removedId);
+                        setCurrentPageId(nextId);
+                        if (nextId) replaceItems(getPageItems(selectedProject.id, nextId) as GridItem[]); else replaceItems([]);
+                        setHistory(h => {
+                          let restoredId: string | null = null;
+                          const entry: HistoryEntry = {
+                            label: 'Delete page',
                             undo: (items) => items,
                             redo: (items) => items,
                             onUndo: () => {
-                              deletePage(selectedProject.id, id);
-                              const backId = prevId || (selectedProject.pageOrder?.[0] || null);
-                              if (backId) {
-                                setCurrentPageId(backId);
-                                const loaded = getPageItems(selectedProject.id, backId) as GridItem[];
-                                replaceItems(loaded);
+                              const nid = createPage(selectedProject.id);
+                              if (nid) {
+                                restoredId = nid;
+                                renamePage(selectedProject.id, nid, title);
+                                setPageItems(selectedProject.id, nid, serializeGridItems(snapItems));
+                                setCurrentPageId(nid);
+                                replaceItems(getPageItems(selectedProject.id, nid) as GridItem[]);
                               }
                             },
                             onRedo: () => {
-                              const newId = createPage(selectedProject.id);
-                              if (newId) {
-                                setCurrentPageId(newId);
-                                replaceItems([]);
+                              const target = restoredId || removedId;
+                              if (target) {
+                                deletePage(selectedProject.id, target);
+                                const fallback = (selectedProject.pageOrder?.[0]) || null;
+                                setCurrentPageId(fallback);
+                                if (fallback) replaceItems(getPageItems(selectedProject.id, fallback) as GridItem[]);
                               }
-                            }
+                            },
                           };
                           return [...h, entry];
                         });
                         setRedoStack([]);
-                      }
-                    }}
-                    onRenameInline={(newName: string) => {
-                      if (!selectedProject || !currentPageId) return;
-                      const oldTitle = selectedProject.pages[currentPageId]?.title || 'Untitled';
-                      const trimmed = (newName || '').trim();
-                      if (!trimmed || trimmed === oldTitle) return;
-                      // history entry
-                      setHistory(h => {
-                        const entry: HistoryEntry = {
-                          label: 'Rename page',
-                          undo: (items) => items,
-                          redo: (items) => items,
-                          onUndo: () => { renamePage(selectedProject.id, currentPageId, oldTitle); },
-                          onRedo: () => { renamePage(selectedProject.id, currentPageId, trimmed); },
-                        } as HistoryEntry;
-                        return [...h, entry];
-                      });
-                      setRedoStack([]);
-                      renamePage(selectedProject.id, currentPageId, trimmed);
-                      try { localStorage.setItem(`py_current_page_${selectedProject.id}`, currentPageId); } catch { /* ignore */ }
-                      try { replaceItems(getPageItems(selectedProject.id, currentPageId) as GridItem[]); } catch { /* ignore */ }
-                    }}
-                    onOpenSettings={() => {
-                      if (!selectedProject || !currentPageId) return;
-                      const oldTitle = selectedProject.pages[currentPageId]?.title || 'Untitled';
-                      setRenameOldTitle(oldTitle);
-                      setRenameInitialStarter(Boolean(selectedProject.pages[currentPageId]?.starter));
-                      setRenameModalOpen(true);
-                    }}
-                    onDeleteCurrentPage={() => {
-                      if (!selectedProject || !currentPageId) return;
-                      const total = selectedProject.pageOrder?.length ?? 0;
-                      if (total <= 1) return;
-                      const title = selectedProject.pages[currentPageId]?.title || 'Untitled';
-                      const ok = window.confirm(`Delete page "${title}"? This cannot be undone.`);
-                      if (!ok) return;
-                      const snapItems = getPageItems(selectedProject.id, currentPageId) as GridItem[];
-                      const removedId = currentPageId;
-                      const remaining = (selectedProject.pageOrder || []).filter(id => id !== currentPageId);
-                      const nextId = remaining[0] || null;
-                      deletePage(selectedProject.id, removedId);
-                      setCurrentPageId(nextId);
-                      if (nextId) replaceItems(getPageItems(selectedProject.id, nextId) as GridItem[]); else replaceItems([]);
-                      setHistory(h => {
-                        let restoredId: string | null = null;
-                        const entry: HistoryEntry = {
-                          label: 'Delete page',
-                          undo: (items) => items,
-                          redo: (items) => items,
-                          onUndo: () => {
-                            const nid = createPage(selectedProject.id);
-                            if (nid) {
-                              restoredId = nid;
-                              renamePage(selectedProject.id, nid, title);
-                              setPageItems(selectedProject.id, nid, serializeGridItems(snapItems));
-                              setCurrentPageId(nid);
-                              replaceItems(getPageItems(selectedProject.id, nid) as GridItem[]);
-                            }
-                          },
-                          onRedo: () => {
-                            const target = restoredId || removedId;
-                            if (target) {
-                              deletePage(selectedProject.id, target);
-                              const fallback = (selectedProject.pageOrder?.[0]) || null;
-                              setCurrentPageId(fallback);
-                              if (fallback) replaceItems(getPageItems(selectedProject.id, fallback) as GridItem[]);
-                            }
-                          },
-                        };
-                        return [...h, entry];
-                      });
-                      setRedoStack([]);
-                    }}
-                  />
+                      }}
+                    />
+                  </div>
                 </div>
               </div>
             </div>
@@ -1185,19 +1187,27 @@ export default function EditorPage() {
 
       {/* Theme subsection under Portfolio Canvas */}
       <div className="mt-4 rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)]/90 p-4">
-        <div className="max-w-2xl mx-auto">
-          <div className="flex items-start justify-between">
-            <div>
-              <p className="text-xs uppercase tracking-wide text-[color:var(--fg-muted)]">Theme</p>
-              <p className="text-sm text-[color:var(--fg-muted)]">Current theme applied to the canvas and widgets.</p>
-              <p className="mt-2 text-sm">{activeTheme?.name ?? 'Default'}</p>
+        <div className="w-full">
+          <div>
+            <p className="text-xs uppercase tracking-wide text-[color:var(--fg-muted)]">Theme</p>
+            <p className="text-sm text-[color:var(--fg-muted)]">Current theme applied to the canvas and widgets.</p>
+          </div>
+
+          {/* Current theme + settings subsection */}
+          <div className="mt-4 flex flex-wrap items-center gap-3">
+            <div className="flex items-center gap-3 px-3 py-2 rounded-lg border border-[color:var(--border)] bg-[color:var(--surface)]/70 shadow-sm">
+              <div>
+                <p className="text-[10px] uppercase tracking-wide text-[color:var(--fg-muted)]">Current theme</p>
+                <p className="mt-1 text-sm">{activeTheme?.name ?? 'Default'}</p>
+              </div>
             </div>
-            <div className="flex items-center gap-3">
+
+            <div className="flex items-center gap-3 px-3 py-2 rounded-lg border border-[color:var(--border)] bg-[color:var(--surface)]/70 shadow-sm">
               <div className="flex items-center gap-2">
                 <div className="w-8 h-8 rounded-md border border-[color:var(--border)]" style={{ background: activeTheme?.colors?.primary || '#111827' }} title="Primary color" />
                 <div className="w-8 h-8 rounded-md border border-[color:var(--border)]" style={{ background: activeTheme?.colors?.secondary || '#f3f4f6' }} title="Secondary color" />
               </div>
-              <div className="flex flex-col">
+              <div>
                 <button
                   className="btn btn-ghost btn-sm flex items-center gap-2"
                   onClick={() => { if (selectedProject) openSettings({ projectId: selectedProject.id, section: 'theme' }); }}
@@ -1210,28 +1220,32 @@ export default function EditorPage() {
             </div>
           </div>
 
+          {/* Color hex controls subsection */}
           {activeTheme && selectedProject && (
-            <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {Object.keys(activeTheme.colors).map((k) => {
-                const key = k as keyof typeof activeTheme.colors;
-                const val = activeTheme.colors[key] as string;
-                return (
-                  <label key={k} className="flex items-center gap-3 text-xs">
-                    <span className="w-28 text-[10px] uppercase tracking-wide text-[color:var(--fg-muted)]">{key}</span>
-                    <input
-                      type="color"
-                      className="w-9 h-9 rounded border border-[color:var(--border)]"
-                      value={val}
-                      onChange={(e) => updateTheme(selectedProject.id, activeTheme.themeId, { colors: { [key]: e.target.value } as any })}
-                    />
-                    <input
-                      className="input flex-1 text-sm"
-                      value={val}
-                      onChange={(e) => updateTheme(selectedProject.id, activeTheme.themeId, { colors: { [key]: e.target.value } as any })}
-                    />
-                  </label>
-                );
-              })}
+            <div className="mt-4 px-3 py-2 rounded-lg border border-[color:var(--border)] bg-[color:var(--surface)]/70 shadow-sm">
+              <p className="text-[10px] uppercase tracking-wide text-[color:var(--fg-muted)]">Colors</p>
+              <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {Object.keys(activeTheme.colors).map((k) => {
+                  const key = k as keyof typeof activeTheme.colors;
+                  const val = activeTheme.colors[key] as string;
+                  return (
+                    <label key={k} className="flex items-center gap-3 text-xs">
+                      <span className="w-28 text-[10px] uppercase tracking-wide text-[color:var(--fg-muted)]">{key}</span>
+                      <input
+                        type="color"
+                        className="w-9 h-9 rounded border border-[color:var(--border)]"
+                        value={val}
+                        onChange={(e) => updateTheme(selectedProject.id, activeTheme.themeId, { colors: { [key]: e.target.value } as any })}
+                      />
+                      <input
+                        className="input text-sm w-auto max-w-[10rem]"
+                        value={val}
+                        onChange={(e) => updateTheme(selectedProject.id, activeTheme.themeId, { colors: { [key]: e.target.value } as any })}
+                      />
+                    </label>
+                  );
+                })}
+              </div>
             </div>
           )}
         </div>

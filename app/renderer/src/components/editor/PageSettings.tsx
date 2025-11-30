@@ -51,13 +51,13 @@ export default function PageSettings({
     const groupLabelClass = "text-[10px] uppercase tracking-wide text-[color:var(--fg-muted)]";
     const panelContentClass = "w-full text-[12px]";
     const panelLabelClass = "text-[10px] uppercase tracking-wide text-[color:var(--fg-muted)] w-28";
-    const inputClass = "input px-2 py-1 text-sm w-full md:w-auto min-w-0 md:min-w-[160px]";
+    const inputClass = "input px-2 py-1 text-sm w-auto md:w-auto min-w-0 md:min-w-[160px] max-w-[10rem]";
 
     return (
         <div className="flex flex-wrap items-stretch gap-2 md:gap-3">
             <div className={`${groupClass}`}>
-                <span className={groupLabelClass}>Page appearance</span>
-                <div className="flex flex-wrap items-start gap-2 ml-2">
+                <span className={groupLabelClass}>appearance</span>
+                <div className="flex items-start gap-2 ml-2 flex-nowrap">
                     <input
                         type="color"
                         className="w-9 h-9 rounded border border-[color:var(--border)]"
@@ -94,9 +94,9 @@ export default function PageSettings({
             </div>
 
             <div className={`${groupClass}`}>
-                <span className={groupLabelClass}>Page navigation</span>
+                <span className={groupLabelClass}>navigation</span>
                 {!editing ? (
-                    <div className="flex flex-wrap items-start gap-2 ml-2">
+                    <div className="flex items-start gap-2 ml-2 flex-nowrap">
                         <button className="btn btn-ghost btn-xs" title="Rename page" aria-label="Rename page" onClick={() => {
                             if (!currentPageId) return;
                             const title = pages[currentPageId]?.title || 'Untitled';
@@ -130,7 +130,7 @@ export default function PageSettings({
                         </button>
                     </div>
                 ) : (
-                    <div className="flex flex-wrap items-start gap-2 ml-2">
+                    <div className="flex items-start gap-2 ml-2 flex-nowrap">
                         <input
                             className={inputClass}
                             value={draft}

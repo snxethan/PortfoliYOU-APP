@@ -61,7 +61,7 @@ export default function EditorSettings(props: EditorSettingsProps) {
     const previewDisabledClass = "";
 
     return (
-        <div className="flex flex-wrap justify-center items-stretch gap-2 md:gap-3">
+        <div className="flex flex-wrap items-stretch gap-2 md:gap-3 w-full">
             <div className={`${groupClass}`}>
                 <span className={groupLabelClass}>Mode</span>
                 <div className="flex items-center gap-1">
