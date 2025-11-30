@@ -94,12 +94,55 @@ export async function compileStaticSite(
         if (!page) continue;
         const widgets = (page.widgets || []).map(wid => project.widgets[wid]).filter(Boolean);
         const widgetHtmls = await Promise.all(widgets.map(w => renderWidgetToHtml(w)));
-        const html = renderPageHtml(page, widgetHtmls.map(h => ({ toString: () => h })) as any, project);
+
+        // Mirror the editor's canvas defaults so the compiled page layout
+        // matches the editor preview (absolute-positioned widget wrappers).
+        const COLS = 12;
+        const GAP = 12; // px
+        const ROW_H = 32; // px
+        const CONTAINER_MAX_WIDTH = 1100; // matches editor/container
+        const CONTAINER_PADDING = 36; // left+right padding used in .container
+        const innerWidth = Math.max(0, CONTAINER_MAX_WIDTH - (CONTAINER_PADDING * 2));
+        const colW = COLS > 0 ? Math.floor((innerWidth - GAP * (COLS - 1)) / COLS) : 0;
+
+        // Compute content rows to determine canvas height
+        const contentRows = widgets.length === 0 ? 12 : Math.max(12, ...widgets.map((w: any) => {
+            const layout = (w?.layout ?? {}) as any;
+            return (typeof layout.y === 'number' ? layout.y : 0) + (typeof layout.h === 'number' ? layout.h : 1);
+        }));
+        const height = contentRows * ROW_H + (contentRows - 1) * GAP;
+
+        const widgetBodies = widgets.map((w: any, index: number) => {
+            const layout = (w?.layout ?? {}) as any;
+            const lx = typeof layout.x === 'number' ? layout.x : 0;
+            const ly = typeof layout.y === 'number' ? layout.y : 0;
+            const lw = typeof layout.w === 'number' ? layout.w : 1;
+            const lh = typeof layout.h === 'number' ? layout.h : 1;
+            const lz = typeof layout.z === 'number' ? layout.z : index;
+
+            const left = lx * (colW + GAP);
+            const top = ly * (ROW_H + GAP);
+            const wPx = lw * colW + (lw - 1) * GAP;
+            const hPx = lh * ROW_H + (lh - 1) * GAP;
+            const z = 100 + (typeof lz === 'number' ? lz : index);
+
+            const inner = widgetHtmls[index] || '';
+            return `<div class="page-widget-wrapper" style="position:absolute;left:${left}px;top:${top}px;width:${wPx}px;height:${hPx}px;z-index:${z};">${inner}</div>`;
+        }).join('\n');
+
+        const html = renderPageHtml(page, widgetBodies, project, innerWidth, height);
         pageOutputs.push({ filename: `${pageId}.html`, html });
     }
 
     // 3. Write aggregated CSS (base + widget-specific)
-    const baseCss = `body { font-family: system-ui, sans-serif; margin: 0; padding: 0; }`;
+    // Add a small set of page/grid rules so exported widgets mirror the editor's
+    // behavior: each widget will be treated as a contained block and clipped to
+    // avoid children rendering outside their section (matches editor preview).
+    const baseCss = `body { font-family: system-ui, sans-serif; margin: 0; padding: 0; }
+.page-grid { box-sizing: border-box; padding: 1rem; }
+.page-grid .widget { position: relative; overflow: hidden; box-sizing: border-box; }
+.widget img { max-width: 100%; display: block; }
+`;
     const fullCss = [baseCss, ...collectedCss].join('\n\n');
     await fs.writeFile(path.join(outputDir, 'site.css'), fullCss, 'utf8');
 
@@ -132,20 +175,26 @@ function renderWidget(widget: Widget, project: LocalProject): React.ReactElement
     return def.render(props);
 }
 
-function renderPageHtml(page: Page, widgetEls: React.ReactElement[], project: LocalProject): string {
+function renderPageHtml(page: Page, widgetBodies: string, project: LocalProject, innerWidth: number, height: number): string {
     const meta = project.portfolioMeta as PortfolioMeta | undefined;
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>${meta?.siteTitle || page.title}</title>
-  <link rel="stylesheet" href="/site.css" />
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>${meta?.siteTitle || page.title}</title>
+    <link rel="stylesheet" href="/site.css" />
+    <style> .container{max-width:1100px;margin:0 auto;padding:36px} .page-canvas{position:relative;height:${height}px;max-width:${innerWidth}px;margin:0 auto;} </style>
 </head>
 <body>
-  <main>
-    ${widgetEls.map(el => ReactDOMServer.renderToStaticMarkup(el)).join('\n')}
-  </main>
+    <main>
+        <div class="container">
+            <h1>${meta?.siteTitle || page.title}</h1>
+            <div class="page-canvas">
+                ${widgetBodies}
+            </div>
+        </div>
+    </main>
 </body>
 </html>`;
 }

@@ -5,7 +5,7 @@ import PortfolioSettingsModal from "../components/modals/PortfolioSettingsModal"
 import { useProjects } from "./ProjectsProvider";
 import type { PortfolioMeta } from "./ProjectsProvider";
 
-type SectionKey = "portfolio" | "cloud" | "theme" | "build";
+type SectionKey = "portfolio" | "cloud" | "theme" | "build" | "preview" | "saving";
 
 type OpenOptions = {
     projectId?: string;

@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from "react";
-import { ChevronDown, ChevronRight, Plus, Settings, Play, Square, Copy, ExternalLink, X, Eye } from "lucide-react";
+import { ChevronDown, ChevronRight, Plus, Settings, Play, Square, Copy, ExternalLink, X, Eye, RefreshCw } from "lucide-react";
 import { useProjects } from "../providers/ProjectsProvider";
 import { usePortfolioSettings } from "../providers/PortfolioSettingsProvider";
 import { useAssets } from "../providers/AssetsProvider";
@@ -14,23 +14,35 @@ export default function DeployPage() {
 
 	function appendLog(line: string) {
 		setBuildLog((prev) => {
+			// Normalize emojis so they only appear at the start of the message
+			function normalizeMessage(s: string) {
+				let msg = String(s || '').trim();
+				let emoji = '';
+				if (msg.indexOf('✅') !== -1) { emoji = '✅'; msg = msg.replace(/✅/g, ''); }
+				else if (msg.indexOf('❌') !== -1) { emoji = '❌'; msg = msg.replace(/❌/g, ''); }
+				else if (msg.indexOf('⚠️') !== -1 || msg.indexOf('⚠') !== -1) { emoji = '⚠️'; msg = msg.replace(/⚠️|⚠/g, ''); }
+				msg = msg.trim();
+				return (emoji ? (emoji + ' ' + msg) : msg).trim();
+			}
+
+			const normalized = normalizeMessage(line);
 			// Prefix each log line with a short timestamp for clarity
 			const ts = new Date();
 			const hh = String(ts.getHours()).padStart(2, '0');
 			const mm = String(ts.getMinutes()).padStart(2, '0');
 			const ss = String(ts.getSeconds()).padStart(2, '0');
-			const formatted = `[${hh}:${mm}:${ss}] ${line}`;
+			const formatted = `[${hh}:${mm}:${ss}] ${normalized}`;
 			const next = [...prev, formatted];
 			try {
 				// keep a global buffer so other routes can pick up logs when they mount
 				const g = (window as any).__py_preview_log = (window as any).__py_preview_log || [];
-				g.push(line);
+				g.push(normalized);
 				// NOTE: do NOT re-dispatch 'py:preview:log' here — that causes a feedback loop
 			} catch { /* ignore */ }
 
 			// Also persist technical logs to disk via the main process
 			try {
-				void (window as any).api?.appendLog?.({ line });
+				void (window as any).api?.appendLog?.({ line: normalized });
 			} catch { /* ignore */ }
 			return next;
 		});
@@ -131,13 +143,37 @@ export default function DeployPage() {
 		const onStopRequest = (e: any) => { try { void handleStopLocalPreview(); } catch { /* ignore */ } };
 		window.addEventListener('py:preview-stop-request', onStopRequest as EventListener);
 
+		// Respond to reload-request events (rebuild + restart)
+		const onReloadRequest = (e: any) => { try { void handleReloadLocalPreview(); } catch { /* ignore */ } };
+		window.addEventListener('py:preview-reload-request', onReloadRequest as EventListener);
+
 		return () => {
 			window.removeEventListener('py:preview-start-request', onRequest as EventListener);
 			window.removeEventListener('py:export-request', onExport as EventListener);
 			window.removeEventListener('py:preview:log', onLog as EventListener);
 			window.removeEventListener('py:preview-stop-request', onStopRequest as EventListener);
+			window.removeEventListener('py:preview-reload-request', onReloadRequest as EventListener);
 		};
 	}, [previewRunning, previewStarting]);
+
+
+	async function handleReloadLocalPreview() {
+		// Stop if running, then start a fresh preview (rebuild + restart)
+		appendLog('Reloading local preview...');
+		try { window.dispatchEvent(new CustomEvent('py:preview:log', { detail: { line: 'Reloading local preview...', origin: 'deploy' } })); } catch { }
+		try {
+			if (previewRunning) {
+				await handleStopLocalPreview();
+			}
+			// small delay to ensure stop has fully completed
+			await new Promise((res) => setTimeout(res, 250));
+			await handleStartLocalPreview();
+		} catch (e) {
+			appendLog('❌ Reload failed: ' + (e instanceof Error ? e.message : String(e)));
+		}
+
+		return;
+	}
 
 	if (!selectedProject) {
 		return (
@@ -178,11 +214,11 @@ export default function DeployPage() {
 			appendLog('Building static site...');
 			const buildRes = await (window as any).api?.buildStaticSite?.({ project: selectedProject, assets: assetsBase64, useTempOutput: true });
 			if (!buildRes || !buildRes.ok) {
-				appendLog(' ❌ Build failed: ' + (buildRes?.error || 'unknown') + ' ❌');
+				appendLog('❌ Build failed: ' + (buildRes?.error || 'unknown'));
 				window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'error', message: 'Export build failed: ' + (buildRes?.error || 'unknown'), persistent: false } }));
 				return;
 			}
-			appendLog(`✅ Build succeeded: ${buildRes.path} ✅`);
+			appendLog(`✅ Build succeeded: ${buildRes.path}`);
 			window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'success', message: 'Build succeeded', persistent: false } }));
 
 			// Try embedding into existing project package if possible, else fallback to ZIP
@@ -204,7 +240,7 @@ export default function DeployPage() {
 					appendLog('Embedding into project file: ' + resolvedProjectFile);
 					const embedRes = await (window as any).api.embedDistIntoProject({ projectFilePath: resolvedProjectFile, distDir, defaultName: `${selectedProject.name || 'project'}.portfoliyou` });
 					if (embedRes && embedRes.ok) {
-						appendLog('✅ Embedding complete: ' + embedRes.filePath + ' ✅');
+						appendLog('✅ Embedding complete: ' + embedRes.filePath);
 						// Notify with a href to allow opening the file/folder from notifications
 						window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'success', message: 'Export embedded into project file', href: embedRes.filePath, ctaLabel: 'Open', persistent: false } }));
 						// Continue to also compile & save a ZIP for user download (do NOT return here)
@@ -215,24 +251,27 @@ export default function DeployPage() {
 				const exportRes = await (window as any).api?.buildExportFolder?.({ distDir: buildRes.path, projectName: (selectedProject && selectedProject.name) || (selectedProject && (selectedProject as any).title) || 'portfolio' });
 				let zipSourceDir = buildRes.path;
 				if (!exportRes || !exportRes.ok) {
-					appendLog(' ⚠️ Export folder creation failed, falling back to raw build path: ' + (exportRes?.error || 'unknown'));
+					appendLog('⚠️ Export folder creation failed, falling back to raw build path: ' + (exportRes?.error || 'unknown'));
 				} else {
 					appendLog('✅ Export folder ready: ' + exportRes.path);
 					zipSourceDir = exportRes.path;
 				}
 
-				appendLog('⚠️ Creating ZIP from export folder ⚠️');
+				appendLog('⚠️ Creating ZIP from export folder');
 				const zipRes = await (window as any).api?.zipDir?.({ dir: zipSourceDir });
 				if (!zipRes || !zipRes.ok) {
-					appendLog('❌ ZIP failed: ' + (zipRes?.error || 'unknown') + ' ❌');
+					appendLog('❌ ZIP failed: ' + (zipRes?.error || 'unknown'));
 					window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'error', message: 'ZIP creation failed: ' + (zipRes?.error || 'unknown'), persistent: false } }));
 					return;
 				}
 				const saveRes = await (window as any).api?.saveFileBytes?.({ defaultPath: `${selectedProject.name || 'portfolio'}.zip`, dataBase64: zipRes.dataBase64 });
 				if (saveRes && saveRes.filePath) {
-					appendLog('✅ ZIP saved: ' + saveRes.filePath + ' ✅');
+					appendLog('✅ ZIP saved: ' + saveRes.filePath);
 					setExportedFilePath(saveRes.filePath);
 					window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'success', message: 'ZIP saved: ' + saveRes.filePath, href: saveRes.filePath, ctaLabel: 'Reveal', persistent: false } }));
+				} else {
+					// User likely cancelled the save dialog — reflect in the log
+					appendLog('❌ Save cancelled');
 				}
 			} catch (e) { appendLog('❌ Export fallback failed: ' + (e instanceof Error ? e.message : String(e)) + ' ❌'); }
 		} catch (e) {
@@ -409,46 +448,55 @@ export default function DeployPage() {
 					</div>
 
 					{/* 2) Local Preview (quickstart style) */}
-					<div className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)]/90 p-4">
+					<div className="surface border border-[color:var(--border)] rounded-2xl p-6 shadow-lg shadow-black/20">
 						<p className="text-xs uppercase tracking-wide text-[color:var(--fg-muted)]">Local Preview</p>
 						<p className="text-sm text-[color:var(--fg-muted)]">Start a local static server to preview your compiled site on this machine or your LAN.</p>
 						<div className="mt-4">
-							<div className="border border-[color:var(--border)] rounded-md bg-[color:var(--surface)]/80 p-3">
-								{!previewRunning ? (
-									<div className="flex flex-col sm:flex-row items-center justify-center gap-3 text-center">
-										<button className="btn btn-accent w-full sm:w-auto gap-2 text-base font-semibold shadow-lg shadow-[color:var(--accent)]/25" onClick={() => handleStartLocalPreview()} disabled={previewStarting || exporting} title="Start local preview">
-											<Play size={16} /> <span>Start</span>
-										</button>
-									</div>
-								) : (
-									<div className="flex flex-col sm:flex-row items-center justify-center gap-3 text-center">
-										<button className="btn btn-danger w-full sm:w-auto gap-2 text-base font-semibold" onClick={() => handleStopLocalPreview()} title="Stop preview">
-											<Square size={16} className="text-[color:var(--danger)]" aria-hidden="true" /> <span>Stop</span>
-										</button>
-										<div className="flex items-center gap-2">
-											{previewLocalUrl && (
-												<a className="btn btn-ghost w-full sm:w-auto gap-2 text-base flex items-center justify-center" href={previewLocalUrl} target="_blank" rel="noreferrer" title="Open preview in browser" onClick={() => window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'info', message: 'Opening preview in browser', persistent: false } }))}>
-													<Eye size={16} /> <span>Open</span>
-												</a>
-											)}
-											{previewLocalUrl && (
-												<button className="btn btn-ghost w-full sm:w-auto gap-2 text-base flex items-center justify-center" onClick={() => (window as any).api?.clipboardWrite?.({ text: previewLocalUrl })} title="Copy local URL">
-													<Copy size={16} /> <span>Copy</span>
+							<div className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)]/90 p-4">
+								<div className="max-w-5xl mx-auto">
+									{!previewRunning ? (
+										<div className="flex flex-col sm:flex-row items-center justify-center gap-3 text-center">
+											<div className="flex items-center gap-2">
+												<button className="btn btn-accent w-full sm:w-auto gap-2 text-base font-semibold shadow-lg shadow-[color:var(--accent)]/25" onClick={() => handleStartLocalPreview()} disabled={previewStarting || exporting} title="Start local preview">
+													<Play size={16} /> <span>Start Preview</span>
 												</button>
-											)}
-											{previewLanUrl && (
-												<a className="btn btn-ghost w-full sm:w-auto gap-2 text-base flex items-center justify-center" href={previewLanUrl} target="_blank" rel="noreferrer" title="Open LAN preview" onClick={() => window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'info', message: 'Opening LAN preview in browser', persistent: false } }))}>
-													<ExternalLink size={16} /> <span>Open LAN</span>
-												</a>
-											)}
-											{previewLanUrl && (
-												<button className="btn btn-ghost w-full sm:w-auto gap-2 text-base flex items-center justify-center" onClick={() => (window as any).api?.clipboardWrite?.({ text: previewLanUrl })} title="Copy LAN URL">
-													<Copy size={16} /> <span>Copy LAN</span>
-												</button>
-											)}
+											</div>
 										</div>
-									</div>
-								)}
+									) : (
+										<div className="flex flex-col sm:flex-row items-center justify-center gap-3 text-center">
+											<button className="btn btn-danger w-full sm:w-auto gap-2 text-base font-semibold" onClick={() => handleStopLocalPreview()} title="Stop preview">
+												<Square size={16} className="text-[color:var(--danger)]" aria-hidden="true" /> <span>Stop</span>
+											</button>
+											{previewLocalUrl && (
+												<button className="btn btn-ghost w-full sm:w-auto gap-2 text-base flex items-center justify-center" onClick={() => handleReloadLocalPreview()} title="Reload preview (rebuild + restart)">
+													<RefreshCw size={16} /> <span>Reload</span>
+												</button>
+											)}
+											<div className="flex items-center gap-2">
+												{previewLocalUrl && (
+													<a className="btn btn-ghost w-full sm:w-auto gap-2 text-base flex items-center justify-center" href={previewLocalUrl} target="_blank" rel="noreferrer" title="Open preview in browser" onClick={() => window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'info', message: 'Opening preview in browser', persistent: false } }))}>
+														<Eye size={16} /> <span>Open</span>
+													</a>
+												)}
+												{previewLocalUrl && (
+													<button className="btn btn-ghost w-full sm:w-auto gap-2 text-base flex items-center justify-center" onClick={() => (window as any).api?.clipboardWrite?.({ text: previewLocalUrl })} title="Copy local URL">
+														<Copy size={16} /> <span>Copy</span>
+													</button>
+												)}
+												{previewLanUrl && (
+													<a className="btn btn-ghost w-full sm:w-auto gap-2 text-base flex items-center justify-center" href={previewLanUrl} target="_blank" rel="noreferrer" title="Open LAN preview" onClick={() => window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'info', message: 'Opening LAN preview in browser', persistent: false } }))}>
+														<ExternalLink size={16} /> <span>Open LAN</span>
+													</a>
+												)}
+												{previewLanUrl && (
+													<button className="btn btn-ghost w-full sm:w-auto gap-2 text-base flex items-center justify-center" onClick={() => (window as any).api?.clipboardWrite?.({ text: previewLanUrl })} title="Copy LAN URL">
+														<Copy size={16} /> <span>Copy LAN</span>
+													</button>
+												)}
+											</div>
+										</div>
+									)}
+								</div>
 							</div>
 						</div>
 					</div>
@@ -465,7 +513,7 @@ export default function DeployPage() {
 										onClick={handleExportZip}
 										disabled={exporting}
 									>
-										<ExternalLink size={16} /> <span>{exporting ? 'Exporting…' : 'Export'}</span>
+										<ExternalLink size={16} /> <span>{exporting ? 'Exporting…' : 'Export Portfolio'}</span>
 									</button>
 									{exportedFilePath && (
 										<button
@@ -488,14 +536,17 @@ export default function DeployPage() {
 											<ExternalLink size={14} /> <span className="hidden sm:inline text-sm">Open Folder</span>
 										</button>
 									)}
+								</div>
+								{/* Build settings placed underneath primary export control */}
+								<div className="mt-2 flex items-center justify-center gap-2">
 									<button
 										type="button"
-										className="btn btn-ghost btn-xs p-2 flex items-center gap-2"
+										className="btn btn-ghost btn-sm p-2 flex items-center gap-2"
 										title={selectedProject || selectedProjectId ? 'Build settings' : 'Open a project to modify build settings'}
 										disabled={!selectedProject && !selectedProjectId}
 										onClick={() => openSettings({ projectId: selectedProjectId || (selectedProject as any)?.id, section: 'build' })}
 									>
-										<Settings size={16} />
+										<Settings size={14} />
 										<span className="text-sm hidden sm:inline">Build settings</span>
 									</button>
 								</div>
@@ -504,6 +555,8 @@ export default function DeployPage() {
 					</div>
 				</div>
 			</section>
+
+			{/* Theme settings removed from Deploy page; moved into Editor workspace */}
 
 			<section className="surface border border-[color:var(--border)] rounded-2xl p-6 shadow-lg shadow-black/20">
 				<div className="flex flex-col gap-1">

@@ -11,7 +11,7 @@ import type { Theme } from "../../themes/types";
 
 const INVALID_FILENAME = /[\\/:*?"<>|]/g;
 
-type SectionKey = "portfolio" | "cloud" | "theme" | "build";
+type SectionKey = "portfolio" | "cloud" | "theme" | "build" | "preview" | "saving";
 
 type Draft = {
     siteTitle: string;
@@ -110,6 +110,7 @@ export default function PortfolioSettingsModal({ open, mode, projectId, cloudId,
         deleteTheme,
         updateTheme,
         createThemeFromPreset,
+        autosaveEnabled, setAutosaveEnabled, saveProject
     } = useProjects();
     const { addFiles, getUrl } = useAssets();
     const { add: notify } = useNotifications();
@@ -241,10 +242,28 @@ export default function PortfolioSettingsModal({ open, mode, projectId, cloudId,
         const current = (project?.portfolioMeta as any)?.buildSettings || {};
         return current.basePath || "";
     });
+    // Preview settings local state
+    const [previewPortState, setPreviewPortState] = useState<number>(() => {
+        const current = (project?.portfolioMeta as any)?.buildSettings || {};
+        const p = (current.preview && current.preview.port) || (current.previewPort) || 0;
+        return Number(p) || 0;
+    });
+    const [previewHostState, setPreviewHostState] = useState<string>(() => {
+        const current = (project?.portfolioMeta as any)?.buildSettings || {};
+        return (current.preview && current.preview.host) || (current.previewHost) || 'localhost';
+    });
+    const [previewOpenOnStartState, setPreviewOpenOnStartState] = useState<boolean>(() => {
+        const current = (project?.portfolioMeta as any)?.buildSettings || {};
+        return !!(current.preview && current.preview.openOnStart);
+    });
     React.useEffect(() => {
         const current = (project?.portfolioMeta as any)?.buildSettings || {};
         setIncludeAssetsState(!!current.includeAssets);
         setBasePathState(current.basePath || "");
+        // hydrate preview settings when project changes
+        setPreviewPortState(Number((current.preview && current.preview.port) || (current.previewPort) || 0) || 0);
+        setPreviewHostState((current.preview && current.preview.host) || (current.previewHost) || 'localhost');
+        setPreviewOpenOnStartState(!!(current.preview && current.preview.openOnStart));
     }, [project?.id, project?.portfolioMeta]);
 
     const initialExpanded = useMemo<Record<SectionKey, boolean>>(() => ({
@@ -252,6 +271,8 @@ export default function PortfolioSettingsModal({ open, mode, projectId, cloudId,
         cloud: defaultSection === "cloud",
         theme: defaultSection === "theme",
         build: defaultSection === "build",
+        preview: defaultSection === "preview",
+        saving: defaultSection === "saving",
     }), [defaultSection]);
     const [expanded, setExpanded] = useState<Record<SectionKey, boolean>>(initialExpanded);
     useEffect(() => setExpanded(initialExpanded), [initialExpanded]);
@@ -459,6 +480,66 @@ export default function PortfolioSettingsModal({ open, mode, projectId, cloudId,
                 <input className="input mt-1 w-full" value={basePathState} onChange={e => void setBase(e.target.value)} placeholder="/base/path" />
                 <div className="text-xs text-[color:var(--fg-muted)] mt-1">Optional base path for the generated site.</div>
             </label>
+        </div>
+    );
+
+    const renderSavingBody = () => (
+        <div className="space-y-3">
+            <label className="flex items-center space-x-2">
+                <input type="checkbox" checked={!!autosaveEnabled} onChange={() => setAutosaveEnabled(!autosaveEnabled)} />
+                <span className="text-[color:var(--fg-muted)]">Enable autosave</span>
+            </label>
+            <div>
+                <p className="text-xs uppercase tracking-wide text-[color:var(--fg-muted)]">Project file</p>
+                <div className="mt-1 rounded border border-dashed border-[color:var(--border)] p-2 flex items-center gap-2">
+                    <div className="flex-1 min-w-0">
+                        <p className="text-sm font-mono truncate">{project?._filePath || '(not saved to disk)'}</p>
+                        <p className="text-xs text-[color:var(--fg-muted)]">Location of the saved .portfoliyou file</p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <button className="btn btn-ghost btn-sm" disabled={!project?._filePath} onClick={async () => { if (project?._filePath && (window as any).api?.showItemInFolder) await (window as any).api.showItemInFolder({ filePath: project._filePath }); }}>Open</button>
+                        <button className="btn btn-ghost btn-sm" onClick={async () => { if (project?.id) await saveProject(project.id, { saveAs: true }); }}>Save As…</button>
+                        <button className="btn btn-ghost btn-sm" onClick={async () => { if (project?.id) await saveProject(project.id, { saveAs: true }); }}>Duplicate (.portfoliyou)</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+
+    const savePreviewSettings = async (port: number, host: string, openOnStart: boolean) => {
+        if (!project) return;
+        try {
+            await updateProjectMetadata(project.id, { metadata: ({ ...(project.portfolioMeta || {}), buildSettings: { ...(project.portfolioMeta as any)?.buildSettings, preview: { ...(project.portfolioMeta as any)?.buildSettings?.preview, port: port || undefined, host: host || undefined, openOnStart: openOnStart || undefined } } } as any) });
+            notify({ type: 'success', title: 'Preview settings saved', message: 'Preview settings updated.', persistent: false });
+        } catch { /* ignore */ }
+    };
+
+    const renderPreviewBody = () => (
+        <div className="space-y-3">
+            <label className="block text-xs uppercase tracking-wide">
+                Localhost host
+                <input className="input mt-1 w-full" value={previewHostState} onChange={e => { setPreviewHostState(e.target.value); }} placeholder="localhost" />
+                <div className="text-xs text-[color:var(--fg-muted)] mt-1">Hostname for the preview server (usually localhost).</div>
+            </label>
+            <label className="block text-xs uppercase tracking-wide">
+                Port
+                <input type="number" className="input mt-1 w-full" value={previewPortState || ''} onChange={e => { const v = Number((e.target as HTMLInputElement).value); setPreviewPortState(Number.isFinite(v) ? v : 0); }} placeholder="3000" />
+                <div className="text-xs text-[color:var(--fg-muted)] mt-1">Port to run the local preview server on. Leave blank or 0 to auto-select.</div>
+            </label>
+            <label className="flex items-center space-x-2">
+                <input type="checkbox" checked={previewOpenOnStartState} onChange={() => setPreviewOpenOnStartState(prev => !prev)} />
+                <span className="text-[color:var(--fg-muted)]">Open browser when preview starts</span>
+            </label>
+            <div className="flex items-center gap-2">
+                <button className="btn btn-accent btn-sm" onClick={() => void savePreviewSettings(previewPortState, previewHostState, previewOpenOnStartState)}>Save Preview Settings</button>
+                <button className="btn btn-ghost btn-sm" onClick={() => {
+                    // reset to current project settings
+                    const current = (project?.portfolioMeta as any)?.buildSettings || {};
+                    setPreviewPortState(Number((current.preview && current.preview.port) || (current.previewPort) || 0) || 0);
+                    setPreviewHostState((current.preview && current.preview.host) || (current.previewHost) || 'localhost');
+                    setPreviewOpenOnStartState(!!(current.preview && current.preview.openOnStart));
+                }}>Reset</button>
+            </div>
         </div>
     );
 
@@ -703,6 +784,8 @@ export default function PortfolioSettingsModal({ open, mode, projectId, cloudId,
                 <div className="p-4 space-y-4 max-h-[70vh] overflow-y-auto">
                     {renderSection("portfolio", "Portfolio", mode === "create" ? "Draft" : "Details", renderPortfolioFields())}
                     {renderSection("build", "Build", undefined, renderBuildBody())}
+                    {renderSection("saving", "Saving", undefined, renderSavingBody())}
+                    {renderSection("preview", "Preview", undefined, renderPreviewBody())}
                     {showCloudSection && renderSection("cloud", "Cloud", cloudStatus, renderCloudBody())}
                     {renderSection("theme", "Theme", activeTheme ? activeTheme.name : "Unavailable", renderThemeBody())}
                     {formError && <div className="text-sm text-red-500">{formError}</div>}

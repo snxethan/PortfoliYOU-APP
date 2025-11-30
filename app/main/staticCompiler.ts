@@ -76,8 +76,65 @@ function renderWidgetToHtml(widget: any, assetsBase: string, placeholderUrl: str
                     href = pageFilenameMap[targetId];
                 }
                 if (!href) href = '#';
-                pushCss(`color: var(--accent);`);
-                return `<div class="widget widget-link widget-instance-${id}"><a href="${escapeHtml(href)}">${label}</a></div>`;
+
+                // Mirror renderer LinkView: support variants 'text', 'card', 'button' with inline styles
+                const variant = (props.variant || 'button');
+                const font = props.font || 'system';
+                const fontSize = typeof props.fontSize === 'number' ? `${props.fontSize}px` : '16px';
+                const weight = (props.weight === 'bold' ? 700 : 400);
+                const italic = !!props.italic;
+
+                const theme = themeColors || {};
+                const borderColor = theme.border || 'var(--border)';
+                const surface = theme.surface || 'var(--surface)';
+                const textColor = theme.text || 'var(--fg)';
+                const accent = theme.accent || 'var(--accent)';
+                const buttonBg = theme.accent || 'var(--accent)';
+                const buttonText = theme.widgetText || 'var(--widget-fg)';
+
+                if (variant === 'text') {
+                    const style = [`color: ${accent}`, `font-weight: ${weight}`, `text-decoration: underline`, `font-size: ${fontSize}`, `font-style: ${italic ? 'italic' : 'normal'}`].join(';');
+                    return `<div class="widget widget-link widget-instance-${id}"><a href="${escapeHtml(href)}" style="${style}">${label}</a></div>`;
+                }
+
+                if (variant === 'card') {
+                    const style = [
+                        `display:block`,
+                        `width:100%`,
+                        `height:100%`,
+                        `flex-direction:column`,
+                        `justify-content:center`,
+                        `gap:6px`,
+                        `padding:16px`,
+                        `border-radius:16px`,
+                        `font-size:${fontSize}`,
+                        `border:1px solid ${borderColor}`,
+                        `background:${surface}`,
+                        `box-shadow:0 8px 20px rgba(0,0,0,0.06)`,
+                        `text-decoration:none`,
+                        `color:${textColor}`
+                    ].join(';');
+                    const sub = `<span style="font-size:12px;text-transform:uppercase;letter-spacing:1px;color:${accent};opacity:0.9">Link</span><div style="display:flex;align-items:center;font-size:${fontSize};font-weight:${weight};font-style:${italic ? 'italic' : 'normal'};">${label}</div>`;
+                    return `<div class="widget widget-link widget-instance-${id}"><a href="${escapeHtml(href)}" style="${style}">${sub}</a></div>`;
+                }
+
+                // default -> button
+                const btnStyle = [
+                    `display:inline-flex`,
+                    `align-items:center`,
+                    `gap:8px`,
+                    `padding:10px 16px`,
+                    `border-radius:999px`,
+                    `border:2px solid ${borderColor}`,
+                    `box-shadow:2px 2px 0 rgba(0,0,0,0.06)`,
+                    `background:${buttonBg}`,
+                    `color:${buttonText}`,
+                    `text-decoration:none`,
+                    `font-weight:${weight}`,
+                    `font-style:${italic ? 'italic' : 'normal'}`,
+                    `font-size:${fontSize}`
+                ].join(';');
+                return `<div class="widget widget-link widget-instance-${id}"><a href="${escapeHtml(href)}" style="${btnStyle}">${label}</a></div>`;
             }
             case 'video': {
                 const src = String(props.src || '');

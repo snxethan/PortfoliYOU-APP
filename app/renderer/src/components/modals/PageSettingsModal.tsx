@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { createPortal } from 'react-dom';
-import { X, RotateCcw } from 'lucide-react';
+import { X, RotateCcw, ChevronDown, ChevronRight } from 'lucide-react';
 
 export default function PageSettingsModal({
     title = "Page settings",
@@ -43,6 +43,75 @@ export default function PageSettingsModal({
         return fallbackTheme;
     }, [background, fallbackTheme]);
 
+    function PageSettingsSections({ name, setName, starter, setStarter, background, setBackground, backgroundSwatch, themeBackground }: {
+        name: string;
+        setName: (s: string) => void;
+        starter: boolean;
+        setStarter: (v: boolean) => void;
+        background: string;
+        setBackground: (s: string) => void;
+        backgroundSwatch: string;
+        themeBackground?: string | null;
+    }) {
+        const [expanded, setExpanded] = useState<{ page: boolean; appearance: boolean }>({ page: true, appearance: true });
+        const toggle = (k: 'page' | 'appearance') => setExpanded(prev => ({ ...prev, [k]: !prev[k] }));
+
+        const renderSection = (key: 'page' | 'appearance', title: string, children?: React.ReactNode) => (
+            <div className="border border-[color:var(--border)] rounded-md mb-3">
+                <button type="button" className="w-full flex items-center justify-between px-3 py-2 text-left" onClick={() => toggle(key)}>
+                    <div className="flex items-center gap-2">
+                        {expanded[key] ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                        <span className="font-semibold text-sm uppercase tracking-wide">{title}</span>
+                    </div>
+                </button>
+                {expanded[key] && (
+                    <div className="border-t border-[color:var(--border)] bg-[color:var(--muted)]/20 p-4 space-y-3">
+                        {children}
+                    </div>
+                )}
+            </div>
+        );
+
+        return (
+            <div>
+                {renderSection('page', 'Page', (
+                    <>
+                        <div className="grid grid-cols-3 gap-4 items-center mb-2">
+                            <div className="text-xs uppercase tracking-wide text-[color:var(--fg-muted)]">Name</div>
+                            <div className="col-span-2">
+                                <input className="input w-full" placeholder="Page name" autoFocus value={name} onChange={(e) => setName(e.target.value)} />
+                            </div>
+                        </div>
+
+                        <div className="grid grid-cols-3 gap-4 items-center">
+                            <div className="text-xs uppercase tracking-wide text-[color:var(--fg-muted)]">Default</div>
+                            <div className="col-span-2 flex items-center gap-3">
+                                <input id="starter-toggle" type="checkbox" checked={starter} onChange={(e) => setStarter(e.target.checked)} />
+                                <label htmlFor="starter-toggle" className="text-sm">Default page</label>
+                            </div>
+                        </div>
+                    </>
+                ))}
+
+                {renderSection('appearance', 'Appearance', (
+                    <>
+                        <div className="grid grid-cols-3 gap-4 items-center mb-3">
+                            <div className="text-xs uppercase tracking-wide text-[color:var(--fg-muted)]">Background</div>
+                            <div className="col-span-2 flex items-center gap-2">
+                                <input type="color" className="w-12 h-12 rounded border border-[color:var(--border)] bg-[color:var(--surface)]" value={backgroundSwatch} onChange={(e) => setBackground(e.target.value)} aria-label="Page background color" />
+                                <input className="input flex-1" placeholder={themeBackground || '#ffffff'} value={background} onChange={(e) => setBackground(e.target.value)} />
+                                <button type="button" className="btn btn-ghost btn-xs flex items-center gap-2" title="Reset to theme" aria-label="Reset page background to theme" onClick={() => setBackground('')}>
+                                    <RotateCcw size={14} />
+                                    <span className="text-xs">Reset</span>
+                                </button>
+                            </div>
+                        </div>
+                    </>
+                ))}
+            </div>
+        );
+    }
+
     const modal = (
         <div
             className="fixed inset-0 z-[20000] flex items-center justify-center bg-black/50 backdrop-blur-sm"
@@ -66,53 +135,17 @@ export default function PageSettingsModal({
 
                 <div className="p-4">
                     <form onSubmit={(e) => { e.preventDefault(); const v = name.trim(); if (v) onSave({ name: v, starter, backgroundColor: background.trim() ? background.trim() : null }); }}>
-                        <section className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)]/90 p-4 mb-4">
-                            <div className="flex items-center justify-between mb-2">
-                                <div className="text-xs uppercase tracking-wide text-[color:var(--fg-muted)]">Page</div>
-                                <div className="text-xs text-[color:var(--fg-muted)]">Details</div>
-                            </div>
-                            <label className="text-sm text-[color:var(--fg-muted)]">Name</label>
-                            <input
-                                className="input w-full mb-3"
-                                placeholder="Page name"
-                                autoFocus
-                                value={name}
-                                onChange={(e) => setName(e.target.value)}
-                            />
-
-                            <label className="text-sm text-[color:var(--fg-muted)]">Background</label>
-                            <div className="flex items-center gap-2 mb-2">
-                                <input
-                                    type="color"
-                                    className="w-12 h-12 rounded border border-[color:var(--border)] bg-[color:var(--surface)]"
-                                    value={backgroundSwatch}
-                                    onChange={(e) => setBackground(e.target.value)}
-                                    aria-label="Page background color"
-                                />
-                                <input
-                                    className="input flex-1"
-                                    placeholder={themeBackground || '#ffffff'}
-                                    value={background}
-                                    onChange={(e) => setBackground(e.target.value)}
-                                />
-                                <button
-                                    type="button"
-                                    className="btn btn-ghost btn-xs"
-                                    title="Reset to theme"
-                                    aria-label="Reset page background to theme"
-                                    onClick={() => setBackground('')}
-                                >
-                                    <RotateCcw size={14} />
-                                </button>
-                            </div>
-                            <p className="text-[12px] text-[color:var(--fg-muted)] mb-3">Leave blank to inherit the active theme background.</p>
-
-                            <div className="flex items-center gap-3 mb-3">
-                                <input id="starter-toggle" type="checkbox" checked={starter} onChange={(e) => setStarter(e.target.checked)} />
-                                <label htmlFor="starter-toggle" className="text-sm">Default page</label>
-                            </div>
-
-                        </section>
+                        {/* Use accordion-style subsections like PortfolioSettingsModal to mirror editor settings */}
+                        <PageSettingsSections
+                            name={name}
+                            setName={setName}
+                            starter={starter}
+                            setStarter={setStarter}
+                            background={background}
+                            setBackground={setBackground}
+                            backgroundSwatch={backgroundSwatch}
+                            themeBackground={themeBackground}
+                        />
 
                         <div className="flex justify-end items-center gap-2">
                             <button

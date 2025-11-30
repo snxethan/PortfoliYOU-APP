@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useLayoutEffect, lazy, Suspense } from "react";
-import { ChevronsLeft, ChevronsRight, ChevronDown, ChevronRight, GripVertical } from "lucide-react";
+import { ChevronsLeft, ChevronsRight, ChevronDown, ChevronRight, GripVertical, Settings, Palette } from "lucide-react";
 import { DndContext, PointerSensor, MouseSensor, TouchSensor, useSensor, useSensors, DragEndEvent, DragStartEvent, rectIntersection, DragOverlay, type Modifier } from "@dnd-kit/core";
 
 import { useProjects } from "../providers/ProjectsProvider";
@@ -9,8 +9,8 @@ import type { GridItem } from "../components/editor/canvas/GridCanvas";
 const ModifyWidgetModal = lazy(() => import("../components/editor/widgets/ModifyWidgetModal"));
 const WidgetsPalette = lazy(() => import("../components/editor/widgets/WidgetsPalette"));
 import PageSettingsModal from "../components/modals/PageSettingsModal";
-import EditorTopBar from "../components/editor/EditorTopBar";
-import PageControls from "../components/editor/PageControls";
+import EditorSettings from "../components/editor/EditorSettings";
+import PageSettings from "../components/editor/PageSettings";
 import ViewportSurface from "../components/editor/ViewportSurface";
 import DragOverlayPreview from "../components/editor/DragOverlayPreview";
 import AssetsPanel from "../components/editor/widgets/AssetsPanel";
@@ -36,7 +36,7 @@ function serializeGridItems(list: GridItem[]) {
 }
 
 export default function EditorPage() {
-  const { selectedProject, createPage, deletePage, renamePage, getPageItems, setPageItems, setPageStarter, setPageBackground, activeTheme } = useProjects();
+  const { selectedProject, createPage, deletePage, renamePage, getPageItems, setPageItems, setPageStarter, setPageBackground, activeTheme, updateTheme } = useProjects();
   const { add: notify } = useNotifications();
   const { openSettings } = usePortfolioSettings();
 
@@ -666,30 +666,34 @@ export default function EditorPage() {
               <p className="text-sm text-[color:var(--fg-muted)]">Controls for canvas, zoom and editor preferences.</p>
             </div>
             <div className="mt-4">
-              <EditorTopBar
-                previewMode={previewMode}
-                togglePreviewMode={togglePreviewMode}
-                gap={gap}
-                setGap={setGap}
-                showGrid={showGrid}
-                toggleGrid={toggleGrid}
-                activeView={activeView}
-                setDesktopView={setDesktopView}
-                setMobileView={setMobileView}
-                pageWidth={pageWidth}
-                pageHeight={pageHeight}
-                heightMode={heightMode}
-                setHeightMode={applyHeightMode}
-                zoom={zoom}
-                onZoomIn={zoomIn}
-                onZoomOut={zoomOut}
-                onResetZoom={resetZoom}
-                canUndo={canUndo}
-                canRedo={canRedo}
-                undo={undo}
-                redo={redo}
-                onOpenWebpage={openWebpage}
-              />
+              <div className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)]/90 p-4">
+                <div className="max-w-5xl mx-auto">
+                  <EditorSettings
+                    previewMode={previewMode}
+                    togglePreviewMode={togglePreviewMode}
+                    gap={gap}
+                    setGap={setGap}
+                    showGrid={showGrid}
+                    toggleGrid={toggleGrid}
+                    activeView={activeView}
+                    setDesktopView={setDesktopView}
+                    setMobileView={setMobileView}
+                    pageWidth={pageWidth}
+                    pageHeight={pageHeight}
+                    heightMode={heightMode}
+                    setHeightMode={applyHeightMode}
+                    zoom={zoom}
+                    onZoomIn={zoomIn}
+                    onZoomOut={zoomOut}
+                    onResetZoom={resetZoom}
+                    canUndo={canUndo}
+                    canRedo={canRedo}
+                    undo={undo}
+                    redo={redo}
+                    onOpenWebpage={openWebpage}
+                  />
+                </div>
+              </div>
             </div>
           </div>
 
@@ -701,8 +705,8 @@ export default function EditorPage() {
                 <p className="text-sm text-[color:var(--fg-muted)]">Manage pages, backgrounds and quick page actions.</p>
               </div>
               <div className="mt-4">
-                <div className="max-w-3xl mx-auto">
-                  <PageControls
+                <div className="max-w-5xl mx-auto">
+                  <PageSettings
                     isCloud={!!(selectedProject as unknown as { _cloudId?: string })._cloudId}
                     pageOrder={selectedProject.pageOrder || []}
                     pages={selectedProject.pages}
@@ -835,6 +839,8 @@ export default function EditorPage() {
               </div>
             </div>
           )}
+
+
           {/* Portfolio Canvas subsection (contains canvas and dashboard) */}
           <div className="mt-4 rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)]/90 p-4">
             <div className="flex flex-col gap-1">
@@ -1176,6 +1182,60 @@ export default function EditorPage() {
           </div>
         </div>
       </section>
+
+      {/* Theme subsection under Portfolio Canvas */}
+      <div className="mt-4 rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)]/90 p-4">
+        <div className="max-w-2xl mx-auto">
+          <div className="flex items-start justify-between">
+            <div>
+              <p className="text-xs uppercase tracking-wide text-[color:var(--fg-muted)]">Theme</p>
+              <p className="text-sm text-[color:var(--fg-muted)]">Current theme applied to the canvas and widgets.</p>
+              <p className="mt-2 text-sm">{activeTheme?.name ?? 'Default'}</p>
+            </div>
+            <div className="flex items-center gap-3">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-md border border-[color:var(--border)]" style={{ background: activeTheme?.colors?.primary || '#111827' }} title="Primary color" />
+                <div className="w-8 h-8 rounded-md border border-[color:var(--border)]" style={{ background: activeTheme?.colors?.secondary || '#f3f4f6' }} title="Secondary color" />
+              </div>
+              <div className="flex flex-col">
+                <button
+                  className="btn btn-ghost btn-sm flex items-center gap-2"
+                  onClick={() => { if (selectedProject) openSettings({ projectId: selectedProject.id, section: 'theme' }); }}
+                  title="Open theme settings"
+                >
+                  <Settings size={14} />
+                  <span>Theme settings</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {activeTheme && selectedProject && (
+            <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {Object.keys(activeTheme.colors).map((k) => {
+                const key = k as keyof typeof activeTheme.colors;
+                const val = activeTheme.colors[key] as string;
+                return (
+                  <label key={k} className="flex items-center gap-3 text-xs">
+                    <span className="w-28 text-[10px] uppercase tracking-wide text-[color:var(--fg-muted)]">{key}</span>
+                    <input
+                      type="color"
+                      className="w-9 h-9 rounded border border-[color:var(--border)]"
+                      value={val}
+                      onChange={(e) => updateTheme(selectedProject.id, activeTheme.themeId, { colors: { [key]: e.target.value } as any })}
+                    />
+                    <input
+                      className="input flex-1 text-sm"
+                      value={val}
+                      onChange={(e) => updateTheme(selectedProject.id, activeTheme.themeId, { colors: { [key]: e.target.value } as any })}
+                    />
+                  </label>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
 
       {/* Preview now replaces canvas above when toggled */}
 

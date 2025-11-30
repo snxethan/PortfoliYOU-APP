@@ -1,6 +1,6 @@
 import { useNavigate, useLocation } from "react-router-dom";
 import React, { useMemo, useState, useCallback } from "react";
-import { Cloud, UploadCloud, Wrench, X, Save, FolderOpen, Pin, PinOff, Palette, Settings2, Play, Square, Copy, ExternalLink, Eye } from "lucide-react";
+import { Cloud, UploadCloud, X, Save, FolderOpen, Pin, PinOff, Palette, Settings, Play, Square, Copy, ExternalLink, Eye, RefreshCw } from "lucide-react";
 
 import { useAuth } from "../../providers/AuthProvider";
 import { useProjects } from "../../providers/ProjectsProvider";
@@ -78,7 +78,7 @@ export default function PortfolioIsland(): JSX.Element | null {
     setTimeout(() => { window.dispatchEvent(new CustomEvent('py:highlight-request')); }, 50);
   }, [navigate]);
 
-  const handleOpenSettings = useCallback((section: 'portfolio' | 'theme' | 'cloud') => {
+  const handleOpenSettings = useCallback((section: 'portfolio' | 'theme' | 'cloud' | 'preview') => {
     if (selectedProjectId) openSettings({ projectId: selectedProjectId, section });
   }, [openSettings, selectedProjectId]);
 
@@ -89,7 +89,7 @@ export default function PortfolioIsland(): JSX.Element | null {
   return (
     <div className={`portfolio-island ${containerClass} ${shouldVisuallyHide ? 'opacity-0 pointer-events-none h-0 overflow-hidden' : ''}`}>
       <div
-        className={`surface border border-[color:var(--border)] rounded-2xl px-3 py-3 shadow-lg bg-[color:var(--surface)]/80 transition ${hasSelection ? 'ring-2 ring-[color:var(--accent)]/50 ring-offset-2 ring-offset-[color:var(--bg,transparent)]' : ''}`}
+        className={`surface relative border border-[color:var(--border)] rounded-2xl px-3 py-3 shadow-lg bg-[color:var(--surface)]/80 transition ${hasSelection ? 'ring-2 ring-[color:var(--accent)]/50 ring-offset-2 ring-offset-[color:var(--bg,transparent)]' : ''}`}
         style={islandStyle}
       >
         <div className="flex flex-wrap items-center gap-2 w-full">
@@ -106,26 +106,49 @@ export default function PortfolioIsland(): JSX.Element | null {
 
           <span className="hidden sm:inline-block w-px h-6 bg-[color:var(--border)]" aria-hidden="true"></span>
 
-          {statusChip}
+          {/* Compact controls next to project name: settings + theme (icon-only) */}
+          <div className="ml-2 flex items-center gap-1">
+            <button
+              type="button"
+              className={`btn btn-ghost p-2 w-9 h-9 inline-flex items-center justify-center rounded-md text-[color:var(--fg-muted)]`}
+              disabled={!hasSelection}
+              title="Portfolio settings"
+              onClick={() => handleOpenSettings('portfolio')}
+            >
+              <Settings size={16} />
+            </button>
+            <button
+              type="button"
+              className={`btn btn-ghost p-2 w-9 h-9 inline-flex items-center justify-center rounded-md text-[color:var(--fg-muted)]`}
+              disabled={!hasSelection}
+              title="Theme settings"
+              onClick={() => handleOpenSettings('theme')}
+            >
+              <Palette size={16} />
+            </button>
+          </div>
 
           <div className={segmentClass}>
             <span className={labelClass}>Preview</span>
             {!previewRunningState ? (
-              <button
-                type="button"
-                title="Start local preview"
-                aria-label="Start preview"
-                className="btn btn-accent btn-sm flex items-center gap-2 text-[12px] font-semibold shadow-lg shadow-[color:var(--accent)]/25"
-                disabled={!hasSelection}
-                onClick={async () => {
-                  if (!hasSelection) return;
-                  window.dispatchEvent(new CustomEvent('py:preview-start-request'));
-                  navigate('/deploy');
-                }}
-              >
-                <Play size={14} />
-                <span>Start</span>
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  title="Start local preview"
+                  aria-label="Start preview"
+                  className="btn btn-accent btn-sm flex items-center gap-2 text-[12px] font-semibold shadow-lg shadow-[color:var(--accent)]/25"
+                  disabled={!hasSelection}
+                  onClick={async () => {
+                    if (!hasSelection) return;
+                    window.dispatchEvent(new CustomEvent('py:preview-start-request'));
+                    navigate('/deploy');
+                  }}
+                >
+                  <Play size={14} />
+                  <span>Start</span>
+                </button>
+
+              </div>
             ) : (
               <>
                 <button
@@ -143,6 +166,28 @@ export default function PortfolioIsland(): JSX.Element | null {
 
                 {previewLocalState && (
                   <>
+                    <button
+                      type="button"
+                      title="Reload preview (rebuild + restart)"
+                      aria-label="Reload preview"
+                      className={actionBtnClass}
+                      onClick={() => {
+                        try { window.dispatchEvent(new CustomEvent('py:preview-reload-request')); } catch { /* ignore */ }
+                      }}
+                    >
+                      <RefreshCw size={14} />
+                      <span>Reload</span>
+                    </button>
+                    <button
+                      type="button"
+                      title="Preview settings"
+                      aria-label="Preview settings"
+                      className={actionBtnClass}
+                      onClick={() => handleOpenSettings('preview')}
+                    >
+                      <Settings size={14} />
+                      <span>Preview</span>
+                    </button>
                     <a title="Open preview in browser" aria-label="Open preview" href={previewLocalState} target="_blank" rel="noreferrer" className={actionBtnClass}>
                       <Eye size={14} />
                       <span>Open</span>
@@ -227,67 +272,38 @@ export default function PortfolioIsland(): JSX.Element | null {
                 <X size={16} />
               </button>
             </div>
+
+            {/* saving / notification indicator moved to bottom-right */}
           </div>
         </div>
 
         <div className="mt-3 flex flex-wrap items-center gap-2">
+          {/* Compile section: holds export and build settings */}
           <div className={segmentClass}>
-            <span className={labelClass}>Configure</span>
+            <span className={labelClass}>Compile</span>
             <button
               type="button"
-              className={actionBtnClass}
+              className="btn btn-accent btn-sm flex items-center gap-2 text-[12px] font-semibold shadow-lg shadow-[color:var(--accent)]/25"
               disabled={!hasSelection}
-              onClick={() => handleOpenSettings('portfolio')}
-              title="Open portfolio settings"
-            >
-              <Settings2 size={14} />
-              Settings
-            </button>
-            <button
-              type="button"
-              className={actionBtnClass}
-              disabled={!hasSelection}
-              onClick={() => handleOpenSettings('theme')}
-              title="Open theme section"
-            >
-              <Palette size={14} />
-              Theme
-            </button>
-            {user && (
-              <button
-                type="button"
-                className={`${actionBtnClass} ${selectedProject?._synced ? 'text-[color:var(--accent)]' : ''}`}
-                disabled={!hasSelection}
-                onClick={() => handleOpenSettings('cloud')}
-                title="Open cloud settings"
-              >
-                <Cloud size={14} />
-                Cloud
-              </button>
-            )}
-          </div>
-
-          <div className={segmentClass}>
-            <span className={labelClass}>Workspace</span>
-            <button
-              type="button"
-              className={actionBtnClass}
-              disabled={!hasSelection}
-              onClick={() => handleNavigate('/editor')}
-              title="Open editor workspace"
-            >
-              <Wrench size={14} />
-              EDITOR
-            </button>
-            <button
-              type="button"
-              className={actionBtnClass}
-              disabled={!hasSelection}
-              onClick={() => handleNavigate('/deploy')}
-              title="Open deploy workspace"
+              onClick={() => {
+                if (!hasSelection) return;
+                window.dispatchEvent(new CustomEvent('py:export-request'));
+                navigate('/deploy');
+              }}
+              title="Export project"
             >
               <ExternalLink size={14} />
-              DEPLOY
+              Export
+            </button>
+            <button
+              type="button"
+              className={actionBtnClass}
+              disabled={!hasSelection}
+              onClick={() => openSettings({ projectId: selectedProjectId || (selectedProject as any)?.id, section: 'build' })}
+              title="Build settings"
+            >
+              <Copy size={14} />
+              Build
             </button>
           </div>
 
@@ -309,18 +325,13 @@ export default function PortfolioIsland(): JSX.Element | null {
             </button>
             <button
               type="button"
-              className="btn btn-accent btn-sm flex items-center gap-2 text-[12px] font-semibold shadow-lg shadow-[color:var(--accent)]/25"
+              className={actionBtnClass}
               disabled={!hasSelection}
-              onClick={() => {
-                if (!hasSelection) return;
-                // request export and navigate to Deploy
-                window.dispatchEvent(new CustomEvent('py:export-request'));
-                navigate('/deploy');
-              }}
-              title="Export project"
+              onClick={() => { if (selectedProjectId) openSettings({ projectId: selectedProjectId, section: 'saving' }); }}
+              title="Save settings"
             >
-              <ExternalLink size={14} />
-              Export
+              <Save size={14} />
+              Save settings
             </button>
             <button
               type="button"
@@ -358,6 +369,8 @@ export default function PortfolioIsland(): JSX.Element | null {
             Pick a portfolio from Home to enable the quick-launch controls.
           </p>
         )}
+        {/* Bottom-right status indicator */}
+        <div className="absolute right-3 bottom-3">{statusChip}</div>
       </div>
     </div>
   );
