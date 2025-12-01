@@ -3,7 +3,7 @@ import { z } from 'zod';
 
 import type { WidgetDefinition } from '../types';
 import { useAssets } from '../../providers/AssetsProvider';
-import type { VideoWidgetProps } from '../videoProps';
+import type { VideoWidgetProps } from '../../../../shared/widgets/videoProps';
 import {
     COLOR_OR_VAR,
     VIDEO_BASE_FALLBACK,
@@ -14,7 +14,7 @@ import {
     sanitizeText,
     sanitizeUrlish,
     sanitizeVideoProps,
-} from '../videoProps';
+} from '../../../../shared/widgets/videoProps';
 
 type Props = VideoWidgetProps;
 

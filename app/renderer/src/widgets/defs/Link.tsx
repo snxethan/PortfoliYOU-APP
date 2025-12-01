@@ -2,7 +2,7 @@ import React from 'react';
 import { z } from 'zod';
 
 import type { WidgetDefinition } from '../types';
-import { normalizeExternalLinkUrl } from '../utils/linkUrl';
+import { normalizeExternalLinkUrl } from '../../../../shared/widgets/linkUrl';
 import { useWidgetTheme } from '../sdk';
 
 type LinkVariant = 'text' | 'button' | 'card';

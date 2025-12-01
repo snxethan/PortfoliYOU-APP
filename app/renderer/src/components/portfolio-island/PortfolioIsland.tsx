@@ -1,17 +1,22 @@
 import { useNavigate, useLocation } from "react-router-dom";
 import React, { useMemo, useState, useCallback } from "react";
-import { Cloud, UploadCloud, X, Save, FolderOpen, Pin, PinOff, Palette, Settings, Play, Square, Copy, ExternalLink, Eye, RefreshCw } from "lucide-react";
+import { Cloud, UploadCloud, X, Save, FolderOpen, Pin, PinOff, Palette, Settings, Play, Square, Copy, ExternalLink, Eye, RefreshCw, SlidersHorizontal, Bell, BellDot } from "lucide-react";
 
 import { useAuth } from "../../providers/AuthProvider";
 import { useProjects } from "../../providers/ProjectsProvider";
 import { usePortfolioSettings } from "../../providers/PortfolioSettingsProvider";
+import { useNotifications } from "../../providers/NotificationsProvider";
+import { getPreviewState } from "../../lib/previewInterop";
 
 export default function PortfolioIsland(): JSX.Element | null {
   const { user } = useAuth();
   const { selectedProject, selectedProjectId, saving, lastSavedAt, saveProject, clearSelection, autosaveEnabled, setAutosaveEnabled } = useProjects();
+  const { notifications, add: notify } = useNotifications();
   const { openSettings } = usePortfolioSettings();
   const navigate = useNavigate();
   const location = useLocation();
+  const pendingHighlightRef = React.useRef(false);
+  const selectedProjectCloudId = selectedProject?._cloudId ?? selectedProjectId ?? (selectedProject as any)?.id ?? null;
   const [pinned, setPinned] = useState<boolean>(() => {
     try { return localStorage.getItem('py_island_pin') === '1'; } catch { return false; }
   });
@@ -23,7 +28,7 @@ export default function PortfolioIsland(): JSX.Element | null {
     } catch { return 0.95; }
   });
   const savedText = useMemo(() => lastSavedAt ? new Date(lastSavedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : null, [lastSavedAt]);
-  const hasSelection = !!selectedProjectId;
+  const hasSelection = !!selectedProjectCloudId;
   // When on the Home page with no selected portfolio, keep the island mounted
   // but visually hide it to avoid changing hook order during quick selection changes.
   const shouldVisuallyHide = location.pathname === '/' && !hasSelection;
@@ -53,18 +58,26 @@ export default function PortfolioIsland(): JSX.Element | null {
   const [previewLocalState, setPreviewLocalState] = useState<string | null>(null);
   const [previewLanState, setPreviewLanState] = useState<string | null>(null);
   React.useEffect(() => {
+    const applyState = (payload: { running?: boolean; localUrl?: string | null; lanUrl?: string | null }) => {
+      setPreviewRunningState(!!payload.running);
+      setPreviewLocalState(payload.localUrl || null);
+      if (payload.lanUrl && !payload.lanUrl.startsWith('http://127.') && !payload.lanUrl.startsWith('http://localhost')) setPreviewLanState(payload.lanUrl);
+      else setPreviewLanState(null);
+    };
     const handler = (e: any) => {
       try {
         const d = e?.detail || {};
-        setPreviewRunningState(!!d.running);
-        setPreviewLocalState(d.localUrl || null);
-        if (d.lanUrl && !d.lanUrl.startsWith('http://127.') && !d.lanUrl.startsWith('http://localhost')) setPreviewLanState(d.lanUrl);
-        else setPreviewLanState(null);
+        const eventProjectId = d.projectId;
+        if (eventProjectId && selectedProjectCloudId && eventProjectId !== selectedProjectCloudId) return;
+        applyState(d);
       } catch { /* ignore */ }
     };
     window.addEventListener('py:preview:state', handler as EventListener);
+    const snapshot = getPreviewState(selectedProjectCloudId);
+    if (snapshot) applyState(snapshot);
+    else applyState({ running: false, localUrl: null, lanUrl: null });
     return () => window.removeEventListener('py:preview:state', handler as EventListener);
-  }, []);
+  }, [selectedProjectCloudId]);
 
   const pct = Math.round(opacity * 100);
   const islandStyle = useMemo(() => {
@@ -86,6 +99,22 @@ export default function PortfolioIsland(): JSX.Element | null {
     if (selectedProjectId) navigate(to);
   }, [navigate, selectedProjectId]);
 
+  const highlightNotifications = useCallback(() => {
+    const fire = () => {
+      try { window.dispatchEvent(new CustomEvent('py:highlight-notifications', { detail: { origin: 'island' } })); } catch { /* ignore */ }
+    };
+    // Fire twice to cover the short window before Home mounts after navigation
+    window.setTimeout(fire, 80);
+    window.setTimeout(fire, 240);
+  }, []);
+
+  React.useEffect(() => {
+    if (pendingHighlightRef.current && location.pathname === '/') {
+      highlightNotifications();
+      pendingHighlightRef.current = false;
+    }
+  }, [location.pathname, highlightNotifications]);
+
   return (
     <div className={`portfolio-island ${containerClass} ${shouldVisuallyHide ? 'opacity-0 pointer-events-none h-0 overflow-hidden' : ''}`}>
       <div
@@ -103,8 +132,6 @@ export default function PortfolioIsland(): JSX.Element | null {
               {selectedProject ? selectedProject.name : 'No Portfolio Selected'}
             </span>
           </button>
-
-          <span className="hidden sm:inline-block w-px h-6 bg-[color:var(--border)]" aria-hidden="true"></span>
 
           {/* Compact controls next to project name: settings + theme (icon-only) */}
           <div className="ml-2 flex items-center gap-1">
@@ -128,6 +155,8 @@ export default function PortfolioIsland(): JSX.Element | null {
             </button>
           </div>
 
+          <span className="hidden sm:inline-block w-px h-6 bg-[color:var(--border)]" aria-hidden="true"></span>
+
           <div className={segmentClass}>
             <span className={labelClass}>Preview</span>
             {!previewRunningState ? (
@@ -140,12 +169,23 @@ export default function PortfolioIsland(): JSX.Element | null {
                   disabled={!hasSelection}
                   onClick={async () => {
                     if (!hasSelection) return;
-                    window.dispatchEvent(new CustomEvent('py:preview-start-request'));
+                    window.dispatchEvent(new CustomEvent('py:preview-start-request', { detail: { projectId: selectedProjectCloudId } }));
                     navigate('/deploy');
                   }}
                 >
                   <Play size={14} />
                   <span>Start</span>
+                </button>
+                <button
+                  type="button"
+                  title="Preview settings"
+                  aria-label="Preview settings"
+                  className={actionBtnClass + ' ml-auto'}
+                  disabled={!hasSelection}
+                  onClick={() => handleOpenSettings('preview')}
+                >
+                  <SlidersHorizontal size={14} />
+                  <span>Preview Settings</span>
                 </button>
 
               </div>
@@ -157,7 +197,7 @@ export default function PortfolioIsland(): JSX.Element | null {
                   aria-label="Stop preview"
                   className="btn btn-danger btn-sm flex items-center gap-2 text-[12px] font-semibold"
                   onClick={() => {
-                    try { window.dispatchEvent(new CustomEvent('py:preview-stop-request')); } catch { /* ignore */ }
+                    try { window.dispatchEvent(new CustomEvent('py:preview-stop-request', { detail: { projectId: selectedProjectCloudId } })); } catch { /* ignore */ }
                   }}
                 >
                   <Square size={14} className="text-[color:var(--danger)]" aria-hidden="true" />
@@ -172,23 +212,30 @@ export default function PortfolioIsland(): JSX.Element | null {
                       aria-label="Reload preview"
                       className={actionBtnClass}
                       onClick={() => {
-                        try { window.dispatchEvent(new CustomEvent('py:preview-reload-request')); } catch { /* ignore */ }
+                        if (!hasSelection) return;
+                        notify({ type: 'info', message: 'Reloading preview…', persistent: false });
+                        navigate('/deploy');
+                        try { window.dispatchEvent(new CustomEvent('py:preview-reload-request', { detail: { projectId: selectedProjectCloudId } })); } catch { /* ignore */ }
                       }}
                     >
                       <RefreshCw size={14} />
                       <span>Reload</span>
                     </button>
-                    <button
-                      type="button"
-                      title="Preview settings"
-                      aria-label="Preview settings"
+                    <a
+                      title="Open preview in browser"
+                      aria-label="Open preview"
+                      href={previewLocalState || undefined}
+                      target="_blank"
+                      rel="noreferrer"
                       className={actionBtnClass}
-                      onClick={() => handleOpenSettings('preview')}
+                      onClick={async (e) => {
+                        try {
+                          e.preventDefault();
+                          if (!previewLocalState) return;
+                          await (window as any).api?.openExternal?.({ url: previewLocalState });
+                        } catch { /* ignore */ }
+                      }}
                     >
-                      <Settings size={14} />
-                      <span>Preview</span>
-                    </button>
-                    <a title="Open preview in browser" aria-label="Open preview" href={previewLocalState} target="_blank" rel="noreferrer" className={actionBtnClass}>
                       <Eye size={14} />
                       <span>Open</span>
                     </a>
@@ -203,6 +250,11 @@ export default function PortfolioIsland(): JSX.Element | null {
                         <span>Open LAN</span>
                       </button>
                     )}
+                    {/* move preview settings to the far right of this segment */}
+                    <button type="button" title="Preview settings" aria-label="Preview settings" className={actionBtnClass + ' ml-auto'} onClick={() => handleOpenSettings('preview')}>
+                      <SlidersHorizontal size={14} />
+                      <span>Preview Settings</span>
+                    </button>
                   </>
                 )}
               </>
@@ -220,28 +272,30 @@ export default function PortfolioIsland(): JSX.Element | null {
               {pinned && (
                 <div className="flex items-center gap-2 px-2">
                   <label className="text-[10px] text-[color:var(--fg-muted)]">Opacity</label>
-                  <input
-                    aria-label="Portfolio island opacity"
-                    title="Adjust portfolio island opacity"
-                    type="range"
-                    min={25}
-                    max={100}
-                    step={5}
-                    value={pct}
-                    className="island-opacity-slider w-28"
-                    onChange={(e) => {
-                      const raw = Number((e.target as HTMLInputElement).value);
-                      const next = Math.min(100, Math.max(25, raw)) / 100;
-                      setOpacity(next);
-                      try { localStorage.setItem('py_island_opacity', String(next)); } catch { /* ignore */ }
-                    }}
-                    style={{
-                      backgroundImage: `linear-gradient(90deg, var(--accent), var(--accent))`,
-                      backgroundSize: `${pct}% 100%`,
-                      backgroundRepeat: 'no-repeat',
-                      backgroundColor: 'color-mix(in oklab, var(--surface) 85%, transparent)'
-                    }}
-                  />
+                  <div
+                    className="island-opacity-slider-shell w-28"
+                    style={{ ['--island-slider-fill' as unknown as string]: `${pct}%` } as React.CSSProperties}
+                  >
+                    <div className="island-opacity-slider-track">
+                      <div className="island-opacity-slider-fill" />
+                    </div>
+                    <input
+                      aria-label="Portfolio island opacity"
+                      title="Adjust portfolio island opacity"
+                      type="range"
+                      min={25}
+                      max={100}
+                      step={5}
+                      value={pct}
+                      className="island-opacity-slider"
+                      onChange={(e) => {
+                        const raw = Number((e.target as HTMLInputElement).value);
+                        const next = Math.min(100, Math.max(25, raw)) / 100;
+                        setOpacity(next);
+                        try { localStorage.setItem('py_island_opacity', String(next)); } catch { /* ignore */ }
+                      }}
+                    />
+                  </div>
                   <div className="text-[11px] text-[color:var(--fg-muted)]">{Math.round(opacity * 100)}%</div>
                 </div>
               )}
@@ -264,7 +318,7 @@ export default function PortfolioIsland(): JSX.Element | null {
                 disabled={!hasSelection}
                 title="Close current portfolio"
                 onClick={() => {
-                  try { window.dispatchEvent(new CustomEvent('py:preview-stop-request')); } catch { /* ignore */ }
+                  try { window.dispatchEvent(new CustomEvent('py:preview-stop-request', { detail: { projectId: selectedProjectCloudId } })); } catch { /* ignore */ }
                   clearSelection();
                   navigate('/');
                 }}
@@ -287,7 +341,7 @@ export default function PortfolioIsland(): JSX.Element | null {
               disabled={!hasSelection}
               onClick={() => {
                 if (!hasSelection) return;
-                window.dispatchEvent(new CustomEvent('py:export-request'));
+                window.dispatchEvent(new CustomEvent('py:export-request', { detail: { projectId: selectedProjectCloudId } }));
                 navigate('/deploy');
               }}
               title="Export project"
@@ -297,13 +351,13 @@ export default function PortfolioIsland(): JSX.Element | null {
             </button>
             <button
               type="button"
-              className={actionBtnClass}
+              className={actionBtnClass + ' ml-auto'}
               disabled={!hasSelection}
               onClick={() => openSettings({ projectId: selectedProjectId || (selectedProject as any)?.id, section: 'build' })}
               title="Build settings"
             >
-              <Copy size={14} />
-              Build
+              <SlidersHorizontal size={14} />
+              <span>Build Settings</span>
             </button>
           </div>
 
@@ -323,16 +377,7 @@ export default function PortfolioIsland(): JSX.Element | null {
               <FolderOpen size={14} />
               Open
             </button>
-            <button
-              type="button"
-              className={actionBtnClass}
-              disabled={!hasSelection}
-              onClick={() => { if (selectedProjectId) openSettings({ projectId: selectedProjectId, section: 'saving' }); }}
-              title="Save settings"
-            >
-              <Save size={14} />
-              Save settings
-            </button>
+
             <button
               type="button"
               className={actionBtnClass}
@@ -361,6 +406,17 @@ export default function PortfolioIsland(): JSX.Element | null {
               </span>
               Autosave
             </button>
+            {/* Move Save settings to the far right of the Files segment */}
+            <button
+              type="button"
+              className={actionBtnClass + ' ml-auto'}
+              disabled={!hasSelection}
+              onClick={() => { if (selectedProjectId) openSettings({ projectId: selectedProjectId, section: 'saving' }); }}
+              title="Save settings"
+            >
+              <SlidersHorizontal size={14} />
+              Save settings
+            </button>
           </div>
         </div>
 
@@ -369,8 +425,31 @@ export default function PortfolioIsland(): JSX.Element | null {
             Pick a portfolio from Home to enable the quick-launch controls.
           </p>
         )}
-        {/* Bottom-right status indicator */}
-        <div className="absolute right-3 bottom-3">{statusChip}</div>
+        {/* Bottom-right status indicator + notifications button */}
+        <div className="absolute right-3 bottom-3 flex items-center gap-2">
+          {statusChip}
+          <button
+            type="button"
+            title="Notifications"
+            aria-label="Notifications"
+            className={`btn btn-ghost p-2 w-9 h-9 inline-flex items-center justify-center rounded-md text-[color:var(--fg-muted)] relative`}
+            onClick={() => {
+              try {
+                if (location.pathname !== '/') {
+                  pendingHighlightRef.current = true;
+                  navigate('/');
+                } else {
+                  highlightNotifications();
+                }
+              } catch { /* ignore */ }
+            }}
+          >
+            {notifications && notifications.length > 0 ? <BellDot size={16} /> : <Bell size={16} />}
+            {notifications && notifications.length > 0 && (
+              <span className="absolute -top-1 -right-1 inline-flex items-center justify-center min-w-4 h-4 px-1 text-[10px] rounded-full bg-[color:var(--accent)] text-black border border-[color:var(--accent-700)]">{notifications.length}</span>
+            )}
+          </button>
+        </div>
       </div>
     </div>
   );

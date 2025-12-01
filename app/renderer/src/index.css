@@ -31,6 +31,10 @@
 		/* orange */
 		--accent-600: #f97316;
 		--accent-700: #ea580c;
+		/* App-level accent stays constant even if page themes override --accent */
+		--app-accent: #fb923c;
+		--app-accent-600: #f97316;
+		--app-accent-700: #ea580c;
 
 
 		/* Semantic success / danger colors (used by preview stop and status badges) */
@@ -65,6 +69,9 @@
 		--accent: #06b6d4;
 		--accent-600: #0891b2;
 		--accent-700: #0e7490;
+		--app-accent: #06b6d4;
+		--app-accent-600: #0891b2;
+		--app-accent-700: #0e7490;
 
 		--focus: 0 0 0 3px rgba(6, 182, 212, 0.4);
 		--color-scheme: light;
@@ -288,9 +295,9 @@
 	--accent: #000000 !important;
 }
 
-/* Palette full-height helper: uses measured --canvas-h set on wrapper */
+/* Palette full-height helper: ensure layout fills available track */
 .palette-full-height {
-	height: var(--canvas-h, auto);
+	height: 100%;
 	box-sizing: border-box;
 }
 
@@ -573,12 +580,39 @@
 }
 
 /* Accent-styled range slider for PortfolioIsland opacity control */
+.island-opacity-slider-shell {
+	position: relative;
+}
+
+.island-opacity-slider-track {
+	position: absolute;
+	left: 0;
+	right: 0;
+	top: 50%;
+	height: 6px;
+	transform: translateY(-50%);
+	border-radius: 999px;
+	background: color-mix(in oklab, var(--surface) 85%, transparent);
+	pointer-events: none;
+}
+
+.island-opacity-slider-fill {
+	height: 100%;
+	border-radius: inherit;
+	background: var(--accent);
+	left: 0;
+	right: calc(100% - var(--island-slider-fill, 0%));
+	transition: right 120ms ease-out;
+}
+
 .island-opacity-slider {
 	-webkit-appearance: none;
 	appearance: none;
-	/* the element background will be set dynamically to render the filled portion */
 	background: transparent;
 	height: 6px;
+	width: 100%;
+	position: relative;
+	z-index: 1;
 }
 
 .island-opacity-slider:focus {

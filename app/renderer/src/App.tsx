@@ -1,5 +1,8 @@
 ﻿import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
-import { Suspense, lazy, useEffect, useState, useCallback } from "react";
+import { Suspense, lazy, useEffect, useState, useCallback, useRef } from "react";
+import { startPreviewServer } from "./lib/previewServer";
+import { captureGlobalStyleSnapshot } from "./lib/styleSnapshot";
+import { appendPreviewLog, setPreviewState } from "./lib/previewInterop";
 
 import Sidebar from "./components/Sidebar";
 import PortfolioIsland from "./components/portfolio-island/PortfolioIsland";
@@ -15,6 +18,7 @@ import { PortfolioSettingsProvider } from "./providers/PortfolioSettingsProvider
 import NotificationsUI from "./components/notifications/Notifications";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { useAuth } from "./providers/AuthProvider";
+import { getWidgetThemeSnapshot, themeSnapshotToCss } from "./widgets/theme";
 // Ensure widgets are registered globally so previews render on any route
 import "./widgets/loader";
 
@@ -61,20 +65,6 @@ export default function App() {
                   <div
                     style={{ marginLeft: 'var(--sidebar-w,15rem)' }}
                     className="min-h-0"
-                    onPointerDown={(e) => {
-                      try {
-                        const el = e.currentTarget as HTMLElement | null;
-                        if (!el) return;
-                        const rect = el.getBoundingClientRect();
-                        const localX = e.clientX - rect.left;
-                        // If pointer is within 48px of the left edge (adjacent to the sidebar), start sidebar resize
-                        if (localX >= 0 && localX <= 48) {
-                          window.dispatchEvent(new CustomEvent('py:sidebar-begin-resize', { detail: { startX: e.clientX } }));
-                        }
-                      } catch {
-                        /* ignore */
-                      }
-                    }}
                   >
                     <div className="min-h-screen flex flex-col">
                       <PortfolioIsland />
@@ -220,77 +210,180 @@ function GlobalZoomControls() {
 }
 
 function GlobalPreviewStarter() {
-  const { selectedProject } = useProjects();
+  const { selectedProject, selectedProjectId } = useProjects();
   const { list: assetList } = useAssets();
   const [starting, setStarting] = useState(false);
+  const selectedProjectCloudId = selectedProject?._cloudId ?? selectedProjectId ?? selectedProject?.id ?? null;
+  const location = useLocation();
+  const isDeployRoute = location.pathname.startsWith('/deploy');
+  const stopInFlight = useRef(false);
+  const reloadInFlight = useRef(false);
+
+  const startPreview = useCallback(async (reason: 'start' | 'reload' = 'start') => {
+    if (!selectedProject || !selectedProjectCloudId) return;
+    if (starting) return;
+    setStarting(true);
+    try {
+      const toastMessage = reason === 'reload' ? 'Reloading preview build…' : 'Building preview...';
+      window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'info', message: toastMessage, persistent: false } }));
+      const assetsBase64: Record<string, string> = {};
+      if (assetList && assetList.length) {
+        try {
+          const mod = await import('./lib/assetsStore');
+          const idbGet = (mod as any).idbGet as (store: string, key: string) => Promise<Blob | undefined>;
+          for (const asset of assetList) {
+            if (!asset.hash) continue;
+            try {
+              const blob = await idbGet('blobs', asset.hash);
+              if (!blob) continue;
+              const ab = await (blob as Blob).arrayBuffer();
+              const bytes = new Uint8Array(ab);
+              let binary = '';
+              const chunk = 0x8000;
+              for (let i = 0; i < bytes.length; i += chunk) binary += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + chunk)));
+              assetsBase64[asset.hash] = btoa(binary);
+            } catch { /* ignore asset error */ }
+          }
+        } catch { /* ignore assets read */ }
+      }
+
+      const activeTheme = selectedProject?.themes?.[selectedProject.activeThemeId] ?? null;
+      const [styleSnapshot, themeSnapshot] = await Promise.all([
+        captureGlobalStyleSnapshot(),
+        Promise.resolve(getWidgetThemeSnapshot(activeTheme))
+      ]);
+      const buildRes = await (window as any).api?.buildStaticSite?.({
+        project: selectedProject,
+        assets: assetsBase64,
+        useTempOutput: true,
+        globalCss: { tailwind: styleSnapshot.tailwindCss },
+        themeCss: themeSnapshotToCss(themeSnapshot)
+      });
+      if (!buildRes || !buildRes.ok) {
+        const err = 'Preview build failed: ' + (buildRes?.error || 'unknown');
+        appendPreviewLog(selectedProjectCloudId, err);
+        try { window.dispatchEvent(new CustomEvent('py:preview:log', { detail: { line: err, projectId: selectedProjectCloudId } })); } catch { }
+        window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'error', message: err, persistent: false } }));
+        setStarting(false);
+        return;
+      }
+      try {
+        const msg = `Preview build output: ${buildRes.path}`;
+        appendPreviewLog(selectedProjectCloudId, msg);
+        window.dispatchEvent(new CustomEvent('py:preview:log', { detail: { line: msg, projectId: selectedProjectCloudId } }));
+      } catch { }
+
+      const meta = (selectedProject as any)?.portfolioMeta?.buildSettings || {};
+      const previewMeta = (meta && meta.preview) || {};
+      const hostOpt = previewMeta.host || meta.previewHost || undefined;
+      const portVal = Number(previewMeta.port || meta.previewPort || 0) || 0;
+      const startRes = await startPreviewServer(buildRes.path, hostOpt, portVal || undefined);
+      if (!startRes || !startRes.ok) {
+        const err = 'Failed to start preview server: ' + (startRes?.error || 'unknown');
+        appendPreviewLog(selectedProjectCloudId, err);
+        try { window.dispatchEvent(new CustomEvent('py:preview:log', { detail: { line: err, projectId: selectedProjectCloudId } })); } catch { }
+        window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'error', message: err, persistent: false } }));
+        setStarting(false);
+        return;
+      }
+
+      try {
+        const msg = `Preview running: ${startRes.localUrl} (LAN: ${startRes.lanUrl})`;
+        appendPreviewLog(selectedProjectCloudId, msg);
+        window.dispatchEvent(new CustomEvent('py:preview:log', { detail: { line: msg, projectId: selectedProjectCloudId } }));
+      } catch { }
+      window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'success', message: 'Local preview started', href: startRes.localUrl, ctaLabel: 'Open', persistent: false } }));
+      setPreviewState(selectedProjectCloudId, { running: true, localUrl: startRes.localUrl, lanUrl: startRes.lanUrl });
+      window.dispatchEvent(new CustomEvent('py:preview:state', { detail: { projectId: selectedProjectCloudId, running: true, localUrl: startRes.localUrl, lanUrl: startRes.lanUrl } }));
+    } catch (err) {
+      window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'error', message: 'Preview start failed', persistent: false } }));
+    } finally {
+      setStarting(false);
+    }
+  }, [assetList, selectedProject, selectedProjectCloudId, starting]);
+
+  const stopPreview = useCallback(async () => {
+    if (!selectedProjectCloudId) return false;
+    const stoppingLine = 'Stopping local preview...';
+    appendPreviewLog(selectedProjectCloudId, stoppingLine);
+    try { window.dispatchEvent(new CustomEvent('py:preview:log', { detail: { line: stoppingLine, projectId: selectedProjectCloudId } })); } catch { }
+    try {
+      const res = await (window as any).api?.previewStopServer?.();
+      if (!res || !res.ok) {
+        const err = '❌ Failed to stop preview: ' + (res?.error || 'unknown');
+        appendPreviewLog(selectedProjectCloudId, err);
+        try { window.dispatchEvent(new CustomEvent('py:preview:log', { detail: { line: err, projectId: selectedProjectCloudId } })); } catch { }
+        window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'error', message: 'Failed to stop preview: ' + (res?.error || 'unknown'), persistent: false } }));
+        return false;
+      }
+      const stoppedLine = '✅ Preview stopped';
+      appendPreviewLog(selectedProjectCloudId, stoppedLine);
+      try { window.dispatchEvent(new CustomEvent('py:preview:log', { detail: { line: stoppedLine, projectId: selectedProjectCloudId } })); } catch { }
+      window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'info', message: 'Local preview stopped', persistent: false } }));
+      setPreviewState(selectedProjectCloudId, { running: false });
+      window.dispatchEvent(new CustomEvent('py:preview:state', { detail: { projectId: selectedProjectCloudId, running: false } }));
+      return true;
+    } catch (err) {
+      const errMsg = '❌ Failed to stop preview: ' + (err instanceof Error ? err.message : String(err));
+      appendPreviewLog(selectedProjectCloudId, errMsg);
+      try { window.dispatchEvent(new CustomEvent('py:preview:log', { detail: { line: errMsg, projectId: selectedProjectCloudId } })); } catch { }
+      window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'error', message: errMsg, persistent: false } }));
+      return false;
+    }
+  }, [selectedProjectCloudId]);
 
   useEffect(() => {
+    if (isDeployRoute) return;
     let mounted = true;
-    const handler = async (e: any) => {
+    const handler = (e: any) => {
       if (!mounted) return;
-      if (!selectedProject) return;
-      if (starting) return;
-      setStarting(true);
-      try {
-        // initialize global buffers
-        try { (window as any).__py_preview_log = (window as any).__py_preview_log || []; } catch { /* ignore */ }
-        try { (window as any).__py_preview_state = (window as any).__py_preview_state || { running: false }; } catch { /* ignore */ }
-        window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'info', message: 'Building preview...', persistent: false } }));
-        const assetsBase64: Record<string, string> = {};
-        if (assetList && assetList.length) {
-          try {
-            const mod = await import('./lib/assetsStore');
-            const idbGet = (mod as any).idbGet as (store: string, key: string) => Promise<Blob | undefined>;
-            for (const asset of assetList) {
-              if (!asset.hash) continue;
-              try {
-                const blob = await idbGet('blobs', asset.hash);
-                if (!blob) continue;
-                const ab = await (blob as Blob).arrayBuffer();
-                const bytes = new Uint8Array(ab);
-                let binary = '';
-                const chunk = 0x8000;
-                for (let i = 0; i < bytes.length; i += chunk) binary += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + chunk)));
-                assetsBase64[asset.hash] = btoa(binary);
-              } catch { /* ignore asset error */ }
-            }
-          } catch { /* ignore assets read */ }
-        }
-
-        const buildRes = await (window as any).api?.buildStaticSite?.({ project: selectedProject, assets: assetsBase64, useTempOutput: true });
-        if (!buildRes || !buildRes.ok) {
-          const err = 'Preview build failed: ' + (buildRes?.error || 'unknown');
-          try { (window as any).__py_preview_log.push(err); window.dispatchEvent(new CustomEvent('py:preview:log', { detail: { line: err } })); } catch { }
-          window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'error', message: err, persistent: false } }));
-          setStarting(false);
-          return;
-        }
-        try { const msg = `Preview build output: ${buildRes.path}`; (window as any).__py_preview_log.push(msg); window.dispatchEvent(new CustomEvent('py:preview:log', { detail: { line: msg } })); } catch { }
-
-        const startRes = await (window as any).api?.previewStartServer?.({ distDir: buildRes.path });
-        if (!startRes || !startRes.ok) {
-          const err = 'Failed to start preview server: ' + (startRes?.error || 'unknown');
-          try { (window as any).__py_preview_log.push(err); window.dispatchEvent(new CustomEvent('py:preview:log', { detail: { line: err } })); } catch { }
-          window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'error', message: err, persistent: false } }));
-          setStarting(false);
-          return;
-        }
-
-        try { const msg = `Preview running: ${startRes.localUrl} (LAN: ${startRes.lanUrl})`; (window as any).__py_preview_log.push(msg); window.dispatchEvent(new CustomEvent('py:preview:log', { detail: { line: msg } })); } catch { }
-        window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'success', message: 'Local preview started', href: startRes.localUrl, ctaLabel: 'Open', persistent: false } }));
-        // persist and broadcast state for late-mounted UIs
-        try { (window as any).__py_preview_state = { running: true, localUrl: startRes.localUrl, lanUrl: startRes.lanUrl }; } catch { }
-        window.dispatchEvent(new CustomEvent('py:preview:state', { detail: { running: true, localUrl: startRes.localUrl, lanUrl: startRes.lanUrl } }));
-      } catch (err) {
-        window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'error', message: 'Preview start failed', persistent: false } }));
-      } finally {
-        if (mounted) setStarting(false);
-      }
+      const requestedProjectId = e?.detail?.projectId;
+      if (requestedProjectId && selectedProjectCloudId && requestedProjectId !== selectedProjectCloudId) return;
+      void startPreview('start');
     };
-
     window.addEventListener('py:preview-start-request', handler as EventListener);
     return () => { mounted = false; window.removeEventListener('py:preview-start-request', handler as EventListener); };
-  }, [selectedProject, assetList, starting]);
+  }, [isDeployRoute, selectedProjectCloudId, startPreview]);
+
+  useEffect(() => {
+    if (isDeployRoute) return;
+    const handler = (e: any) => {
+      if (!selectedProjectCloudId) return;
+      const requestedProjectId = e?.detail?.projectId;
+      if (requestedProjectId && requestedProjectId !== selectedProjectCloudId) return;
+      if (stopInFlight.current) return;
+      stopInFlight.current = true;
+      void (async () => {
+        await stopPreview();
+      })().finally(() => { stopInFlight.current = false; });
+    };
+    window.addEventListener('py:preview-stop-request', handler as EventListener);
+    return () => window.removeEventListener('py:preview-stop-request', handler as EventListener);
+  }, [isDeployRoute, selectedProjectCloudId, stopPreview]);
+
+  useEffect(() => {
+    if (isDeployRoute) return;
+    const handler = (e: any) => {
+      if (!selectedProjectCloudId) return;
+      const requestedProjectId = e?.detail?.projectId;
+      if (requestedProjectId && requestedProjectId !== selectedProjectCloudId) return;
+      if (reloadInFlight.current) return;
+      reloadInFlight.current = true;
+      void (async () => {
+        const reloadLine = 'Reloading local preview...';
+        appendPreviewLog(selectedProjectCloudId, reloadLine);
+        try { window.dispatchEvent(new CustomEvent('py:preview:log', { detail: { line: reloadLine, projectId: selectedProjectCloudId } })); } catch { }
+        window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'info', message: 'Reloading preview…', persistent: false } }));
+        const stopped = await stopPreview();
+        if (stopped) {
+          await new Promise((res) => setTimeout(res, 250));
+          await startPreview('reload');
+        }
+      })().finally(() => { reloadInFlight.current = false; });
+    };
+    window.addEventListener('py:preview-reload-request', handler as EventListener);
+    return () => window.removeEventListener('py:preview-reload-request', handler as EventListener);
+  }, [isDeployRoute, selectedProjectCloudId, startPreview, stopPreview]);
 
   return null;
 }

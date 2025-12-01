@@ -51,7 +51,7 @@ contextBridge.exposeInMainWorld("api", {
 		return ipcRenderer.invoke("py:flashFrame", options || {});
 	},
 	// Build static site from project JSON + assets (assets base64 map)
-	buildStaticSite: async (options: { project: unknown; assets: Record<string, string>; outputDir?: string }) => {
+	buildStaticSite: async (options: { project: unknown; assets: Record<string, string>; outputDir?: string; useTempOutput?: boolean; globalCss?: { tailwind?: string }; themeCss?: string }) => {
 		return ipcRenderer.invoke('py:buildStaticSite', options || {});
 	},
 	// Zip a directory and return base64 ZIP
@@ -110,11 +110,15 @@ contextBridge.exposeInMainWorld("api", {
 		return ipcRenderer.invoke('py:clipboardRead');
 	},
 	// Preview server controls
-	previewStartServer: async (options: { distDir: string }) => {
+	previewStartServer: async (options: { distDir: string; host?: string; port?: number }) => {
 		return ipcRenderer.invoke('py:preview:startServer', options || {});
 	},
 	previewStopServer: async () => {
 		return ipcRenderer.invoke('py:preview:stopServer');
+	},
+	// Open a URL in the system browser
+	openExternal: async (options: { url: string }) => {
+		return ipcRenderer.invoke('py:openExternal', options || {});
 	},
 	// Append a line to the main-process preview log file
 	appendLog: async (opts: { line?: string }) => {

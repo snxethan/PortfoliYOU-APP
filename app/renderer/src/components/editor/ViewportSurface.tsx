@@ -8,6 +8,7 @@ import PreviewIframe from "./PreviewIframe";
 import PagePreview from "./PagePreview";
 import GridCanvas from "./canvas/GridCanvas";
 import type { GridItem } from "./canvas/GridCanvas";
+import type { SelectionChangeOptions, MarqueeSelectionOptions } from "./selection";
 type ThemeVarsStyle = React.CSSProperties & Record<string, string>;
 
 export type ViewportSurfaceProps = {
@@ -28,8 +29,9 @@ export type ViewportSurfaceProps = {
     onItemsChange: (next: GridItem[]) => void;
 
     showGrid: boolean;
-    selectedId: string | null;
-    onSelect: (id: string | null) => void;
+    selectedIds: string[];
+    onSelect: (id: string | null, opts?: SelectionChangeOptions) => void;
+    onMarqueeSelect?: (ids: string[], opts?: MarqueeSelectionOptions) => void;
 
     onDelete: (id: string) => void;
     onDuplicate: (id: string) => void;
@@ -67,8 +69,9 @@ export default function ViewportSurface(props: ViewportSurfaceProps) {
         items,
         onItemsChange,
         showGrid,
-        selectedId,
+        selectedIds,
         onSelect,
+        onMarqueeSelect,
         onDelete,
         onDuplicate,
         onMoveStart,
@@ -187,8 +190,9 @@ export default function ViewportSurface(props: ViewportSurfaceProps) {
                                 scrollEl={scrollRef.current}
                                 viewportHeight={pageHeight}
                                 showGrid={showGrid}
-                                selectedId={selectedId}
+                                selectedIds={selectedIds}
                                 onSelect={onSelect}
+                                onMarqueeSelect={onMarqueeSelect}
                                 onDelete={onDelete}
                                 onDuplicate={onDuplicate}
                                 onItemMoveStart={onMoveStart}

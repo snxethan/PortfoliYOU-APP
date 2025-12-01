@@ -26,9 +26,10 @@ export default function AssetsPanel({ hideHeader = false }: { hideHeader?: boole
     type Cat = 'Images' | 'Audio' | 'Video' | 'Other';
     const grouped = useMemo(() => {
         const map = new Map<Cat, typeof filtered>();
+        const isImageAsset = (a: typeof filtered[number]) => (a.type?.startsWith('image/')) || ((a.width ?? 0) > 0 && (a.height ?? 0) > 0);
         for (const a of filtered) {
             let key: Cat = 'Other';
-            if (a.type?.startsWith('image/')) key = 'Images';
+            if (isImageAsset(a)) key = 'Images';
             else if (a.type?.startsWith('audio/')) key = 'Audio';
             else if (a.type?.startsWith('video/')) key = 'Video';
             if (!map.has(key)) map.set(key, []);

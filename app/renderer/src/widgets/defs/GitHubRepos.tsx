@@ -51,7 +51,30 @@ type GitHubReposProps = {
     ariaDescription?: string;
     announceMode?: 'off' | 'polite' | 'assertive';
     refreshLabel?: string;
+    containerBackgroundColor?: string;
+    cardBackgroundColor?: string;
+    cardBorderColor?: string;
+    cardTextColor?: string;
+    cardMutedColor?: string;
 };
+
+type RepoCardAppearance = {
+    background?: string;
+    border?: string;
+    text?: string;
+    muted?: string;
+};
+
+type GitHubWidgetPalette = {
+    containerBackground?: string;
+    card: RepoCardAppearance;
+};
+
+function normalizeColor(value?: string): string | undefined {
+    if (typeof value !== 'string') return undefined;
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : undefined;
+}
 
 function GitHubReposView(props: GitHubReposProps) {
     const { editing, updateProps } = useWidget();
@@ -183,6 +206,29 @@ function GitHubReposView(props: GitHubReposProps) {
     const announceMode = props.announceMode || 'polite';
     const shouldAnnounce = announceMode !== 'off';
     const refreshLabel = props.refreshLabel || 'Refresh repositories';
+    const palette = useMemo<GitHubWidgetPalette>(() => {
+        const containerBackground = normalizeColor(props.containerBackgroundColor);
+        const cardBackground = normalizeColor(props.cardBackgroundColor);
+        const cardBorder = normalizeColor(props.cardBorderColor);
+        const cardText = normalizeColor(props.cardTextColor);
+        const cardMuted = normalizeColor(props.cardMutedColor);
+        return {
+            containerBackground,
+            card: {
+                background: cardBackground,
+                border: cardBorder,
+                text: cardText,
+                muted: cardMuted,
+            },
+        };
+    }, [
+        props.cardBackgroundColor,
+        props.cardBorderColor,
+        props.cardMutedColor,
+        props.cardTextColor,
+        props.containerBackgroundColor,
+    ]);
+    const sectionStyle = palette.containerBackground ? { background: palette.containerBackground } : undefined;
 
     return (
         <section
@@ -190,7 +236,8 @@ function GitHubReposView(props: GitHubReposProps) {
             aria-describedby={descriptionId}
             aria-label={regionLabel}
             role="region"
-            className="h-full w-full flex flex-col gap-3 p-3"
+            className="flex h-full w-full min-h-0 flex-col gap-3 p-3"
+            style={sectionStyle}
             data-widget-role="github-repos"
         >
             <header className="flex items-center justify-between gap-2">
@@ -220,7 +267,7 @@ function GitHubReposView(props: GitHubReposProps) {
             <div
                 role="list"
                 aria-label="Repository list"
-                className={`flex-1 overflow-auto scrollable scrollable-container ${layout === 'cards' ? 'grid grid-cols-1 gap-3 md:grid-cols-2' : 'flex flex-col gap-2'}`}
+                className={`flex-1 min-h-0 overflow-auto scrollable scrollable-container ${layout === 'cards' ? 'grid grid-cols-1 gap-3 md:grid-cols-2' : 'flex flex-col gap-2'}`}
             >
                 {loading && repos.length === 0 ? (
                     <SkeletonList layout={layout} count={maxItems} />
@@ -228,7 +275,7 @@ function GitHubReposView(props: GitHubReposProps) {
                     <Placeholder message={statusText} />
                 ) : (
                     repos.map((repo) => (
-                        <RepoCard key={repo.id} repo={repo} layout={layout} />
+                        <RepoCard key={repo.id} repo={repo} layout={layout} appearance={palette.card} />
                     ))
                 )}
             </div>
@@ -252,7 +299,15 @@ function Placeholder({ message }: { message: string }) {
     );
 }
 
-function RepoCard({ repo, layout }: { repo: RepoPreview; layout: Layout }) {
+function RepoCard({ repo, layout, appearance }: { repo: RepoPreview; layout: Layout; appearance: RepoCardAppearance }) {
+    const cardStyle: React.CSSProperties = {};
+    if (appearance.background) cardStyle.background = appearance.background;
+    if (appearance.border) cardStyle.borderColor = appearance.border;
+    const headingStyle = appearance.text ? { color: appearance.text } : undefined;
+    const mutedStyle = appearance.muted ? { color: appearance.muted } : undefined;
+    const badgeStyle: React.CSSProperties = {};
+    if (appearance.text) badgeStyle.color = appearance.text;
+    if (appearance.border) badgeStyle.borderColor = appearance.border;
     return layout === 'cards' ? (
         <a
             href={repo.url}
@@ -260,15 +315,16 @@ function RepoCard({ repo, layout }: { repo: RepoPreview; layout: Layout }) {
             rel="noreferrer"
             role="listitem"
             className={`flex flex-col gap-2 rounded-lg border border-[color:var(--border)] bg-[color:var(--surface)] p-4 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md ${FOCUS_RING}`}
+            style={cardStyle}
         >
             <div className="flex items-center justify-between gap-2">
-                <h3 className="text-base font-semibold text-[color:var(--fg)]">{repo.name}</h3>
-                <span className="inline-flex items-center gap-1 rounded-full border border-[color:var(--border)] px-2 py-0.5 text-[10px] uppercase tracking-wide text-[color:var(--fg-muted)]">
+                <h3 className="text-base font-semibold text-[color:var(--fg)]" style={headingStyle}>{repo.name}</h3>
+                <span className="inline-flex items-center gap-1 rounded-full border border-[color:var(--border)] px-2 py-0.5 text-[10px] uppercase tracking-wide text-[color:var(--fg-muted)]" style={badgeStyle}>
                     <Star size={10} aria-hidden="true" /> {repo.stars}
                 </span>
             </div>
-            {repo.description && <p className="text-sm text-[color:var(--fg-muted)]">{repo.description}</p>}
-            <div className="flex flex-wrap items-center gap-3 text-[11px] text-[color:var(--fg-muted)]">
+            {repo.description && <p className="text-sm text-[color:var(--fg-muted)]" style={mutedStyle}>{repo.description}</p>}
+            <div className="flex flex-wrap items-center gap-3 text-[11px] text-[color:var(--fg-muted)]" style={mutedStyle}>
                 {repo.language && <span>{repo.language}</span>}
                 <span>Updated {timeAgo(new Date(repo.updatedAt))}</span>
             </div>
@@ -280,12 +336,13 @@ function RepoCard({ repo, layout }: { repo: RepoPreview; layout: Layout }) {
             rel="noreferrer"
             role="listitem"
             className={`flex items-center justify-between gap-3 rounded border border-[color:var(--border)] bg-[color:var(--surface)] px-3 py-2 text-sm ${FOCUS_RING}`}
+            style={cardStyle}
         >
             <div>
-                <div className="font-medium text-[color:var(--fg)]">{repo.name}</div>
-                <div className="text-[11px] text-[color:var(--fg-muted)]">Updated {timeAgo(new Date(repo.updatedAt))}</div>
+                <div className="font-medium text-[color:var(--fg)]" style={headingStyle}>{repo.name}</div>
+                <div className="text-[11px] text-[color:var(--fg-muted)]" style={mutedStyle}>Updated {timeAgo(new Date(repo.updatedAt))}</div>
             </div>
-            <div className="inline-flex items-center gap-1 text-xs text-[color:var(--fg-muted)]">
+            <div className="inline-flex items-center gap-1 text-xs text-[color:var(--fg-muted)]" style={mutedStyle}>
                 <Star size={12} aria-hidden="true" /> {repo.stars}
             </div>
         </a>
@@ -351,6 +408,11 @@ const schema = z
         ariaDescription: z.string().max(400).optional(),
         announceMode: z.enum(['off', 'polite', 'assertive']).optional(),
         refreshLabel: z.string().max(80).optional(),
+        containerBackgroundColor: z.string().max(120).optional(),
+        cardBackgroundColor: z.string().max(120).optional(),
+        cardBorderColor: z.string().max(120).optional(),
+        cardTextColor: z.string().max(120).optional(),
+        cardMutedColor: z.string().max(120).optional(),
     })
     .passthrough();
 

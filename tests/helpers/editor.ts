@@ -56,7 +56,7 @@ export async function openWidgetSettingsModal(page: Page, widget: Locator) {
     return modal;
 }
 
-async function ensureWidgetPropertiesOpen(modal: Locator) {
+export async function ensureWidgetPropertiesOpen(modal: Locator) {
     const toggle = modal.getByRole('button', { name: /Widget Properties/i });
     const expanded = await toggle.getAttribute('aria-expanded');
     if (expanded !== 'true') {

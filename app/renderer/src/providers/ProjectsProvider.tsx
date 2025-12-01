@@ -8,8 +8,8 @@ import JSZip from "jszip";
 
 import { idbGet, idbPut, computeHash, stores, AssetMeta } from "../lib/assetsStore";
 import { auth, db, storage } from "../lib/firebase";
-import { sanitizeVideoProps } from "../widgets/videoProps";
-import type { VideoWidgetProps } from "../widgets/videoProps";
+import { sanitizeVideoProps } from "../../../shared/widgets/videoProps";
+import type { VideoWidgetProps } from "../../../shared/widgets/videoProps";
 import type { Theme, ThemePatch } from "../themes/types";
 import { THEME_PRESETS, DEFAULT_THEME_PRESET_ID, getPresetById } from "../themes/presets";
 import { createThemeFromPreset as createThemeFromPresetUtil, mergeTheme } from "../themes/utils";

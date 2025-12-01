@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useLayoutEffect, lazy, Suspense } from "react";
+import type { CSSProperties } from "react";
 import { ChevronsLeft, ChevronsRight, ChevronDown, ChevronRight, GripVertical, Settings, Palette } from "lucide-react";
 import { DndContext, PointerSensor, MouseSensor, TouchSensor, useSensor, useSensors, DragEndEvent, DragStartEvent, rectIntersection, DragOverlay, type Modifier } from "@dnd-kit/core";
 
@@ -18,11 +19,32 @@ import PreviewPopup from "../components/editor/PreviewPopup";
 import PagePreview from "../components/editor/PagePreview";
 import { usePersistentFlag } from "../hooks/usePersistentFlag";
 import { getWidgetThemeSnapshot } from "../widgets/theme";
+import type { SelectionChangeOptions, MarqueeSelectionOptions } from "../components/editor/selection";
+import { WidgetsRegistry } from "../widgets/registry";
 
 const COLS = 12;
 const DEFAULT_ROW_H = 32; // px height per row (content area)
 const MIN_ZOOM = 0.5;
 const MAX_ZOOM = 1.75;
+const CLIPBOARD_MARKER_MULTI = 'PORTFOLIYOU:WIDGETS:v2\n';
+const CLIPBOARD_MARKER_SINGLE = 'PORTFOLIYOU:WIDGET:v1\n';
+
+function serializeClipboardItems(list: GridItem[]): string | null {
+  try {
+    const seen = new WeakSet();
+    return JSON.stringify(list, (_key, value) => {
+      if (typeof value === 'function') return undefined;
+      if (typeof value === 'bigint') return value.toString();
+      if (value && typeof value === 'object') {
+        if (seen.has(value as object)) return undefined;
+        seen.add(value as object);
+      }
+      return value;
+    });
+  } catch {
+    return null;
+  }
+}
 
 function serializeGridItems(list: GridItem[]) {
   return list.map(it => ({
@@ -92,26 +114,83 @@ export default function EditorPage() {
   // Demo items to drag around the canvas
   const [items, setItems] = useState<GridItem[]>([]);
   const itemsRef = useRef<GridItem[]>([]);
+  const lastPersistedSignatureRef = useRef<string | null>(null);
+  const snapshotSignature = useCallback((list: GridItem[]) => JSON.stringify(serializeGridItems(list)), []);
+  const suppressHydrateRef = useRef(false);
   const replaceItems = useCallback((next: GridItem[]) => {
     itemsRef.current = next;
     setItems(next);
-  }, []);
+    lastPersistedSignatureRef.current = snapshotSignature(next);
+  }, [snapshotSignature]);
   const persistItems = useCallback((snapshot?: GridItem[]) => {
     if (!selectedProject || !currentPageId) return;
     try {
-      setPageItems(selectedProject.id, currentPageId, serializeGridItems(snapshot ?? itemsRef.current));
-    } catch { /* ignore */ }
+      suppressHydrateRef.current = true;
+      const source = snapshot ?? itemsRef.current;
+      const serialized = serializeGridItems(source);
+      const signature = JSON.stringify(serialized);
+      if (lastPersistedSignatureRef.current === signature) {
+        suppressHydrateRef.current = false;
+        return;
+      }
+      setPageItems(selectedProject.id, currentPageId, serialized);
+      lastPersistedSignatureRef.current = signature;
+    } catch {
+      suppressHydrateRef.current = false;
+    }
   }, [selectedProject?.id, currentPageId, setPageItems]);
   useEffect(() => {
     itemsRef.current = items;
   }, [items]);
-
-  // Load items from provider whenever project/page changes
   useEffect(() => {
-    if (!selectedProject || !currentPageId) { replaceItems([]); return; }
-    const loaded = getPageItems(selectedProject.id, currentPageId) as GridItem[];
+    const handleBeforeUnload = () => { persistItems(); };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      persistItems();
+    };
+  }, [persistItems]);
+
+  const getPageItemsRef = useRef(getPageItems);
+  useEffect(() => { getPageItemsRef.current = getPageItems; }, [getPageItems]);
+
+  const currentPageRevision = selectedProject && currentPageId
+    ? (selectedProject.pages?.[currentPageId]?.updatedAt ?? null)
+    : null;
+
+  // Load items from provider whenever project/page changes or page data updates
+  useEffect(() => {
+    if (!selectedProject || !currentPageId) {
+      suppressHydrateRef.current = false;
+      replaceItems([]);
+      return;
+    }
+    if (suppressHydrateRef.current) {
+      suppressHydrateRef.current = false;
+      return;
+    }
+    const getter = getPageItemsRef.current;
+    if (!getter) return;
+    const loaded = getter(selectedProject.id, currentPageId) as GridItem[];
     replaceItems(loaded);
-  }, [selectedProject?.id, currentPageId, getPageItems, replaceItems]);
+  }, [selectedProject?.id, currentPageId, currentPageRevision, replaceItems]);
+
+  const presentWidgetTypes = useMemo(() => {
+    const set = new Set<string>();
+    for (const it of items) {
+      if (typeof it.type === 'string' && it.type) {
+        set.add(it.type);
+      }
+    }
+    return Array.from(set);
+  }, [items]);
+
+  useEffect(() => {
+    if (!presentWidgetTypes.length) return;
+    presentWidgetTypes.forEach((type) => {
+      try { void WidgetsRegistry.ensure(type); } catch { /* ignore */ }
+    });
+  }, [presentWidgetTypes]);
 
   // Simple undo/redo stacks (keep last 50 operations)
   type ItemsUpdater = (prev: GridItem[]) => GridItem[];
@@ -169,6 +248,31 @@ export default function EditorPage() {
 
   const canUndo = history.length > 0;
   const canRedo = redoStack.length > 0;
+  const handleItemMoveStart = useCallback(() => {
+    // reserved for future hooks (e.g., showing drag UI state)
+  }, []);
+  const handleItemMoveEnd = useCallback((prevItem: GridItem, nextItem: GridItem) => {
+    if (
+      prevItem.x === nextItem.x &&
+      prevItem.y === nextItem.y &&
+      prevItem.w === nextItem.w &&
+      prevItem.h === nextItem.h
+    ) {
+      return;
+    }
+    const label = `Move ${nextItem.title}`;
+    setHistory(h => {
+      const entry: HistoryEntry = {
+        label,
+        undo: (items) => items.map(it => it.id === nextItem.id ? { ...it, x: prevItem.x, y: prevItem.y } : it),
+        redo: (items) => items.map(it => it.id === nextItem.id ? { ...it, x: nextItem.x, y: nextItem.y } : it),
+      };
+      const nh = [...h, entry];
+      return nh.length > MAX_HISTORY ? nh.slice(nh.length - MAX_HISTORY) : nh;
+    });
+    setRedoStack([]);
+    persistItems();
+  }, [persistItems, setHistory, setRedoStack]);
 
   // Standalone popup preview state
   const [popupOpen, setPopupOpen] = useState<boolean>(false);
@@ -319,119 +423,148 @@ export default function EditorPage() {
   }
 
   // Selection + keyboard shortcuts
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [clipboard, setClipboard] = useState<GridItem | null>(null);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [clipboard, setClipboard] = useState<GridItem[] | null>(null);
+  const primarySelectedId = selectedIds.length ? selectedIds[selectedIds.length - 1] : null;
+
+  const handleSelect = useCallback((id: string | null, opts?: SelectionChangeOptions) => {
+    setSelectedIds((prev) => {
+      if (!id) {
+        if (opts?.append || opts?.toggle) return prev;
+        return [];
+      }
+      if (opts?.toggle) {
+        if (prev.includes(id)) return prev.filter(existing => existing !== id);
+        return [...prev, id];
+      }
+      if (opts?.append) {
+        if (prev.includes(id)) return prev;
+        return [...prev, id];
+      }
+      return [id];
+    });
+  }, []);
+
+  const handleMarqueeSelect = useCallback((ids: string[], opts?: MarqueeSelectionOptions) => {
+    if (!ids || ids.length === 0) {
+      if (!opts?.append) setSelectedIds([]);
+      return;
+    }
+    setSelectedIds((prev) => {
+      if (opts?.append) {
+        const merged = [...prev];
+        ids.forEach((id) => {
+          if (!merged.includes(id)) merged.push(id);
+        });
+        return merged;
+      }
+      return [...ids];
+    });
+  }, []);
+
   function withSelected(mut: (it: GridItem) => GridItem | GridItem[] | null, label: string) {
-    if (!selectedId) return;
-    const src = items.find(i => i.id === selectedId);
+    if (!primarySelectedId) return;
+    const src = items.find(i => i.id === primarySelectedId);
     if (!src) return;
     const result = mut(src);
     if (!result) return;
     if (Array.isArray(result)) {
       commitUpdate(label, () => result);
     } else {
-      commitUpdate(label, (prev) => prev.map(i => i.id === selectedId ? result : i));
+      commitUpdate(label, (prev) => prev.map(i => i.id === primarySelectedId ? result : i));
     }
   }
+
+  useEffect(() => {
+    setSelectedIds((prev) => {
+      if (!prev.length) return prev;
+      const existingIds = new Set(items.map((it) => it.id));
+      const next = prev.filter((id) => existingIds.has(id));
+      return next.length === prev.length ? prev : next;
+    });
+  }, [items]);
   async function onKeyDown(e: React.KeyboardEvent<HTMLDivElement>) {
     // Do not interfere with typing in inputs/textareas
     const t = e.target as HTMLElement;
     if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.getAttribute('contenteditable') === 'true')) return;
     // Movement
-    if (selectedId && (e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+    if (selectedIds.length && (e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
       e.preventDefault();
       const dx = e.key === 'ArrowLeft' ? -1 : e.key === 'ArrowRight' ? 1 : 0;
       const dy = e.key === 'ArrowUp' ? -1 : e.key === 'ArrowDown' ? 1 : 0;
-      withSelected((it) => {
-        if (it.pinned || it.locked) return null;
-        const nx = Math.max(0, Math.min(it.x + dx, COLS - it.w));
-        const ny = Math.max(0, it.y + dy);
-        if (nx === it.x && ny === it.y) return null;
-        return { ...it, x: nx, y: ny };
-      }, 'Nudge widget');
+      const selectedSet = new Set(selectedIds);
+      commitUpdate(selectedIds.length > 1 ? 'Nudge widgets' : 'Nudge widget', (prev) => {
+        let changed = false;
+        const next = prev.map((it) => {
+          if (!selectedSet.has(it.id) || it.pinned || it.locked) return it;
+          const nx = Math.max(0, Math.min(it.x + dx, COLS - it.w));
+          const ny = Math.max(0, it.y + dy);
+          if (nx === it.x && ny === it.y) return it;
+          changed = true;
+          return { ...it, x: nx, y: ny };
+        });
+        return changed ? next : prev;
+      });
       return;
     }
     // Delete
-    if (selectedId && (e.key === 'Delete' || e.key === 'Backspace')) {
+    if (selectedIds.length && (e.key === 'Delete' || e.key === 'Backspace')) {
       e.preventDefault();
-      let removedTitle: string | undefined;
-      commitUpdate('Delete item', (prev) => {
-        const target = prev.find(i => i.id === selectedId);
-        if (!target) return prev;
-        removedTitle = target.title;
-        return prev.filter(i => i.id !== selectedId);
+      const selectedSet = new Set(selectedIds);
+      const removed: GridItem[] = [];
+      commitUpdate('Delete items', (prev) => {
+        prev.forEach((item) => { if (selectedSet.has(item.id)) removed.push(item); });
+        if (!removed.length) return prev;
+        return prev.filter((item) => !selectedSet.has(item.id));
       });
-      if (removedTitle) notifyWidgetChange('delete', removedTitle);
-      setSelectedId(null);
+      removed.forEach((item) => notifyWidgetChange('delete', item.title));
+      setSelectedIds([]);
       return;
     }
     // Copy/Cut/Paste/Duplicate
     const meta = e.ctrlKey || e.metaKey;
-    if (meta && e.key.toLowerCase() === 'c' && selectedId) {
+    if (meta && e.key.toLowerCase() === 'c' && selectedIds.length) {
       e.preventDefault();
-      const src = items.find(i => i.id === selectedId) || null;
-      setClipboard(src ? { ...src } : null);
-      // Also write to system clipboard (if available) so paste works across windows.
-      // Use a safe serializer that tolerates functions, BigInt and cycles.
+      const selectedSet = new Set(selectedIds);
+      const snapshot = items.filter((it) => selectedSet.has(it.id)).map((it) => ({ ...it }));
+      if (!snapshot.length) return;
+      setClipboard(snapshot);
       try {
-        const marker = 'PORTFOLIYOU:WIDGET:v1\n';
-        const safeStringify = (obj: unknown) => {
-          try {
-            const seen = new WeakSet();
-            return JSON.stringify(obj, (_k, v) => {
-              if (typeof v === 'function') return undefined;
-              if (typeof v === 'bigint') return v.toString();
-              if (v && typeof v === 'object') {
-                if (seen.has(v)) return undefined;
-                seen.add(v as object);
-              }
-              return v;
-            });
-          } catch { return null; }
-        };
-        const payload = src ? safeStringify(src) : '';
+        const payload = serializeClipboardItems(snapshot);
         if (payload !== null) {
           if (window.api?.clipboardWrite) {
-            void window.api.clipboardWrite({ text: marker + payload });
+            void window.api.clipboardWrite({ text: CLIPBOARD_MARKER_MULTI + payload });
           } else {
-            try { navigator.clipboard?.writeText(marker + payload); } catch { /* ignore */ }
+            try { navigator.clipboard?.writeText(CLIPBOARD_MARKER_MULTI + payload); } catch { /* ignore */ }
           }
         }
       } catch { /* ignore */ }
       return;
     }
-    if (meta && e.key.toLowerCase() === 'x' && selectedId) {
+    if (meta && e.key.toLowerCase() === 'x' && selectedIds.length) {
       e.preventDefault();
-      const src = items.find(i => i.id === selectedId) || null;
-      setClipboard(src ? { ...src } : null);
-      // write to system clipboard for cut using safe serializer
+      const selectedSet = new Set(selectedIds);
+      const snapshot = items.filter((it) => selectedSet.has(it.id)).map((it) => ({ ...it }));
+      if (!snapshot.length) return;
+      setClipboard(snapshot);
       try {
-        const marker = 'PORTFOLIYOU:WIDGET:v1\n';
-        const safeStringify = (obj: unknown) => {
-          try {
-            const seen = new WeakSet();
-            return JSON.stringify(obj, (_k, v) => {
-              if (typeof v === 'function') return undefined;
-              if (typeof v === 'bigint') return v.toString();
-              if (v && typeof v === 'object') {
-                if (seen.has(v)) return undefined;
-                seen.add(v as object);
-              }
-              return v;
-            });
-          } catch { return null; }
-        };
-        const payload = src ? safeStringify(src) : '';
+        const payload = serializeClipboardItems(snapshot);
         if (payload !== null) {
           if (window.api?.clipboardWrite) {
-            void window.api.clipboardWrite({ text: marker + payload });
+            void window.api.clipboardWrite({ text: CLIPBOARD_MARKER_MULTI + payload });
           } else {
-            try { navigator.clipboard?.writeText(marker + payload); } catch { /* ignore */ }
+            try { navigator.clipboard?.writeText(CLIPBOARD_MARKER_MULTI + payload); } catch { /* ignore */ }
           }
         }
       } catch { /* ignore */ }
-      commitUpdate('Cut item', (prev) => prev.filter(i => i.id !== selectedId));
-      setSelectedId(null);
+      const removedTitles: string[] = [];
+      commitUpdate('Cut items', (prev) => {
+        prev.forEach((item) => { if (selectedSet.has(item.id)) removedTitles.push(item.title); });
+        if (!removedTitles.length) return prev;
+        return prev.filter((item) => !selectedSet.has(item.id));
+      });
+      removedTitles.forEach((title) => notifyWidgetChange('delete', title));
+      setSelectedIds([]);
       return;
     }
     if (meta && e.key.toLowerCase() === 'v') {
@@ -453,41 +586,62 @@ export default function EditorPage() {
         }
       } catch { payloadText = null; }
 
-      let clipboardObj: GridItem | null = null;
-      if (payloadText && payloadText.startsWith('PORTFOLIYOU:WIDGET:v1\n')) {
-        try { clipboardObj = JSON.parse(payloadText.slice('PORTFOLIYOU:WIDGET:v1\n'.length)); } catch { clipboardObj = null; }
+      let clipboardItems: GridItem[] | null = null;
+      if (payloadText && payloadText.startsWith(CLIPBOARD_MARKER_MULTI)) {
+        try { clipboardItems = JSON.parse(payloadText.slice(CLIPBOARD_MARKER_MULTI.length)); } catch { clipboardItems = null; }
+      } else if (payloadText && payloadText.startsWith(CLIPBOARD_MARKER_SINGLE)) {
+        try {
+          const legacy = JSON.parse(payloadText.slice(CLIPBOARD_MARKER_SINGLE.length));
+          clipboardItems = legacy ? [legacy] : null;
+        } catch { clipboardItems = null; }
       }
       // Fallback to in-memory clipboard state
-      if (!clipboardObj) clipboardObj = clipboard;
-      if (!clipboardObj) return;
-      const nid = typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : Math.random().toString(36).slice(2, 9);
-      const nx = Math.min(COLS - (clipboardObj.w ?? 1), (clipboardObj.x ?? 0) + 1);
-      const ny = (clipboardObj.y ?? 0) + 1;
-      const dup: GridItem = { ...clipboardObj, id: nid, x: nx, y: ny, title: ((clipboardObj.title || 'Widget') + ' copy') };
-      commitUpdate('Paste item', (prev) => {
-        const norm = normalizeZ(prev);
-        const maxZ = norm.length;
-        return [...norm, { ...dup, z: maxZ }];
+      if (!clipboardItems || clipboardItems.length === 0) {
+        clipboardItems = clipboard ? clipboard.map((it) => ({ ...it })) : null;
+      }
+      if (!clipboardItems || clipboardItems.length === 0) return;
+      const createdIds: string[] = [];
+      const clones = clipboardItems.map((item, idx) => {
+        const nid = typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : Math.random().toString(36).slice(2, 9);
+        createdIds.push(nid);
+        const width = Math.max(1, item.w ?? 1);
+        const height = Math.max(1, item.h ?? 1);
+        const offset = idx + 1;
+        const nx = Math.max(0, Math.min((item.x ?? 0) + offset, COLS - width));
+        const ny = Math.max(0, (item.y ?? 0) + offset);
+        return { ...item, id: nid, x: nx, y: ny, w: width, h: height, title: ((item.title || 'Widget') + ' copy') };
       });
-      notifyWidgetChange('create', dup.title);
-      setSelectedId(nid);
+      commitUpdate(clones.length > 1 ? 'Paste items' : 'Paste item', (prev) => {
+        const norm = normalizeZ(prev);
+        let nextZ = norm.length;
+        const stamped = clones.map((clone) => ({ ...clone, z: nextZ++ }));
+        return [...norm, ...stamped];
+      });
+      clones.forEach((clone) => notifyWidgetChange('create', clone.title));
+      setSelectedIds(createdIds);
     }
 
-    if (meta && e.key.toLowerCase() === 'd' && selectedId) {
+    if (meta && e.key.toLowerCase() === 'd' && selectedIds.length) {
       e.preventDefault();
-      const src = items.find(i => i.id === selectedId);
-      if (!src) return;
-      const nid = typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : Math.random().toString(36).slice(2, 9);
-      const nx = Math.min(COLS - src.w, src.x + 1);
-      const ny = src.y + 1;
-      const dup: GridItem = { ...src, id: nid, x: nx, y: ny, title: src.title + ' copy' };
-      commitUpdate('Duplicate item', (prev) => {
-        const norm = normalizeZ(prev);
-        const maxZ = norm.length;
-        return [...norm, { ...dup, z: maxZ }];
+      const selectedSet = new Set(selectedIds);
+      const sourceItems = items.filter((it) => selectedSet.has(it.id));
+      if (!sourceItems.length) return;
+      const duplicatedIds: string[] = [];
+      const duplicates = sourceItems.map((src, idx) => {
+        const nid = typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : Math.random().toString(36).slice(2, 9);
+        duplicatedIds.push(nid);
+        const nx = Math.min(COLS - src.w, src.x + 1 + idx);
+        const ny = src.y + 1 + idx;
+        return { ...src, id: nid, x: Math.max(0, nx), y: Math.max(0, ny), title: `${src.title} copy` };
       });
-      notifyWidgetChange('create', dup.title);
-      setSelectedId(nid);
+      commitUpdate(duplicates.length > 1 ? 'Duplicate items' : 'Duplicate item', (prev) => {
+        const norm = normalizeZ(prev);
+        let nextZ = norm.length;
+        const stamped = duplicates.map((dup) => ({ ...dup, z: nextZ++ }));
+        return [...norm, ...stamped];
+      });
+      duplicates.forEach((dup) => notifyWidgetChange('create', dup.title));
+      setSelectedIds(duplicatedIds);
       return;
     }
   }
@@ -498,6 +652,7 @@ export default function EditorPage() {
   const dragPointerStart = useRef<{ x: number; y: number } | null>(null);
   const dragPointerLast = useRef<{ x: number; y: number } | null>(null);
   const dragOverlaySize = useRef<{ width: number; height: number } | null>(null);
+  const dragPointerOffset = useRef<{ x: number; y: number } | null>(null);
 
   const dragOverlayCursorAlign = useMemo<Modifier>(() => (({ transform, activeNodeRect }) => {
     if (!transform) return transform;
@@ -506,8 +661,9 @@ export default function EditorPage() {
     const overlaySize = dragOverlaySize.current;
     const fallbackHalfW = activeNodeRect ? activeNodeRect.width / 2 : 0;
     const fallbackHalfH = activeNodeRect ? activeNodeRect.height / 2 : 0;
-    const halfW = overlaySize ? overlaySize.width / 2 : fallbackHalfW;
-    const halfH = overlaySize ? overlaySize.height / 2 : fallbackHalfH;
+    const offset = dragPointerOffset.current;
+    const halfW = offset ? offset.x : (overlaySize ? overlaySize.width / 2 : fallbackHalfW);
+    const halfH = offset ? offset.y : (overlaySize ? overlaySize.height / 2 : fallbackHalfH);
     // transform.x/y are offsets applied to the active node's initial position (activeNodeRect.left/top)
     // Compute the required transform so the overlay's top-left equals pointer - half size.
     const baseLeft = activeNodeRect ? activeNodeRect.left : 0;
@@ -530,11 +686,18 @@ export default function EditorPage() {
       setCanvasHeightPx(h);
     }
     measure();
-    const ro = new ResizeObserver(() => measure());
-    if (canvasWrapperRef.current) ro.observe(canvasWrapperRef.current);
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(() => measure()) : null;
+    const target = canvasWrapperRef.current;
+    if (ro && target) ro.observe(target);
     window.addEventListener('resize', measure);
-    return () => { ro.disconnect(); window.removeEventListener('resize', measure); };
+    return () => {
+      if (ro) {
+        try { ro.disconnect(); } catch { /* ignore */ }
+      }
+      window.removeEventListener('resize', measure);
+    };
   }, [pageWidth, pageHeight, zoom, paletteWidth, paletteCollapsed]);
+  const palettePanelStyle: CSSProperties | undefined = canvasHeightPx ? { height: `${canvasHeightPx}px` } : undefined;
 
   // Modify panel
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -551,10 +714,13 @@ export default function EditorPage() {
   useEffect(() => {
     setHistory([]);
     setRedoStack([]);
-    setSelectedId(null);
-    setClipboard(null);
+    setSelectedIds([]);
     setEditingId(null);
   }, [selectedProject?.id, currentPageId]);
+
+  useEffect(() => {
+    setClipboard(null);
+  }, [selectedProject?.id]);
 
   useEffect(() => {
     if (!editingId) return;
@@ -578,7 +744,7 @@ export default function EditorPage() {
         return [...norm, { ...newItem, z: maxZ }];
       });
       notifyWidgetChange('create', newItem.title);
-      setSelectedId(id);
+      setSelectedIds([id]);
     }
     window.addEventListener('py:addWidget', onAddWidget as EventListener);
     return () => window.removeEventListener('py:addWidget', onAddWidget as EventListener);
@@ -866,8 +1032,18 @@ export default function EditorPage() {
                     if (pointerEvent && typeof pointerEvent.clientX === 'number' && typeof pointerEvent.clientY === 'number') {
                       dragPointerStart.current = { x: pointerEvent.clientX, y: pointerEvent.clientY };
                       dragPointerLast.current = { x: pointerEvent.clientX, y: pointerEvent.clientY };
+                      const nodeRect = event.active.rect.current?.initial;
+                      if (nodeRect) {
+                        dragPointerOffset.current = {
+                          x: pointerEvent.clientX - nodeRect.left,
+                          y: pointerEvent.clientY - nodeRect.top,
+                        };
+                      } else {
+                        dragPointerOffset.current = null;
+                      }
                     } else {
                       dragPointerStart.current = null;
+                      dragPointerOffset.current = null;
                     }
                   }
                 }}
@@ -894,6 +1070,7 @@ export default function EditorPage() {
                     dragPointerStart.current = null;
                     dragPointerLast.current = null;
                     dragOverlaySize.current = null;
+                    dragPointerOffset.current = null;
                     return;
                   }
                   const data = active.data.current as { src?: string; type?: string; label?: string; w?: number; h?: number; schemaVersion?: number } | undefined;
@@ -937,12 +1114,14 @@ export default function EditorPage() {
                   dragPointerStart.current = null;
                   dragPointerLast.current = null;
                   dragOverlaySize.current = null;
+                  dragPointerOffset.current = null;
                 }}
                 onDragCancel={() => {
                   setActiveDrag(undefined);
                   dragPointerStart.current = null;
                   dragPointerLast.current = null;
                   dragOverlaySize.current = null;
+                  dragPointerOffset.current = null;
                 }}
               >
                 {/* Visible drag preview while dragging from the palette */}
@@ -953,7 +1132,6 @@ export default function EditorPage() {
                   className="h-full grid gap-0 min-h-[28rem] items-stretch"
                   style={{
                     gridTemplateColumns: paletteCollapsed ? 'minmax(0,1fr) 32px' : `minmax(0,1fr) ${Math.round(paletteWidth)}px`,
-                    ...(canvasHeightPx ? ({ ['--canvas-h' as unknown as string]: `${canvasHeightPx}px` } as React.CSSProperties) : {}),
                   }}
                   onKeyDown={onKeyDown}
                   tabIndex={0}
@@ -989,8 +1167,9 @@ export default function EditorPage() {
                       items={items}
                       onItemsChange={replaceItems}
                       showGrid={showGrid}
-                      selectedId={selectedId}
-                      onSelect={setSelectedId}
+                      selectedIds={selectedIds}
+                      onSelect={handleSelect}
+                      onMarqueeSelect={handleMarqueeSelect}
                       onDelete={(id) => {
                         let removedTitle: string | undefined;
                         commitUpdate("Delete item", (prev) => {
@@ -1016,29 +1195,8 @@ export default function EditorPage() {
                         });
                         if (duplicateTitle) notifyWidgetChange('create', duplicateTitle);
                       }}
-                      onMoveStart={() => { /* no-op */ }}
-                      onMoveEnd={(prevItem, nextItem) => {
-                        if (
-                          prevItem.x === nextItem.x &&
-                          prevItem.y === nextItem.y &&
-                          prevItem.w === nextItem.w &&
-                          prevItem.h === nextItem.h
-                        ) {
-                          return;
-                        }
-                        const label = `Move ${nextItem.title}`;
-                        setHistory(h => {
-                          const entry: HistoryEntry = {
-                            label,
-                            undo: (items) => items.map(it => it.id === nextItem.id ? { ...it, x: prevItem.x, y: prevItem.y } : it),
-                            redo: (items) => items.map(it => it.id === nextItem.id ? { ...it, x: nextItem.x, y: nextItem.y } : it),
-                          };
-                          const nh = [...h, entry];
-                          return nh.length > MAX_HISTORY ? nh.slice(nh.length - MAX_HISTORY) : nh;
-                        });
-                        setRedoStack([]);
-                        persistItems();
-                      }}
+                      onMoveStart={handleItemMoveStart}
+                      onMoveEnd={handleItemMoveEnd}
                       onBringToFront={bringToFront}
                       onSendToBack={sendToBack}
                       onBringForward={bringForward}
@@ -1068,6 +1226,7 @@ export default function EditorPage() {
                   {/* Widget Sidebar (collapsible) */}
                   <aside
                     className={`relative surface p-4 border border-[color:var(--border)] rounded-2xl shadow-lg bg-[color:var(--surface)]/80 overflow-hidden ${previewMode ? 'opacity-50 pointer-events-none' : ''} flex flex-col palette-full-height`}
+                    style={palettePanelStyle}
                     onPointerDown={(e) => {
                       // allow starting a resize when pointer is near the left edge of the aside
                       const el = paletteRef.current || (e.currentTarget as HTMLElement);

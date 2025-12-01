@@ -118,11 +118,24 @@ export default function Sidebar() {
     };
   }, [collapsed, sidebarWidth]);
   // zoomViewport removed — unused
+  const sidebarWidthValue = collapsed ? '2.75rem' : `${Math.round(sidebarWidth)}px`;
+
   return (
     <aside
       className="fixed left-0 top-9 bottom-0 border-r border-[color:var(--border)] bg-[color:var(--muted)] flex flex-col"
-      style={{ width: 'var(--sidebar-w,15rem)', zIndex: 90 }}
+      style={{ width: sidebarWidthValue, zIndex: 90 }}
     >
+      {!collapsed && (
+        <div
+          aria-hidden="true"
+          className="absolute right-0 top-0 bottom-0 w-3 cursor-ew-resize z-30 no-touch-action"
+          onPointerDown={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            window.dispatchEvent(new CustomEvent('py:sidebar-begin-resize', { detail: { startX: e.clientX } }));
+          }}
+        />
+      )}
       {/* Resize handle: visible only when sidebar is expanded. Centered grip for affordance. */}
       {!collapsed && (
         <div

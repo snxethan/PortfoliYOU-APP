@@ -8,7 +8,7 @@ import { useNotifications } from "../../../providers/NotificationsProvider";
 import { useProjects } from "../../../providers/ProjectsProvider";
 import { WidgetsRegistry } from "../../../widgets/registry";
 import type { CarouselItem } from "../../../widgets/defs/Carousel";
-import { ALLOWED_HTTP_SCHEME_LABEL } from "../../../widgets/utils/linkUrl";
+import { ALLOWED_HTTP_SCHEME_LABEL } from "../../../../../shared/widgets/linkUrl";
 import type { GridItem } from "../canvas/DraggableItem";
 
 import LinkPreviewPanel from "./LinkPreviewPanel";
@@ -226,7 +226,11 @@ export default function ModifyWidgetModal({
     const [carouselItems, setCarouselItems] = useState<CarouselEditorItem[]>([]);
     const [carouselError, setCarouselError] = useState<string | null>(null);
     const assets = useAssets();
-    const imageAssetOptions = useMemo(() => assets.list.filter(asset => asset.type?.startsWith('image/')), [assets.list]);
+    const imageAssetOptions = useMemo(() => assets.list.filter(asset => {
+        if (asset.type?.startsWith('image/')) return true;
+        const hasDimensions = typeof asset.width === 'number' && asset.width > 0 && typeof asset.height === 'number' && asset.height > 0;
+        return hasDimensions;
+    }), [assets.list]);
     const videoAssetOptions = useMemo(() => assets.list.filter(asset => asset.type?.startsWith('video/')), [assets.list]);
     const resolvedDefType = defType || item.type || null;
     const isCarousel = resolvedDefType === 'carousel';
@@ -1275,10 +1279,6 @@ export default function ModifyWidgetModal({
                                                 </div>
                                                 <div className="space-y-3">
                                                     {carouselItems.map((slide, idx) => {
-                                                        const assetOptions = assets.list.filter((asset) => {
-                                                            if (slide.mediaType === 'video') return asset.type?.startsWith('video/');
-                                                            return asset.type?.startsWith('image/');
-                                                        });
                                                         const assetHashForSlide = (typeof slide.source === 'string' && slide.source.startsWith('asset://')) ? slide.source.slice('asset://'.length) : '';
                                                         const currentAsset = assetHashForSlide ? assets.list.find(a => a.hash === assetHashForSlide) : null;
                                                         return (
@@ -1368,6 +1368,39 @@ export default function ModifyWidgetModal({
                                                                                 type="url"
                                                                                 placeholder="https://example.com/image.jpg"
                                                                                 value={typeof slide.source === 'string' && !slide.source.startsWith('asset://') ? slide.source : ''}
+                                                                                onChange={(e) => updateCarouselItem(slide.id, { source: e.target.value })}
+                                                                                disabled={locked}
+                                                                            />
+                                                                        </div>
+                                                                    )}
+                                                                    {slide.mediaType === 'video' && videoAssetOptions.length > 0 && (
+                                                                        <div className="mt-2">
+                                                                            <label className="block text-[color:var(--fg-muted)] text-xs mb-1">Pick from video assets</label>
+                                                                            <select
+                                                                                className="input w-full"
+                                                                                value={assetHashForSlide}
+                                                                                onChange={(e) => {
+                                                                                    const hash = e.target.value;
+                                                                                    if (!hash) return;
+                                                                                    updateCarouselItem(slide.id, { source: `asset://${hash}` });
+                                                                                }}
+                                                                                disabled={locked}
+                                                                            >
+                                                                                <option value="">Select a video asset…</option>
+                                                                                {videoAssetOptions.map((asset) => (
+                                                                                    <option key={asset.hash} value={asset.hash}>{asset.name}</option>
+                                                                                ))}
+                                                                            </select>
+                                                                        </div>
+                                                                    )}
+                                                                    {slide.mediaType === 'video' && (
+                                                                        <div className="mt-2">
+                                                                            <label className="block text-[color:var(--fg-muted)] text-xs mb-1">Paste video link</label>
+                                                                            <input
+                                                                                className="input w-full"
+                                                                                type="url"
+                                                                                placeholder="https://example.com/video.mp4"
+                                                                                value={(typeof slide.source === 'string' && !slide.source.startsWith('asset://')) ? slide.source : ''}
                                                                                 onChange={(e) => updateCarouselItem(slide.id, { source: e.target.value })}
                                                                                 disabled={locked}
                                                                             />

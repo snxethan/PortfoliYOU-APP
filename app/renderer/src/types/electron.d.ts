@@ -28,6 +28,10 @@ declare global {
       clipboardRead?: () => Promise<{ ok: boolean; text?: string; error?: string }>;
       openDevTools?: (options?: { mode?: 'right' | 'bottom' | 'undocked' }) => Promise<{ ok: boolean; error?: string }>;
       toggleDevTools?: () => Promise<{ ok: boolean; error?: string }>;
+      // Preview server controls
+      previewStartServer?: (options: { distDir: string; host?: string; port?: number }) => Promise<{ ok: true; localUrl: string; lanUrl: string; port: number } | { ok: false; error: string }>;
+      previewStopServer?: () => Promise<{ ok: boolean; stopped?: boolean; error?: string }>;
+      openExternal?: (options: { url: string }) => Promise<{ ok: boolean; error?: string }>;
     };
   }
 }

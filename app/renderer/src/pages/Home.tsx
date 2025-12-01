@@ -14,7 +14,6 @@ import { useAuth } from "../providers/AuthProvider";
 import { useProjects } from "../providers/ProjectsProvider";
 // CTA is now shown via a popup from the sidebar Account section when not signed in
 import { useNotifications } from "../providers/NotificationsProvider";
-import type { NotificationType } from "../providers/NotificationsProvider";
 import { usePortfolioSettings } from "../providers/PortfolioSettingsProvider";
 
 
@@ -64,6 +63,38 @@ export default function HomePage() {
 	}, [user, projects.map(p => p._cloudId ? p._cloudId : '').join(',')]);
 	const [notificationsOpen, setNotificationsOpen] = useState(false);
 	const unseenCount = useMemo(() => notifications.length, [notifications.length]);
+	const [notificationsPulse, setNotificationsPulse] = useState(false);
+
+	useEffect(() => {
+		let t: number | null = null;
+		if (notificationsOpen) {
+			setNotificationsPulse(true);
+			t = window.setTimeout(() => setNotificationsPulse(false), 1600);
+		}
+		return () => { if (t) { clearTimeout(t); } };
+	}, [notificationsOpen]);
+
+	useEffect(() => {
+		const handler = (e: any) => {
+			try { setNotificationsOpen(v => !v); } catch { /* ignore */ }
+		};
+		window.addEventListener('py:toggle-notifications', handler as EventListener);
+		return () => window.removeEventListener('py:toggle-notifications', handler as EventListener);
+	}, []);
+
+	// Also respond to highlight requests specifically for notifications (from other UI)
+	useEffect(() => {
+		const onHighlight = (e: any) => {
+			try {
+				// ensure the center is open, then pulse
+				setNotificationsOpen(true);
+				setNotificationsPulse(true);
+				window.setTimeout(() => setNotificationsPulse(false), 1600);
+			} catch { /* ignore */ }
+		};
+		window.addEventListener('py:highlight-notifications', onHighlight as EventListener);
+		return () => window.removeEventListener('py:highlight-notifications', onHighlight as EventListener);
+	}, []);
 
 	// Highlight + scroll interop
 	const [pulseList, setPulseList] = useState(false);
@@ -129,9 +160,9 @@ export default function HomePage() {
 			{/* Centered CTA under title is now shown inside Dashboard; no extra CTA block here */}
 			{/* Notification center area on Home for managing/dismissing persistent notifications */}
 			{notificationsOpen && (
-				<div className="surface border border-[color:var(--border)] rounded-2xl p-4">
+				<div className={`surface border border-[color:var(--border)] rounded-2xl p-4 ${notificationsPulse ? 'highlight-pulse' : ''}`}>
 					<NotificationsCenter
-						notifications={notifications as Array<{ id: string; type: NotificationType; title?: string; message: string; createdAt: number | string }>}
+						notifications={notifications}
 						onDismiss={dismiss}
 						onClearAll={clearAll}
 					/>

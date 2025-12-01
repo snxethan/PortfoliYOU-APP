@@ -1,9 +1,34 @@
 import { useEffect, useState, useRef } from "react";
-import { ChevronDown, ChevronRight, Plus, Settings, Play, Square, Copy, ExternalLink, X, Eye, RefreshCw } from "lucide-react";
+import { ChevronDown, ChevronRight, Plus, Play, Square, Copy, ExternalLink, X, Eye, RefreshCw, SlidersHorizontal } from "lucide-react";
 import { useProjects } from "../providers/ProjectsProvider";
+import { startPreviewServer } from "../lib/previewServer";
+import { captureGlobalStyleSnapshot } from "../lib/styleSnapshot";
 import { usePortfolioSettings } from "../providers/PortfolioSettingsProvider";
 import { useAssets } from "../providers/AssetsProvider";
 import { useNavigate } from 'react-router-dom';
+import { getWidgetThemeSnapshot, themeSnapshotToCss } from "../widgets/theme";
+import { appendPreviewLog, clearPreviewLog, getPreviewLog, getPreviewState, setPreviewState } from "../lib/previewInterop";
+
+async function blobToBase64(blob: Blob): Promise<string> {
+	return await new Promise((resolve, reject) => {
+		try {
+			const reader = new FileReader();
+			reader.onerror = () => reject(reader.error || new Error('Failed to read asset'));
+			reader.onloadend = () => {
+				const result = reader.result;
+				if (typeof result !== 'string') {
+					reject(new Error('Unexpected asset reader result'));
+					return;
+				}
+				const idx = result.indexOf(',');
+				resolve(idx >= 0 ? result.slice(idx + 1) : result);
+			};
+			reader.readAsDataURL(blob);
+		} catch (err) {
+			reject(err instanceof Error ? err : new Error(String(err)));
+		}
+	});
+}
 
 export default function DeployPage() {
 	const { selectedProject, selectedProjectId } = useProjects();
@@ -11,6 +36,7 @@ export default function DeployPage() {
 	const { list: assetList } = useAssets();
 	const [buildLog, setBuildLog] = useState<string[]>([]);
 	const logRef = useRef<HTMLDivElement | null>(null);
+	const selectedProjectCloudId = selectedProject?._cloudId ?? selectedProjectId ?? (selectedProject as any)?.id ?? null;
 
 	function appendLog(line: string) {
 		setBuildLog((prev) => {
@@ -33,12 +59,7 @@ export default function DeployPage() {
 			const ss = String(ts.getSeconds()).padStart(2, '0');
 			const formatted = `[${hh}:${mm}:${ss}] ${normalized}`;
 			const next = [...prev, formatted];
-			try {
-				// keep a global buffer so other routes can pick up logs when they mount
-				const g = (window as any).__py_preview_log = (window as any).__py_preview_log || [];
-				g.push(normalized);
-				// NOTE: do NOT re-dispatch 'py:preview:log' here — that causes a feedback loop
-			} catch { /* ignore */ }
+			appendPreviewLog(selectedProjectCloudId, normalized);
 
 			// Also persist technical logs to disk via the main process
 			try {
@@ -91,60 +112,85 @@ export default function DeployPage() {
 	}, [selectedProject]);
 
 	useEffect(() => {
-		// Listen for preview state updates from other UI (or after start/stop)
 		const handler = (e: any) => {
 			try {
 				const d = e?.detail || {};
+				const eventProjectId = d.projectId;
+				if (eventProjectId && selectedProjectCloudId && eventProjectId !== selectedProjectCloudId) return;
 				setPreviewRunning(!!d.running);
 				setPreviewLocalUrl(d.localUrl || null);
-				// Only set LAN when it's not a loopback
 				if (d.lanUrl && !d.lanUrl.startsWith('http://127.') && !d.lanUrl.startsWith('http://localhost')) setPreviewLanUrl(d.lanUrl);
 				else setPreviewLanUrl(null);
 			} catch { /* ignore */ }
 		};
 		window.addEventListener('py:preview:state', handler as EventListener);
-		// On mount, hydrate from a global preview state/log if present (for cases where preview started from other UI)
-		try {
-			const gs = (window as any).__py_preview_state;
-			if (gs) {
-				setPreviewRunning(!!gs.running);
-				setPreviewLocalUrl(gs.localUrl || null);
-				if (gs.lanUrl && !gs.lanUrl.startsWith('http://127.') && !gs.lanUrl.startsWith('http://localhost')) setPreviewLanUrl(gs.lanUrl);
-			}
-			const gl = (window as any).__py_preview_log;
-			if (gl && Array.isArray(gl) && gl.length) setBuildLog([...gl]);
-		} catch { /* ignore */ }
+		const snapshot = getPreviewState(selectedProjectCloudId);
+		if (snapshot) {
+			setPreviewRunning(!!snapshot.running);
+			setPreviewLocalUrl(snapshot.localUrl || null);
+			if (snapshot.lanUrl && !snapshot.lanUrl.startsWith('http://127.') && !snapshot.lanUrl.startsWith('http://localhost')) setPreviewLanUrl(snapshot.lanUrl);
+			else setPreviewLanUrl(null);
+		} else {
+			setPreviewRunning(false);
+			setPreviewLocalUrl(null);
+			setPreviewLanUrl(null);
+		}
+		const storedLog = getPreviewLog(selectedProjectCloudId);
+		if (storedLog.length) setBuildLog([...storedLog]);
+		else setBuildLog([]);
 		return () => { window.removeEventListener('py:preview:state', handler as EventListener); };
-	}, []);
+	}, [selectedProjectCloudId]);
 
 	useEffect(() => {
-		// Respond to start-request events from compact UI like PortfolioIsland
+		const matchesProject = (projectId?: string | null) => {
+			if (!projectId || !selectedProjectCloudId) return true;
+			return projectId === selectedProjectCloudId;
+		};
+
 		const onRequest = (e: any) => {
-			try { if (!previewRunning && !previewStarting) handleStartLocalPreview(); } catch { /* ignore */ }
+			try {
+				const requestedId = e?.detail?.projectId;
+				if (!matchesProject(requestedId)) return;
+				if (!previewRunning && !previewStarting) handleStartLocalPreview();
+			} catch { /* ignore */ }
 		};
 		window.addEventListener('py:preview-start-request', onRequest as EventListener);
 
-		// Respond to export requests from compact UI
-		const onExport = (e: any) => { try { void handleExportZip(); } catch { /* ignore */ } };
+		const onExport = (e: any) => {
+			try {
+				const requestedId = e?.detail?.projectId;
+				if (!matchesProject(requestedId)) return;
+				void handleExportZip();
+			} catch { /* ignore */ }
+		};
 		window.addEventListener('py:export-request', onExport as EventListener);
 
-		// Listen for live preview log lines (emitted by GlobalPreviewStarter)
 		const onLog = (e: any) => {
 			try {
 				const d = e?.detail || {};
-				// Ignore logs emitted by this Deploy instance to avoid duplication
 				if (d.origin === 'deploy') return;
+				if (!matchesProject(d.projectId)) return;
 				if (d.line) appendLog(d.line);
 			} catch { /* ignore */ }
 		};
 		window.addEventListener('py:preview:log', onLog as EventListener);
 
-		// Respond to stop-request events from compact UI like PortfolioIsland
-		const onStopRequest = (e: any) => { try { void handleStopLocalPreview(); } catch { /* ignore */ } };
+		const onStopRequest = (e: any) => {
+			try {
+				const requestedId = e?.detail?.projectId;
+				if (!matchesProject(requestedId)) return;
+				void handleStopLocalPreview();
+			} catch { /* ignore */ }
+		};
 		window.addEventListener('py:preview-stop-request', onStopRequest as EventListener);
 
-		// Respond to reload-request events (rebuild + restart)
-		const onReloadRequest = (e: any) => { try { void handleReloadLocalPreview(); } catch { /* ignore */ } };
+		const onReloadRequest = (e: any) => {
+			try {
+				const requestedId = e?.detail?.projectId;
+				if (!matchesProject(requestedId)) return;
+				void handleReloadLocalPreview();
+			} catch { /* ignore */ }
+		};
 		window.addEventListener('py:preview-reload-request', onReloadRequest as EventListener);
 
 		return () => {
@@ -154,13 +200,13 @@ export default function DeployPage() {
 			window.removeEventListener('py:preview-stop-request', onStopRequest as EventListener);
 			window.removeEventListener('py:preview-reload-request', onReloadRequest as EventListener);
 		};
-	}, [previewRunning, previewStarting]);
+	}, [previewRunning, previewStarting, selectedProjectCloudId]);
 
 
 	async function handleReloadLocalPreview() {
 		// Stop if running, then start a fresh preview (rebuild + restart)
 		appendLog('Reloading local preview...');
-		try { window.dispatchEvent(new CustomEvent('py:preview:log', { detail: { line: 'Reloading local preview...', origin: 'deploy' } })); } catch { }
+		try { window.dispatchEvent(new CustomEvent('py:preview:log', { detail: { line: 'Reloading local preview...', origin: 'deploy', projectId: selectedProjectCloudId } })); } catch { }
 		try {
 			if (previewRunning) {
 				await handleStopLocalPreview();
@@ -187,6 +233,7 @@ export default function DeployPage() {
 		if (!selectedProject) return;
 		setExporting(true);
 		setBuildLog([]);
+		clearPreviewLog(selectedProjectCloudId);
 		setExportedFilePath(null);
 		appendLog('Starting export...');
 		try {
@@ -200,19 +247,25 @@ export default function DeployPage() {
 						try {
 							const blob = await idbGet('blobs', asset.hash);
 							if (!blob) continue;
-							const ab = await (blob as Blob).arrayBuffer();
-							const bytes = new Uint8Array(ab);
-							let binary = '';
-							const chunk = 0x8000;
-							for (let i = 0; i < bytes.length; i += chunk) binary += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + chunk)));
-							assetsBase64[asset.hash] = btoa(binary);
+							assetsBase64[asset.hash] = await blobToBase64(blob);
 						} catch { /* ignore individual asset failures */ }
 					}
 				} catch { /* ignore asset read failures */ }
 			}
 
 			appendLog('Building static site...');
-			const buildRes = await (window as any).api?.buildStaticSite?.({ project: selectedProject, assets: assetsBase64, useTempOutput: true });
+			const activeTheme = selectedProject?.themes?.[selectedProject.activeThemeId] ?? null;
+			const [styleSnapshot, themeSnapshot] = await Promise.all([
+				captureGlobalStyleSnapshot(),
+				Promise.resolve(getWidgetThemeSnapshot(activeTheme))
+			]);
+			const buildRes = await (window as any).api?.buildStaticSite?.({
+				project: selectedProject,
+				assets: assetsBase64,
+				useTempOutput: true,
+				globalCss: { tailwind: styleSnapshot.tailwindCss },
+				themeCss: themeSnapshotToCss(themeSnapshot)
+			});
 			if (!buildRes || !buildRes.ok) {
 				appendLog('❌ Build failed: ' + (buildRes?.error || 'unknown'));
 				window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'error', message: 'Export build failed: ' + (buildRes?.error || 'unknown'), persistent: false } }));
@@ -286,13 +339,14 @@ export default function DeployPage() {
 		if (!selectedProject) return;
 		setPreviewStarting(true);
 		setBuildLog([]);
+		clearPreviewLog(selectedProjectCloudId);
 		setExportedFilePath(null);
 		appendLog('Preparing local preview...');
-		try { window.dispatchEvent(new CustomEvent('py:preview:log', { detail: { line: 'Preparing local preview...', origin: 'deploy' } })); } catch { }
+		try { window.dispatchEvent(new CustomEvent('py:preview:log', { detail: { line: 'Preparing local preview...', origin: 'deploy', projectId: selectedProjectCloudId } })); } catch { }
 		try {
 			// Build static site into a temp output so we don't modify project folder
 			appendLog('Building static site for preview...');
-			try { window.dispatchEvent(new CustomEvent('py:preview:log', { detail: { line: 'Building static site for preview...', origin: 'deploy' } })); } catch { }
+			try { window.dispatchEvent(new CustomEvent('py:preview:log', { detail: { line: 'Building static site for preview...', origin: 'deploy', projectId: selectedProjectCloudId } })); } catch { }
 			window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'info', message: 'Building static site for preview...', persistent: false } }));
 			const assetsBase64: Record<string, string> = {};
 			if (includeAssets) {
@@ -304,49 +358,70 @@ export default function DeployPage() {
 						try {
 							const blob = await idbGet('blobs', asset.hash);
 							if (!blob) continue;
-							const ab = await (blob as Blob).arrayBuffer();
-							const bytes = new Uint8Array(ab);
-							let binary = '';
-							const chunk = 0x8000;
-							for (let i = 0; i < bytes.length; i += chunk) binary += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + chunk)));
-							assetsBase64[asset.hash] = btoa(binary);
+							assetsBase64[asset.hash] = await blobToBase64(blob);
 						} catch { /* ignore */ }
 					}
 				} catch { /* ignore */ }
 			}
 
-			const buildRes = await (window as any).api?.buildStaticSite?.({ project: selectedProject, assets: assetsBase64, useTempOutput: true });
+			const activeTheme = selectedProject?.themes?.[selectedProject.activeThemeId] ?? null;
+			const [styleSnapshot, themeSnapshot] = await Promise.all([
+				captureGlobalStyleSnapshot(),
+				Promise.resolve(getWidgetThemeSnapshot(activeTheme))
+			]);
+			const buildRes = await (window as any).api?.buildStaticSite?.({
+				project: selectedProject,
+				assets: assetsBase64,
+				useTempOutput: true,
+				globalCss: { tailwind: styleSnapshot.tailwindCss },
+				themeCss: themeSnapshotToCss(themeSnapshot)
+			});
 			if (!buildRes || !buildRes.ok) {
 				appendLog(' ❌ Preview build failed: ' + (buildRes?.error || 'unknown') + ' ❌');
-				try { window.dispatchEvent(new CustomEvent('py:preview:log', { detail: { line: ' ❌ Preview build failed: ' + (buildRes?.error || 'unknown') + ' ❌', origin: 'deploy' } })); } catch { }
+				try { window.dispatchEvent(new CustomEvent('py:preview:log', { detail: { line: ' ❌ Preview build failed: ' + (buildRes?.error || 'unknown') + ' ❌', origin: 'deploy', projectId: selectedProjectCloudId } })); } catch { }
 				window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'error', message: 'Preview build failed: ' + (buildRes?.error || 'unknown'), persistent: false } }));
 				setPreviewStarting(false);
 				return;
 			}
 			appendLog(`Preview build output: ${buildRes.path}`);
-			try { window.dispatchEvent(new CustomEvent('py:preview:log', { detail: { line: `Preview build output: ${buildRes.path}`, origin: 'deploy' } })); } catch { }
+			try { window.dispatchEvent(new CustomEvent('py:preview:log', { detail: { line: `Preview build output: ${buildRes.path}`, origin: 'deploy', projectId: selectedProjectCloudId } })); } catch { }
 			window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'success', message: 'Preview build succeeded', persistent: false } }));
 
 			appendLog('Starting local static server...');
-			try { window.dispatchEvent(new CustomEvent('py:preview:log', { detail: { line: 'Starting local static server...', origin: 'deploy' } })); } catch { }
-			const startRes = await (window as any).api?.previewStartServer?.({ distDir: buildRes.path });
+			try { window.dispatchEvent(new CustomEvent('py:preview:log', { detail: { line: 'Starting local static server...', origin: 'deploy', projectId: selectedProjectCloudId } })); } catch { }
+			// Read saved preview settings from project metadata (if present) and pass host/port through
+			const meta = (selectedProject as any)?.portfolioMeta?.buildSettings || {};
+			const previewMeta = (meta && meta.preview) || {};
+			const hostOpt = previewMeta.host || meta.previewHost || undefined;
+			const portVal = Number(previewMeta.port || meta.previewPort || 0) || 0;
+			const startRes = await startPreviewServer(buildRes.path, hostOpt, portVal || undefined);
 			if (!startRes || !startRes.ok) {
 				appendLog(' ❌ Failed to start preview server: ' + (startRes?.error || 'unknown') + ' ❌');
-				try { window.dispatchEvent(new CustomEvent('py:preview:log', { detail: { line: ' ❌ Failed to start preview server: ' + (startRes?.error || 'unknown') + ' ❌', origin: 'deploy' } })); } catch { }
+				try { window.dispatchEvent(new CustomEvent('py:preview:log', { detail: { line: ' ❌ Failed to start preview server: ' + (startRes?.error || 'unknown') + ' ❌', origin: 'deploy', projectId: selectedProjectCloudId } })); } catch { }
 				window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'error', message: 'Failed to start preview server: ' + (startRes?.error || 'unknown'), persistent: false } }));
 				setPreviewStarting(false);
 				return;
 			}
 			appendLog(`✅ Preview running: ${startRes.localUrl} (LAN: ${startRes.lanUrl})`);
-			try { window.dispatchEvent(new CustomEvent('py:preview:log', { detail: { line: `✅ Preview running: ${startRes.localUrl} (LAN: ${startRes.lanUrl})`, origin: 'deploy' } })); } catch { }
+			try { window.dispatchEvent(new CustomEvent('py:preview:log', { detail: { line: `✅ Preview running: ${startRes.localUrl} (LAN: ${startRes.lanUrl})`, origin: 'deploy', projectId: selectedProjectCloudId } })); } catch { }
 			window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'success', message: 'Local preview started', href: startRes.localUrl, ctaLabel: 'Open', persistent: false } }));
+
+			// Auto-open in browser when preview starts if project preview settings request it
+			try {
+				const meta = (selectedProject as any)?.portfolioMeta?.buildSettings || {};
+				const previewMeta = (meta && meta.preview) || {};
+				const openOnStart = !!(previewMeta.openOnStart || meta.previewOpenOnStart);
+				if (openOnStart && startRes.localUrl) {
+					try { await (window as any).api?.openExternal?.({ url: startRes.localUrl }); } catch { /* ignore */ }
+				}
+			} catch { /* ignore */ }
 			setPreviewRunning(true);
 			setPreviewLocalUrl(startRes.localUrl || null);
 			if (startRes.lanUrl && !startRes.lanUrl.startsWith('http://127.') && !startRes.lanUrl.startsWith('http://localhost')) setPreviewLanUrl(startRes.lanUrl);
 
 			// Persist global preview state and broadcast so other UI (PortfolioIsland) can reflect it
-			try { (window as any).__py_preview_state = { running: true, localUrl: startRes.localUrl, lanUrl: startRes.lanUrl }; } catch { }
-			window.dispatchEvent(new CustomEvent('py:preview:state', { detail: { running: true, localUrl: startRes.localUrl, lanUrl: startRes.lanUrl } }));
+			setPreviewState(selectedProjectCloudId, { running: true, localUrl: startRes.localUrl, lanUrl: startRes.lanUrl });
+			window.dispatchEvent(new CustomEvent('py:preview:state', { detail: { projectId: selectedProjectCloudId, running: true, localUrl: startRes.localUrl, lanUrl: startRes.lanUrl } }));
 		} catch (e) {
 			appendLog('❌ Local preview failed: ' + (e instanceof Error ? e.message : String(e)));
 		} finally {
@@ -357,22 +432,22 @@ export default function DeployPage() {
 	async function handleStopLocalPreview() {
 		try {
 			appendLog('Stopping local preview...');
-			try { window.dispatchEvent(new CustomEvent('py:preview:log', { detail: { line: 'Stopping local preview...', origin: 'deploy' } })); } catch { }
+			try { window.dispatchEvent(new CustomEvent('py:preview:log', { detail: { line: 'Stopping local preview...', origin: 'deploy', projectId: selectedProjectCloudId } })); } catch { }
 			const res = await (window as any).api?.previewStopServer?.();
 			if (!res || !res.ok) {
 				appendLog(' ❌ Failed to stop preview: ' + (res?.error || 'unknown') + ' ❌');
-				try { window.dispatchEvent(new CustomEvent('py:preview:log', { detail: { line: ' ❌ Failed to stop preview: ' + (res?.error || 'unknown') + ' ❌', origin: 'deploy' } })); } catch { }
+				try { window.dispatchEvent(new CustomEvent('py:preview:log', { detail: { line: ' ❌ Failed to stop preview: ' + (res?.error || 'unknown') + ' ❌', origin: 'deploy', projectId: selectedProjectCloudId } })); } catch { }
 				window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'error', message: 'Failed to stop preview: ' + (res?.error || 'unknown'), persistent: false } }));
 				return;
 			}
 			appendLog('✅ Preview stopped');
-			try { window.dispatchEvent(new CustomEvent('py:preview:log', { detail: { line: '✅ Preview stopped', origin: 'deploy' } })); } catch { }
+			try { window.dispatchEvent(new CustomEvent('py:preview:log', { detail: { line: '✅ Preview stopped', origin: 'deploy', projectId: selectedProjectCloudId } })); } catch { }
 			window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'info', message: 'Local preview stopped', persistent: false } }));
 			setPreviewRunning(false);
 			setPreviewLocalUrl(null);
 			setPreviewLanUrl(null);
-			try { (window as any).__py_preview_state = { running: false }; } catch { }
-			window.dispatchEvent(new CustomEvent('py:preview:state', { detail: { running: false } }));
+			setPreviewState(selectedProjectCloudId, { running: false });
+			window.dispatchEvent(new CustomEvent('py:preview:state', { detail: { projectId: selectedProjectCloudId, running: false } }));
 		} catch (e) { appendLog('❌ Failed to stop preview: ' + (e instanceof Error ? e.message : String(e))); }
 	}
 
@@ -404,7 +479,6 @@ export default function DeployPage() {
 											} else if (navigator.clipboard && navigator.clipboard.writeText) {
 												await navigator.clipboard.writeText(text);
 											} else {
-												// fallback: create temporary textarea
 												const ta = document.createElement('textarea');
 												ta.value = text;
 												document.body.appendChild(ta);
@@ -413,7 +487,9 @@ export default function DeployPage() {
 												ta.remove();
 											}
 											window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'success', message: 'Logs copied to clipboard', persistent: false } }));
-										} catch { window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'warn', message: 'Could not copy logs', persistent: false } })); }
+										} catch {
+											window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'warn', message: 'Could not copy logs', persistent: false } }));
+										}
 									}}
 								>
 									<Copy size={14} />
@@ -422,7 +498,11 @@ export default function DeployPage() {
 									type="button"
 									className="btn btn-ghost btn-xs p-1 flex items-center gap-1"
 									title="Clear deployment log"
-									onClick={() => { setBuildLog([]); window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'info', message: 'Deployment log cleared', persistent: false } })); }}
+									onClick={() => {
+										setBuildLog([]);
+										clearPreviewLog(selectedProjectCloudId);
+										window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'info', message: 'Deployment log cleared', persistent: false } }));
+									}}
 								>
 									<X size={14} />
 								</button>
@@ -461,6 +541,14 @@ export default function DeployPage() {
 													<Play size={16} /> <span>Start Preview</span>
 												</button>
 											</div>
+											<button
+												className="btn btn-ghost w-full sm:w-auto gap-2 text-base flex items-center"
+												onClick={() => openSettings({ projectId: selectedProjectId || (selectedProject as any)?.id, section: 'preview' })}
+												disabled={!selectedProject && !selectedProjectId}
+												title="Preview settings"
+											>
+												<SlidersHorizontal size={16} /> <span>Preview Settings</span>
+											</button>
 										</div>
 									) : (
 										<div className="flex flex-col sm:flex-row items-center justify-center gap-3 text-center">
@@ -472,28 +560,41 @@ export default function DeployPage() {
 													<RefreshCw size={16} /> <span>Reload</span>
 												</button>
 											)}
-											<div className="flex items-center gap-2">
-												{previewLocalUrl && (
-													<a className="btn btn-ghost w-full sm:w-auto gap-2 text-base flex items-center justify-center" href={previewLocalUrl} target="_blank" rel="noreferrer" title="Open preview in browser" onClick={() => window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'info', message: 'Opening preview in browser', persistent: false } }))}>
-														<Eye size={16} /> <span>Open</span>
-													</a>
-												)}
-												{previewLocalUrl && (
-													<button className="btn btn-ghost w-full sm:w-auto gap-2 text-base flex items-center justify-center" onClick={() => (window as any).api?.clipboardWrite?.({ text: previewLocalUrl })} title="Copy local URL">
-														<Copy size={16} /> <span>Copy</span>
-													</button>
-												)}
-												{previewLanUrl && (
-													<a className="btn btn-ghost w-full sm:w-auto gap-2 text-base flex items-center justify-center" href={previewLanUrl} target="_blank" rel="noreferrer" title="Open LAN preview" onClick={() => window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'info', message: 'Opening LAN preview in browser', persistent: false } }))}>
-														<ExternalLink size={16} /> <span>Open LAN</span>
-													</a>
-												)}
-												{previewLanUrl && (
-													<button className="btn btn-ghost w-full sm:w-auto gap-2 text-base flex items-center justify-center" onClick={() => (window as any).api?.clipboardWrite?.({ text: previewLanUrl })} title="Copy LAN URL">
-														<Copy size={16} /> <span>Copy LAN</span>
-													</button>
-												)}
-											</div>
+											{previewLocalUrl && (
+												<a
+													className="btn btn-ghost w-full sm:w-auto gap-2 text-base flex items-center"
+													href={previewLocalUrl}
+													target="_blank"
+													rel="noreferrer"
+													title="Open preview in browser"
+													onClick={async (e) => {
+														e.preventDefault();
+														try { await (window as any).api?.openExternal?.({ url: previewLocalUrl }); } catch { /* ignore */ }
+														window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'info', message: 'Opening preview in browser', persistent: false } }));
+													}}
+												>
+													<Eye size={16} /> <span>Open</span>
+												</a>
+											)}
+											{/* Preview settings moved up into the running controls (next to Reload) */}
+											<button className="btn btn-ghost w-full sm:w-auto gap-2 text-base flex items-center" onClick={() => openSettings({ projectId: selectedProjectId || (selectedProject as any)?.id, section: 'preview' })} disabled={!selectedProject && !selectedProjectId} title="Preview settings">
+												<SlidersHorizontal size={16} /> <span>Preview Settings</span>
+											</button>
+											{previewLocalUrl && (
+												<button className="btn btn-ghost w-full sm:w-auto gap-2 text-base flex items-center" onClick={() => (window as any).api?.clipboardWrite?.({ text: previewLocalUrl })} title="Copy local URL">
+													<Copy size={16} /> <span>Copy</span>
+												</button>
+											)}
+											{previewLanUrl && (
+												<a className="btn btn-ghost w-full sm:w-auto gap-2 text-base flex items-center" href={previewLanUrl} target="_blank" rel="noreferrer" title="Open LAN preview" onClick={() => window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'info', message: 'Opening LAN preview in browser', persistent: false } }))}>
+													<ExternalLink size={16} /> <span>Open LAN</span>
+												</a>
+											)}
+											{previewLanUrl && (
+												<button className="btn btn-ghost w-full sm:w-auto gap-2 text-base flex items-center" onClick={() => (window as any).api?.clipboardWrite?.({ text: previewLanUrl })} title="Copy LAN URL">
+													<Copy size={16} /> <span>Copy LAN</span>
+												</button>
+											)}
 										</div>
 									)}
 								</div>
@@ -509,7 +610,7 @@ export default function DeployPage() {
 							<div className="flex flex-col sm:flex-row items-center justify-center gap-3">
 								<div className="flex items-center gap-2">
 									<button
-										className="btn btn-accent w-full sm:w-auto gap-2 text-base font-semibold shadow-lg shadow-[color:var(--accent)]/25"
+										className="btn btn-accent w-full sm:w-auto gap-2 text-base font-semibold shadow-lg shadow-[color:var(--accent)]/25 flex items-center"
 										onClick={handleExportZip}
 										disabled={exporting}
 									>
@@ -537,17 +638,17 @@ export default function DeployPage() {
 										</button>
 									)}
 								</div>
-								{/* Build settings placed underneath primary export control */}
-								<div className="mt-2 flex items-center justify-center gap-2">
+								{/* Build settings placed beside primary export control on larger screens */}
+								<div className="mt-2 sm:mt-0 flex items-center gap-2 sm:ml-3">
 									<button
 										type="button"
-										className="btn btn-ghost btn-sm p-2 flex items-center gap-2"
+										className="btn btn-ghost w-full sm:w-auto gap-2 text-base flex items-center justify-center"
 										title={selectedProject || selectedProjectId ? 'Build settings' : 'Open a project to modify build settings'}
 										disabled={!selectedProject && !selectedProjectId}
 										onClick={() => openSettings({ projectId: selectedProjectId || (selectedProject as any)?.id, section: 'build' })}
 									>
-										<Settings size={14} />
-										<span className="text-sm hidden sm:inline">Build settings</span>
+										<SlidersHorizontal size={16} />
+										<span>Build Settings</span>
 									</button>
 								</div>
 							</div>

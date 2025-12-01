@@ -4,6 +4,7 @@ import React from 'react';
 import ReactDOMServer from 'react-dom/server';
 import type { LocalProject, Widget, Page, PortfolioMeta } from '../providers/ProjectsProvider';
 import type { Theme } from '../themes/types';
+import { themeToCssVars, FALLBACK_THEME } from '../themes/utils';
 import { WidgetsRegistry } from '../widgets/registry';
 
 const DEFAULT_PLACEHOLDER = '/assets/placeholder.png';
@@ -138,12 +139,79 @@ export async function compileStaticSite(
     // Add a small set of page/grid rules so exported widgets mirror the editor's
     // behavior: each widget will be treated as a contained block and clipped to
     // avoid children rendering outside their section (matches editor preview).
-    const baseCss = `body { font-family: system-ui, sans-serif; margin: 0; padding: 0; }
-.page-grid { box-sizing: border-box; padding: 1rem; }
-.page-grid .widget { position: relative; overflow: hidden; box-sizing: border-box; }
-.widget img { max-width: 100%; display: block; }
+    const baseCss = `* { box-sizing: border-box; }
+body { margin: 0; font-family: system-ui, -apple-system, 'Segoe UI', Roboto, Inter, sans-serif; color: var(--fg, #0f172a); }
+.container { max-width: 1100px; margin: 0 auto; padding: 36px; }
+.page-canvas { position: relative; margin: 0 auto; }
+.page-widget-wrapper { position: absolute; will-change: transform; }
+.widget { width: 100%; height: 100%; display: block; }
+.widget img,
+.widget video { max-width: 100%; max-height: 100%; display: block; }
+.widget-unknown,
+.widget-error { font-family: monospace; background: transparent; border: 1px dashed var(--border, #d1d5db); padding: 12px; border-radius: 6px; white-space: pre-wrap; }
 `;
     const fullCss = [baseCss, ...collectedCss].join('\n\n');
+    // Also emit theme variables and global styles so static output matches preview
+    // Build theme CSS from project active theme when available
+    let themeCss = '';
+    try {
+        const activeTheme = (project && (project as any).themes && (project as any).themes[(project as any).activeThemeId]) || null;
+        const vars = themeToCssVars(activeTheme || FALLBACK_THEME as any);
+        const rootLines = Object.entries(vars).map(([k, v]) => `${k}: ${v};`);
+        themeCss = `:root {\n${rootLines.join('\n')}\n}\n`;
+        themeCss += `body { color: var(--fg); background: var(--bg); font-family: var(--body-font); }\n`;
+    } catch (e) {
+        // fallback: minimal vars
+        themeCss = `:root { --bg: #ffffff; --fg: #111827; --accent: #06b6d4; }\n`;
+    }
+
+    // Try to collect global styles (Tailwind/Vite CSS and any injected <style> tags) from parent document
+    let tailwindCss = '';
+    try {
+        if (typeof document !== 'undefined') {
+            const parent = window.document;
+            // Inline <style> contents
+            const styles = Array.from(parent.querySelectorAll('style')) as HTMLStyleElement[];
+            for (const s of styles) {
+                if (s.innerText && s.innerText.trim()) tailwindCss += s.innerText + '\n\n';
+            }
+            // Fetch linked stylesheets
+            const links = Array.from(parent.querySelectorAll('link[rel="stylesheet"]')) as HTMLLinkElement[];
+            for (const l of links) {
+                try {
+                    const href = l.href;
+                    if (!href) continue;
+                    // attempt to fetch the stylesheet content
+                    // eslint-disable-next-line no-await-in-loop
+                    const res = await fetch(href, { cache: 'no-store' });
+                    if (res.ok) {
+                        // eslint-disable-next-line no-await-in-loop
+                        const txt = await res.text();
+                        tailwindCss += `/* source: ${href} */\n` + txt + '\n\n';
+                    }
+                } catch {
+                    // ignore fetch failures for external styles
+                }
+            }
+        }
+    } catch {
+        // ignore DOM access failures
+    }
+
+    // Write theme and tailwind aggregated assets
+    try {
+        await fs.writeFile(path.join(outputDir, 'assets', 'theme.css'), themeCss, 'utf8');
+    } catch (e) {
+        // ignore write error
+    }
+    try {
+        if (tailwindCss.trim().length > 0) {
+            await fs.writeFile(path.join(outputDir, 'assets', 'tailwind.css'), tailwindCss, 'utf8');
+        }
+    } catch (e) {
+        // ignore
+    }
+
     await fs.writeFile(path.join(outputDir, 'site.css'), fullCss, 'utf8');
 
     // 4. Emit page files
@@ -183,14 +251,14 @@ function renderPageHtml(page: Page, widgetBodies: string, project: LocalProject,
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>${meta?.siteTitle || page.title}</title>
-    <link rel="stylesheet" href="/site.css" />
-    <style> .container{max-width:1100px;margin:0 auto;padding:36px} .page-canvas{position:relative;height:${height}px;max-width:${innerWidth}px;margin:0 auto;} </style>
+    <link rel="stylesheet" href="./assets/tailwind.css" />
+    <link rel="stylesheet" href="./assets/theme.css" />
+    <link rel="stylesheet" href="./site.css" />
 </head>
 <body>
     <main>
         <div class="container">
-            <h1>${meta?.siteTitle || page.title}</h1>
-            <div class="page-canvas">
+            <div class="page-canvas" style="height:${height}px;max-width:${innerWidth}px;">
                 ${widgetBodies}
             </div>
         </div>

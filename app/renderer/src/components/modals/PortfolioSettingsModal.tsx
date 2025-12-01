@@ -8,6 +8,7 @@ import { useAssets } from "../../providers/AssetsProvider";
 import { useNotifications } from "../../providers/NotificationsProvider";
 import { THEME_PRESETS } from "../../themes/presets";
 import type { Theme } from "../../themes/types";
+import { getPreviewState } from "../../lib/previewInterop";
 
 const INVALID_FILENAME = /[\\/:*?"<>|]/g;
 
@@ -283,6 +284,7 @@ export default function PortfolioSettingsModal({ open, mode, projectId, cloudId,
     const [cloudLoading, setCloudLoading] = useState(false);
     const [cloudBusy, setCloudBusy] = useState(false);
     const targetCloudId = project?._cloudId || cloudId || null;
+    const previewProjectId = project?._cloudId || project?.id || null;
     const showCloudSection = !!user && mode !== "create";
 
     const loadCloudInfo = useCallback(async () => {
@@ -320,16 +322,41 @@ export default function PortfolioSettingsModal({ open, mode, projectId, cloudId,
         setSavingDraft(true);
         try {
             const metadata = toMetadataPayload(draft);
+            // Merge preview/build settings into the metadata so they save together when user clicks Save
+            const existingMeta = project?.portfolioMeta || {};
+            const existingBuild = (existingMeta as any).buildSettings || {};
+            const mergedBuild = {
+                ...(existingBuild || {}),
+                includeAssets: includeAssetsState,
+                basePath: basePathState || undefined,
+                preview: {
+                    ...(existingBuild.preview || {}),
+                    port: previewPortState || undefined,
+                    host: previewHostState || undefined,
+                    openOnStart: previewOpenOnStartState || undefined,
+                }
+            };
+
+            const mergedMetadata = {
+                ...metadata,
+                buildSettings: mergedBuild
+            } as Partial<PortfolioMeta>;
+
             if (mode === "create") {
-                const created = await createProjectWithSave({ name: metadata.siteTitle || draft.siteTitle, metadata });
+                const created = await createProjectWithSave({ name: mergedMetadata.siteTitle || draft.siteTitle, metadata: mergedMetadata });
                 if (created?.id) selectProject(created.id);
-                notify({ type: "success", title: "Portfolio created", message: `Saved ${metadata.siteTitle || draft.siteTitle}.`, persistent: false });
+                notify({ type: "success", title: "Portfolio created", message: `Saved ${mergedMetadata.siteTitle || draft.siteTitle}.`, persistent: false });
                 onClose();
                 return;
             }
             if (project) {
-                await updateProjectMetadata(project.id, { name: metadata.siteTitle, metadata });
+                await updateProjectMetadata(project.id, { name: mergedMetadata.siteTitle, metadata: mergedMetadata });
                 notify({ type: "success", title: "Portfolio updated", message: "Portfolio settings saved.", persistent: false });
+                // If a local preview is currently running, request a reload so the new preview settings are applied immediately
+                try {
+                    const running = !!getPreviewState(previewProjectId)?.running;
+                    if (running) window.dispatchEvent(new CustomEvent('py:preview-reload-request', { detail: { projectId: previewProjectId } }));
+                } catch { /* ignore */ }
                 onClose();
             }
         } catch {
@@ -493,26 +520,20 @@ export default function PortfolioSettingsModal({ open, mode, projectId, cloudId,
                 <p className="text-xs uppercase tracking-wide text-[color:var(--fg-muted)]">Project file</p>
                 <div className="mt-1 rounded border border-dashed border-[color:var(--border)] p-2 flex items-center gap-2">
                     <div className="flex-1 min-w-0">
-                        <p className="text-sm font-mono truncate">{project?._filePath || '(not saved to disk)'}</p>
+                        <p className="text-sm font-mono break-all">{project?._filePath || '(not saved to disk)'}</p>
                         <p className="text-xs text-[color:var(--fg-muted)]">Location of the saved .portfoliyou file</p>
                     </div>
                     <div className="flex items-center gap-2">
                         <button className="btn btn-ghost btn-sm" disabled={!project?._filePath} onClick={async () => { if (project?._filePath && (window as any).api?.showItemInFolder) await (window as any).api.showItemInFolder({ filePath: project._filePath }); }}>Open</button>
                         <button className="btn btn-ghost btn-sm" onClick={async () => { if (project?.id) await saveProject(project.id, { saveAs: true }); }}>Save As…</button>
-                        <button className="btn btn-ghost btn-sm" onClick={async () => { if (project?.id) await saveProject(project.id, { saveAs: true }); }}>Duplicate (.portfoliyou)</button>
+                        {/* Duplicate action removed; use "Save As…" to save a copy */}
                     </div>
                 </div>
             </div>
         </div>
     );
 
-    const savePreviewSettings = async (port: number, host: string, openOnStart: boolean) => {
-        if (!project) return;
-        try {
-            await updateProjectMetadata(project.id, { metadata: ({ ...(project.portfolioMeta || {}), buildSettings: { ...(project.portfolioMeta as any)?.buildSettings, preview: { ...(project.portfolioMeta as any)?.buildSettings?.preview, port: port || undefined, host: host || undefined, openOnStart: openOnStart || undefined } } } as any) });
-            notify({ type: 'success', title: 'Preview settings saved', message: 'Preview settings updated.', persistent: false });
-        } catch { /* ignore */ }
-    };
+    // Note: preview settings are saved when the user clicks the main Save button below.
 
     const renderPreviewBody = () => (
         <div className="space-y-3">
@@ -531,14 +552,7 @@ export default function PortfolioSettingsModal({ open, mode, projectId, cloudId,
                 <span className="text-[color:var(--fg-muted)]">Open browser when preview starts</span>
             </label>
             <div className="flex items-center gap-2">
-                <button className="btn btn-accent btn-sm" onClick={() => void savePreviewSettings(previewPortState, previewHostState, previewOpenOnStartState)}>Save Preview Settings</button>
-                <button className="btn btn-ghost btn-sm" onClick={() => {
-                    // reset to current project settings
-                    const current = (project?.portfolioMeta as any)?.buildSettings || {};
-                    setPreviewPortState(Number((current.preview && current.preview.port) || (current.previewPort) || 0) || 0);
-                    setPreviewHostState((current.preview && current.preview.host) || (current.previewHost) || 'localhost');
-                    setPreviewOpenOnStartState(!!(current.preview && current.preview.openOnStart));
-                }}>Reset</button>
+                {/* Save button removed — preview settings are saved via main Save action. Reset moved to header as an icon. */}
             </div>
         </div>
     );
@@ -779,6 +793,16 @@ export default function PortfolioSettingsModal({ open, mode, projectId, cloudId,
                         <h2 className="text-lg font-semibold">Portfolio settings</h2>
                         <p className="text-xs text-[color:var(--fg-muted)]">Configure site metadata{showCloudSection ? ' and cloud sync' : ''}.</p>
                     </div>
+                    {/* Reset preview settings (symbol) */}
+                    <button className="btn btn-ghost btn-xs" onClick={() => {
+                        // reset preview fields to current project settings
+                        try {
+                            const current = (project?.portfolioMeta as any)?.buildSettings || {};
+                            setPreviewPortState(Number((current.preview && current.preview.port) || (current.previewPort) || 0) || 0);
+                            setPreviewHostState((current.preview && current.preview.host) || (current.previewHost) || 'localhost');
+                            setPreviewOpenOnStartState(!!(current.preview && current.preview.openOnStart));
+                        } catch { /* ignore */ }
+                    }} title="Reset preview settings" aria-label="Reset preview settings"><RefreshCcw size={14} /></button>
                     <button className="btn btn-ghost btn-xs" onClick={onClose} aria-label="Close"><X size={14} /></button>
                 </div>
                 <div className="p-4 space-y-4 max-h-[70vh] overflow-y-auto">

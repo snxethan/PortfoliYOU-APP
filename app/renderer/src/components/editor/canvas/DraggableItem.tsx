@@ -4,6 +4,7 @@ import { Copy, Settings as SettingsIcon, Pin, PinOff, Trash2 } from "lucide-reac
 import WidgetRenderer from "../../../widgets/Renderer";
 import type { Theme } from "../../../themes/types";
 import type { WidgetThemeSnapshot } from "../../../widgets/theme";
+import { selectionOptionsFromPointerEvent, type SelectionChangeOptions } from "../selection";
 
 export type GridItem = {
   id: string;
@@ -47,7 +48,7 @@ function DraggableItem({ item, metrics, onMove, scrollEl, zoom, onDelete, onDupl
   onOpenModify?: (id: string) => void;
   onDropAsset?: (id: string, hash: string) => void;
   selected?: boolean;
-  onSelect?: (id: string) => void;
+  onSelect?: (id: string | null, opts?: SelectionChangeOptions) => void;
   theme?: Theme | null;
   themeSnapshot?: WidgetThemeSnapshot | null;
 }) {
@@ -74,14 +75,18 @@ function DraggableItem({ item, metrics, onMove, scrollEl, zoom, onDelete, onDupl
   function onPointerDown(e: React.PointerEvent<HTMLDivElement>) {
     // Only left click initiates drag
     if (e.button !== 0) return;
-    // Do not start drag when pinned or locked
-    if (item.pinned || item.locked) return;
     // If the interaction started on a control marked as no-drag, skip drag start
     const t = e.target as HTMLElement | null;
     if (t && t.closest('[data-nodrag="true"]')) return;
     e.preventDefault();
-    // Select this item on pointer interaction
-    onSelect?.(item.id);
+    const selectionIntent = selectionOptionsFromPointerEvent(e);
+    if (selectionIntent) {
+      onSelect?.(item.id, selectionIntent);
+    } else {
+      onSelect?.(item.id);
+    }
+    // Do not start drag when pinned or locked
+    if (item.pinned || item.locked) return;
     const target = e.currentTarget;
     target.setPointerCapture(e.pointerId);
     startRef.current = { x0: item.x, y0: item.y, sx: e.clientX, sy: e.clientY };
@@ -173,12 +178,15 @@ function DraggableItem({ item, metrics, onMove, scrollEl, zoom, onDelete, onDupl
     setDragging(true);
   }
 
-  const outlineClass = selected ? 'ring-2 ring-black border-black' : 'hover:ring-2 hover:ring-black';
+  const outlineClass = selected
+    ? 'ring-2 ring-[color:var(--app-accent)] border-[color:var(--app-accent)] shadow-[0_0_0_3px_rgba(0,0,0,0.12)]'
+    : 'border-[color:var(--border)] hover:ring-2 hover:ring-[color:var(--app-accent)]/45';
   const toolbarVisible = !!selected || hovered;
   return (
     <div className="absolute select-none group" style={{ left: pxLeft, top: pxTop, width: pxW, height: pxH, zIndex: dragging ? 5000 : (typeof item.z === 'number' ? 100 + item.z : undefined) }} data-widget-id={item.id} data-testid="widget-item">
       <div
-        className={`h-full rounded-md border-2 bg-transparent ${outlineClass}`}
+        className={`h-full rounded-md border-2 bg-transparent transition ring-offset-2 ring-offset-white/40 ${outlineClass}`}
+        data-selected={selected ? 'true' : 'false'}
         role="button"
         aria-label={`Widget: ${item.title || item.type || 'item'}`}
         tabIndex={0}

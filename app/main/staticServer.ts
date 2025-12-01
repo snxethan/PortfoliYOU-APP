@@ -42,7 +42,7 @@ function chooseLanAddress() {
     return '127.0.0.1';
 }
 
-export async function startStaticServer(dir: string, host = '0.0.0.0') {
+export async function startStaticServer(dir: string, host = '0.0.0.0', port = 0) {
     if (!dir) throw new Error('No directory');
     const stat = await fs.stat(dir).catch(() => null);
     if (!stat || !stat.isDirectory()) throw new Error('Not a directory');
@@ -118,7 +118,7 @@ export async function startStaticServer(dir: string, host = '0.0.0.0') {
             reject(err);
         };
         server!.on('error', onError);
-        server!.listen(0, host, () => {
+        server!.listen(port, host, () => {
             // Remove the error listener now that listen succeeded
             try { server!.removeListener('error', onError); } catch { /* ignore */ }
             const addr = server!.address();

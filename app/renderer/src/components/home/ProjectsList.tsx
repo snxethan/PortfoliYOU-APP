@@ -1,5 +1,5 @@
 import React from "react";
-import { Cloud, FolderOpen, FolderUp, Settings2, Trash2, UploadCloud, Wrench } from "lucide-react";
+import { Cloud, FolderOpen, FolderUp, Settings, Trash2, UploadCloud, Wrench } from "lucide-react";
 
 export type LocalProject = {
     id: string;
@@ -81,7 +81,7 @@ export default function ProjectsList({
                                             title="Portfolio settings"
                                             onClick={(e) => { e.stopPropagation(); onOpenSettings(p.id, userSignedIn ? 'portfolio' : undefined); }}
                                         >
-                                            <Settings2 size={14} />
+                                            <Settings size={14} />
                                         </button>
                                         <button className="btn btn-ghost btn-xxs text-red-400 border border-red-500/40 hover:bg-red-500/10" title="Delete" onClick={async (e) => {
                                             e.stopPropagation();

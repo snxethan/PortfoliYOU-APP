@@ -454,7 +454,7 @@ ipcMain.handle("py:renameFile", async (_event, opts?: { fromPath: string; toPath
 });
 
 // IPC: Build static site
-ipcMain.handle('py:buildStaticSite', async (_event, opts?: { project: unknown; assets?: Record<string, string>; outputDir?: string; useTempOutput?: boolean }) => {
+ipcMain.handle('py:buildStaticSite', async (_event, opts?: { project: unknown; assets?: Record<string, string>; outputDir?: string; useTempOutput?: boolean; globalCss?: { tailwind?: string }; themeCss?: string }) => {
   try {
     const { buildStaticSite } = await import('./staticCompiler');
     // cast to any to avoid compile-time type mismatches across the IPC boundary
@@ -466,11 +466,14 @@ ipcMain.handle('py:buildStaticSite', async (_event, opts?: { project: unknown; a
 });
 
 // IPC: Start a local static server to preview a built `dist-site` folder
-ipcMain.handle('py:preview:startServer', async (_event, opts?: { distDir?: string }) => {
+ipcMain.handle('py:preview:startServer', async (_event, opts?: { distDir?: string; host?: string; port?: number }) => {
   try {
     const distDir = opts?.distDir || '';
     if (!distDir) return { ok: false, error: 'No distDir' };
-    const res = await startStaticServer(distDir);
+    const host = opts?.host || '0.0.0.0';
+    // If caller passes 0 or undefined, let startStaticServer pick an ephemeral port
+    const port = typeof opts?.port === 'number' ? Math.max(0, Math.floor(opts!.port)) : 0;
+    const res = await startStaticServer(distDir, host, port);
     return { ok: true, localUrl: res.localUrl, lanUrl: res.lanUrl, port: res.port };
   } catch (e) {
     return { ok: false, error: String(e) };
@@ -796,5 +799,18 @@ ipcMain.handle("py:stopFlashFrame", async () => {
     return { ok: true };
   } catch (e) {
     return { ok: false, error: String(e) } as const;
+  }
+});
+
+// IPC: Open a URL in the system default browser
+ipcMain.handle('py:openExternal', async (_event, opts?: { url?: string }) => {
+  try {
+    const url = opts?.url || '';
+    if (!url) return { ok: false, error: 'No URL' };
+    // Use shell.openExternal to open in user's default browser
+    await shell.openExternal(url);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: String(e) };
   }
 });

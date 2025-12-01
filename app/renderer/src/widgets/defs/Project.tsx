@@ -2,7 +2,7 @@ import React, { useId } from 'react';
 import { z } from 'zod';
 
 import type { WidgetDefinition } from '../types';
-import { normalizeExternalLinkUrl } from '../utils/linkUrl';
+import { normalizeExternalLinkUrl } from '../../../../shared/widgets/linkUrl';
 
 type HeadingLevel = 'h2' | 'h3';
 type FontChoice = 'system' | 'serif' | 'mono';
@@ -19,6 +19,7 @@ type ProjectWidgetProps = {
     image?: string;
     imageAlt?: string;
     linkLabel?: string;
+    backgroundColor?: string;
 };
 
 function ProjectView(props: ProjectWidgetProps) {
@@ -33,13 +34,18 @@ function ProjectView(props: ProjectWidgetProps) {
     const descriptionId = props.ariaDescription ? `${id}-desc` : undefined;
     const imageAlt = props.imageAlt ?? props.title;
 
+    const cardBackground = typeof props.backgroundColor === 'string' && props.backgroundColor.trim().length > 0 ? props.backgroundColor.trim() : undefined;
     const content = (
         <article
             className="p-3 rounded border border-[color:var(--border)] bg-[color:var(--bg)] space-y-2"
             aria-label={props.ariaLabel}
             aria-labelledby={props.ariaLabel ? undefined : id}
             aria-describedby={descriptionId}
-            style={{ fontFamily: ff, fontSize: props.fontSize ? `${props.fontSize}px` : undefined }}
+            style={{
+                fontFamily: ff,
+                fontSize: props.fontSize ? `${props.fontSize}px` : undefined,
+                background: cardBackground,
+            }}
         >
             {imageSrc && (
                 <div className="w-full overflow-hidden rounded-md border border-[color:var(--border)] bg-[color:var(--surface)]">
@@ -93,6 +99,7 @@ const def: WidgetDefinition<ProjectWidgetProps> = {
         ariaDescription: z.string().optional(),
         font: z.enum(['system', 'serif', 'mono']).optional(),
         fontSize: z.number().min(8).max(128).optional(),
+        backgroundColor: z.string().max(120).optional(),
         link: z
             .string()
             .max(2048, 'Link is too long')
