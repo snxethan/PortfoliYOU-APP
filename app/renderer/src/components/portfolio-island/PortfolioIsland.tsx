@@ -8,7 +8,7 @@ import { usePortfolioSettings } from "../../providers/PortfolioSettingsProvider"
 import { useNotifications } from "../../providers/NotificationsProvider";
 import { getPreviewState } from "../../lib/previewInterop";
 
-export default function PortfolioIsland(): JSX.Element | null {
+export default function PortfolioIsland(): React.ReactElement | null {
   const { user } = useAuth();
   const { selectedProject, selectedProjectId, saving, lastSavedAt, saveProject, clearSelection, autosaveEnabled, setAutosaveEnabled } = useProjects();
   const { notifications, add: notify } = useNotifications();
@@ -33,7 +33,8 @@ export default function PortfolioIsland(): JSX.Element | null {
   // but visually hide it to avoid changing hook order during quick selection changes.
   const shouldVisuallyHide = location.pathname === '/' && !hasSelection;
   // When pinned, keep the island positioned beneath the fixed FrameBar (36px / top-9)
-  const containerClass = (pinned ? "sticky top-9 z-50 " : "") + "px-4 pt-4";
+  const containerClass = `${pinned ? 'sticky top-9' : 'relative'} px-4 pt-4`;
+  const containerStyle = useMemo(() => ({ zIndex: pinned ? 16000 : 15000 }), [pinned]);
   // Match quick-settings/editor styles: header labels use 10px, content/actions use 12px
   const labelClass = "text-[10px] uppercase tracking-wide text-[color:var(--fg-muted)]";
   const segmentClass = "flex items-center gap-2 rounded-full border border-[color:var(--border)] bg-[color:var(--surface)]/60 px-3 py-1.5 shadow-sm flex-wrap text-[12px]";
@@ -80,6 +81,10 @@ export default function PortfolioIsland(): JSX.Element | null {
   }, [selectedProjectCloudId]);
 
   const pct = Math.round(opacity * 100);
+  const sliderProgress = Math.max(0, Math.min(100, Math.round(((pct - 25) / 75) * 100)));
+  const sliderStyle = useMemo(() => {
+    return ({ ['--slider-progress' as unknown as string]: `${sliderProgress}%` } as unknown) as React.CSSProperties;
+  }, [sliderProgress]);
   const islandStyle = useMemo(() => {
     // CSS custom properties aren't part of React.CSSProperties' typed keys.
     // Cast via unknown to satisfy TypeScript while keeping values typed.
@@ -116,7 +121,10 @@ export default function PortfolioIsland(): JSX.Element | null {
   }, [location.pathname, highlightNotifications]);
 
   return (
-    <div className={`portfolio-island ${containerClass} ${shouldVisuallyHide ? 'opacity-0 pointer-events-none h-0 overflow-hidden' : ''}`}>
+    <div
+      className={`portfolio-island ${containerClass} ${shouldVisuallyHide ? 'opacity-0 pointer-events-none h-0 overflow-hidden' : ''}`}
+      style={containerStyle}
+    >
       <div
         className={`surface relative border border-[color:var(--border)] rounded-2xl px-3 py-3 shadow-lg bg-[color:var(--surface)]/80 transition ${hasSelection ? 'ring-2 ring-[color:var(--accent)]/50 ring-offset-2 ring-offset-[color:var(--bg,transparent)]' : ''}`}
         style={islandStyle}
@@ -272,30 +280,23 @@ export default function PortfolioIsland(): JSX.Element | null {
               {pinned && (
                 <div className="flex items-center gap-2 px-2">
                   <label className="text-[10px] text-[color:var(--fg-muted)]">Opacity</label>
-                  <div
-                    className="island-opacity-slider-shell w-28"
-                    style={{ ['--island-slider-fill' as unknown as string]: `${pct}%` } as React.CSSProperties}
-                  >
-                    <div className="island-opacity-slider-track">
-                      <div className="island-opacity-slider-fill" />
-                    </div>
-                    <input
-                      aria-label="Portfolio island opacity"
-                      title="Adjust portfolio island opacity"
-                      type="range"
-                      min={25}
-                      max={100}
-                      step={5}
-                      value={pct}
-                      className="island-opacity-slider"
-                      onChange={(e) => {
-                        const raw = Number((e.target as HTMLInputElement).value);
-                        const next = Math.min(100, Math.max(25, raw)) / 100;
-                        setOpacity(next);
-                        try { localStorage.setItem('py_island_opacity', String(next)); } catch { /* ignore */ }
-                      }}
-                    />
-                  </div>
+                  <input
+                    aria-label="Portfolio island opacity"
+                    title="Adjust portfolio island opacity"
+                    type="range"
+                    min={25}
+                    max={100}
+                    step={5}
+                    value={pct}
+                    className="accent-range w-32"
+                    style={sliderStyle}
+                    onChange={(e) => {
+                      const raw = Number((e.target as HTMLInputElement).value);
+                      const next = Math.min(100, Math.max(25, raw)) / 100;
+                      setOpacity(next);
+                      try { localStorage.setItem('py_island_opacity', String(next)); } catch { /* ignore */ }
+                    }}
+                  />
                   <div className="text-[11px] text-[color:var(--fg-muted)]">{Math.round(opacity * 100)}%</div>
                 </div>
               )}

@@ -117,6 +117,8 @@ export default function EditorPage() {
   const lastPersistedSignatureRef = useRef<string | null>(null);
   const snapshotSignature = useCallback((list: GridItem[]) => JSON.stringify(serializeGridItems(list)), []);
   const suppressHydrateRef = useRef(false);
+  const dragInProgressRef = useRef(false);
+  const autoPersistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const replaceItems = useCallback((next: GridItem[]) => {
     itemsRef.current = next;
     setItems(next);
@@ -139,6 +141,19 @@ export default function EditorPage() {
       suppressHydrateRef.current = false;
     }
   }, [selectedProject?.id, currentPageId, setPageItems]);
+  const cancelAutoPersist = useCallback(() => {
+    if (autoPersistTimerRef.current !== null) {
+      clearTimeout(autoPersistTimerRef.current);
+      autoPersistTimerRef.current = null;
+    }
+  }, []);
+  const scheduleAutoPersist = useCallback(() => {
+    cancelAutoPersist();
+    autoPersistTimerRef.current = setTimeout(() => {
+      autoPersistTimerRef.current = null;
+      persistItems();
+    }, 600);
+  }, [cancelAutoPersist, persistItems]);
   useEffect(() => {
     itemsRef.current = items;
   }, [items]);
@@ -150,6 +165,16 @@ export default function EditorPage() {
       persistItems();
     };
   }, [persistItems]);
+  useEffect(() => {
+    if (!selectedProject || !currentPageId) {
+      cancelAutoPersist();
+      return;
+    }
+    if (dragInProgressRef.current) return;
+    scheduleAutoPersist();
+    return () => { cancelAutoPersist(); };
+  }, [items, selectedProject?.id, currentPageId, scheduleAutoPersist, cancelAutoPersist]);
+  useEffect(() => () => { cancelAutoPersist(); }, [cancelAutoPersist]);
 
   const getPageItemsRef = useRef(getPageItems);
   useEffect(() => { getPageItemsRef.current = getPageItems; }, [getPageItems]);
@@ -249,8 +274,9 @@ export default function EditorPage() {
   const canUndo = history.length > 0;
   const canRedo = redoStack.length > 0;
   const handleItemMoveStart = useCallback(() => {
-    // reserved for future hooks (e.g., showing drag UI state)
-  }, []);
+    dragInProgressRef.current = true;
+    cancelAutoPersist();
+  }, [cancelAutoPersist]);
   const handleItemMoveEnd = useCallback((prevItem: GridItem, nextItem: GridItem) => {
     if (
       prevItem.x === nextItem.x &&
@@ -258,6 +284,7 @@ export default function EditorPage() {
       prevItem.w === nextItem.w &&
       prevItem.h === nextItem.h
     ) {
+      dragInProgressRef.current = false;
       return;
     }
     const label = `Move ${nextItem.title}`;
@@ -272,6 +299,7 @@ export default function EditorPage() {
     });
     setRedoStack([]);
     persistItems();
+    dragInProgressRef.current = false;
   }, [persistItems, setHistory, setRedoStack]);
 
   // Standalone popup preview state
@@ -680,23 +708,43 @@ export default function EditorPage() {
   const [canvasHeightPx, setCanvasHeightPx] = useState<number | null>(null);
   useLayoutEffect(() => {
     function measure() {
-      const el = canvasWrapperRef.current;
-      if (!el) { setCanvasHeightPx(null); return; }
-      const h = Math.round(el.getBoundingClientRect().height);
-      setCanvasHeightPx(h);
+      const wrapper = canvasWrapperRef.current;
+      if (!wrapper) { setCanvasHeightPx(null); return; }
+      const child = wrapper.firstElementChild as HTMLElement | null;
+      const wrapperRect = wrapper.getBoundingClientRect();
+      const childRect = child?.getBoundingClientRect();
+      const scrollHeight = wrapper.scrollHeight;
+      const candidateHeights = [wrapperRect.height, scrollHeight];
+      if (typeof childRect?.height === 'number') {
+        candidateHeights.push(childRect.height);
+      }
+      const measured = Math.max(...candidateHeights);
+      setCanvasHeightPx(Number.isFinite(measured) && measured > 0 ? Math.round(measured) : null);
     }
     measure();
+    const roTargets: Element[] = [];
     const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(() => measure()) : null;
-    const target = canvasWrapperRef.current;
-    if (ro && target) ro.observe(target);
+    const wrapper = canvasWrapperRef.current;
+    if (ro && wrapper) {
+      ro.observe(wrapper);
+      roTargets.push(wrapper);
+      const child = wrapper.firstElementChild as HTMLElement | null;
+      if (child) {
+        ro.observe(child);
+        roTargets.push(child);
+      }
+    }
     window.addEventListener('resize', measure);
     return () => {
+      window.removeEventListener('resize', measure);
       if (ro) {
+        roTargets.forEach((node) => {
+          try { ro.unobserve(node); } catch { /* ignore */ }
+        });
         try { ro.disconnect(); } catch { /* ignore */ }
       }
-      window.removeEventListener('resize', measure);
     };
-  }, [pageWidth, pageHeight, zoom, paletteWidth, paletteCollapsed]);
+  }, [pageWidth, pageHeight, zoom, paletteWidth, paletteCollapsed, previewMode, heightMode]);
   const palettePanelStyle: CSSProperties | undefined = canvasHeightPx ? { height: `${canvasHeightPx}px` } : undefined;
 
   // Modify panel
@@ -1345,10 +1393,10 @@ export default function EditorPage() {
       </section>
 
       {/* Theme subsection under Portfolio Canvas */}
-      <div className="mt-4 rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)]/90 p-4">
+      <div className="mt-4 relative surface rounded-2xl border border-[color:var(--border)] shadow-lg bg-[color:var(--surface)]/80 p-4 overflow-hidden">
         <div className="w-full">
           <div>
-            <p className="text-xs uppercase tracking-wide text-[color:var(--fg-muted)]">Theme</p>
+            <p className="section-title">Theme</p>
             <p className="text-sm text-[color:var(--fg-muted)]">Current theme applied to the canvas and widgets.</p>
           </div>
 

@@ -528,11 +528,11 @@ export default function DeployPage() {
 					</div>
 
 					{/* 2) Local Preview (quickstart style) */}
-					<div className="surface border border-[color:var(--border)] rounded-2xl p-6 shadow-lg shadow-black/20">
+					<div className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)]/90 p-4">
 						<p className="text-xs uppercase tracking-wide text-[color:var(--fg-muted)]">Local Preview</p>
 						<p className="text-sm text-[color:var(--fg-muted)]">Start a local static server to preview your compiled site on this machine or your LAN.</p>
-						<div className="mt-4">
-							<div className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)]/90 p-4">
+						<div className="mt-3">
+							<div className="rounded-xl border border-[color:var(--border)] bg-[color:var(--surface)]/80 p-4">
 								<div className="max-w-5xl mx-auto">
 									{!previewRunning ? (
 										<div className="flex flex-col sm:flex-row items-center justify-center gap-3 text-center">

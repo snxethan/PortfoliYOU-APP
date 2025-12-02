@@ -579,89 +579,67 @@
 	background: color-mix(in oklab, var(--surface) calc(var(--island-opacity, 1) * 100%), transparent) !important;
 }
 
-/* Accent-styled range slider for PortfolioIsland opacity control */
-.island-opacity-slider-shell {
-	position: relative;
-}
-
-.island-opacity-slider-track {
-	position: absolute;
-	left: 0;
-	right: 0;
-	top: 50%;
-	height: 6px;
-	transform: translateY(-50%);
-	border-radius: 999px;
-	background: color-mix(in oklab, var(--surface) 85%, transparent);
-	pointer-events: none;
-}
-
-.island-opacity-slider-fill {
-	height: 100%;
-	border-radius: inherit;
-	background: var(--accent);
-	left: 0;
-	right: calc(100% - var(--island-slider-fill, 0%));
-	transition: right 120ms ease-out;
-}
-
-.island-opacity-slider {
+/* Basic accent range slider (used for Portfolio Island opacity control) */
+.accent-range {
+	--slider-progress: 50%;
+	--slider-track-bg: color-mix(in oklab, var(--surface) 85%, transparent);
 	-webkit-appearance: none;
 	appearance: none;
-	background: transparent;
-	height: 6px;
 	width: 100%;
-	position: relative;
-	z-index: 1;
-}
-
-.island-opacity-slider:focus {
+	height: 6px;
+	border-radius: 999px;
+	background: linear-gradient(90deg,
+			var(--accent) 0%,
+			var(--accent) var(--slider-progress),
+			var(--slider-track-bg) var(--slider-progress),
+			var(--slider-track-bg) 100%);
+	background-repeat: no-repeat;
+	background-size: 100% 6px;
+	background-position: center;
 	outline: none;
+	padding: 0;
+	cursor: pointer;
 }
 
-.island-opacity-slider::-webkit-slider-runnable-track {
+.accent-range:focus-visible {
+	box-shadow: 0 0 0 2px color-mix(in oklab, var(--accent) 45%, transparent);
+}
+
+.accent-range::-webkit-slider-runnable-track {
 	height: 6px;
-	/* make the native track transparent so the element background gradient shows the filled portion */
+	border-radius: 999px;
 	background: transparent;
-	border-radius: 999px;
 }
 
-/* Firefox: use the progress pseudo-element to color the filled portion */
-.island-opacity-slider::-moz-range-progress {
-	height: 6px;
-	background: var(--accent);
-	border-radius: 999px;
-}
-
-.island-opacity-slider::-moz-range-track {
-	height: 6px;
-	background: color-mix(in oklab, var(--surface) 85%, transparent);
-	border-radius: 999px;
-}
-
-.island-opacity-slider::-webkit-slider-thumb {
+.accent-range::-webkit-slider-thumb {
 	-webkit-appearance: none;
 	appearance: none;
-	width: 14px;
-	height: 14px;
-	border-radius: 999px;
+	width: 16px;
+	height: 16px;
+	border-radius: 50%;
 	background: var(--accent);
-	/* use a solid surface color for the thumb border to avoid a visible seam */
 	border: 2px solid var(--surface);
-	margin-top: -4px;
-	/* center the thumb on the track */
+	box-shadow: 0 2px 4px rgba(0, 0, 0, 0.25);
+	margin-top: -5px;
 }
 
-.island-opacity-slider::-moz-range-track {
+.accent-range::-moz-range-track {
 	height: 6px;
-	background: color-mix(in oklab, var(--surface) 85%, transparent);
 	border-radius: 999px;
+	background: var(--slider-track-bg);
 }
 
-.island-opacity-slider::-moz-range-thumb {
-	width: 14px;
-	height: 14px;
+.accent-range::-moz-range-progress {
+	height: 6px;
 	border-radius: 999px;
 	background: var(--accent);
+}
+
+.accent-range::-moz-range-thumb {
+	width: 16px;
+	height: 16px;
+	border-radius: 50%;
+	background: var(--accent);
 	border: 2px solid var(--surface);
+	box-shadow: 0 2px 4px rgba(0, 0, 0, 0.25);
 }

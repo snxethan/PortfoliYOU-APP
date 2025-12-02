@@ -160,7 +160,7 @@ export default function HomePage() {
 			{/* Centered CTA under title is now shown inside Dashboard; no extra CTA block here */}
 			{/* Notification center area on Home for managing/dismissing persistent notifications */}
 			{notificationsOpen && (
-				<div className={`surface border border-[color:var(--border)] rounded-2xl p-4 ${notificationsPulse ? 'highlight-pulse' : ''}`}>
+				<div className={`relative surface border border-[color:var(--border)] rounded-2xl p-4 shadow-lg bg-[color:var(--surface)]/85 ${notificationsPulse ? 'highlight-pulse' : ''}`}>
 					<NotificationsCenter
 						notifications={notifications}
 						onDismiss={dismiss}

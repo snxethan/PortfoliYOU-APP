@@ -14,7 +14,7 @@ const schema: PropSchema = {
 export const TextWidgetDef: WidgetDefinition<{ text: string; align?: 'left' | 'center' | 'right'; variant?: 'body' | 'h2' | 'h3' }> = {
     type: 'text',
     label: 'Text Block',
-        defaultProps: { text: 'Edit me', align: 'left', variant: 'body' },
+    defaultProps: { text: 'Edit me', align: 'left', variant: 'body' },
     version: 1,
     grid: { w: 4, h: 3 },
     schema,
