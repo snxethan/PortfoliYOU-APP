@@ -26,7 +26,7 @@ export const auth = getAuth(app);
 setPersistence(auth, browserLocalPersistence);
 
 export const db = getFirestore(app);
-enableIndexedDbPersistence(db).catch(() => {});
+enableIndexedDbPersistence(db).catch(() => { });
 
 // Resolve bucket URL with an optional env override and normalize common mistakes
 function resolveBucketUrl(): string {
@@ -48,14 +48,9 @@ function resolveBucketUrl(): string {
     // convert it to a bucket ID. Prefer projectId mapping when available.
     const projId = (app.options as { projectId?: string }).projectId;
     const lower = bucket.toLowerCase();
-    if (/^[a-z0-9.-]+\.firebasestorage\.app$/.test(lower)) {
-        if (projId && lower === `${projId.toLowerCase()}.firebasestorage.app`) {
-            bucket = `${projId}.appspot.com`;
-        } else {
-            const label = lower.replace(/\.firebasestorage\.app$/, "");
-            bucket = `${label}.appspot.com`;
-        }
-    }
+    // Buckets can be named like "<project>.appspot.com" (legacy default) or any custom string,
+    // including ones that end with `.firebasestorage.app`. Treat the provided host as the bucket
+    // identifier instead of forcing an appspot suffix so custom/modern buckets work out of the box.
 
     // If a full https URL was provided, extract the bucket from /v0/b/<bucket>/o or host
     if (/^https?:\/\//i.test(bucket)) {

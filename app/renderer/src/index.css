@@ -465,25 +465,31 @@
 }
 
 /* Ensure close buttons inside sticky header remain visible */
+:root {
+	--frame-bar-h: 36px;
+}
+
 .modal-header-sticky .btn {
 	z-index: 40;
 }
 
 /* Window frame draggable region + controls */
+
 .window-frame {
 	-webkit-app-region: drag;
 	display: flex;
 	align-items: center;
-	height: 36px;
-	gap: 8px;
-	padding: 0 8px;
-	border-bottom: 1px solid color-mix(in oklab, var(--border) 90%, transparent);
-	background: color-mix(in oklab, var(--surface) 94%, transparent);
 	position: fixed;
 	top: 0;
 	left: 0;
 	right: 0;
-	z-index: 100000;
+	height: var(--frame-bar-h);
+	gap: 8px;
+	padding: 0 12px;
+	border-bottom: 1px solid color-mix(in oklab, var(--border) 90%, transparent);
+	background: color-mix(in oklab, var(--surface) 94%, transparent);
+	z-index: 200000;
+	box-sizing: border-box;
 }
 
 .window-frame__left {
@@ -493,24 +499,23 @@
 	gap: 8px;
 }
 
+
 .window-frame__center {
 	flex: 1;
 	pointer-events: none;
-	/* let dragging work across center */
+	padding-right: 132px;
 }
 
 .window-frame__controls {
 	-webkit-app-region: no-drag;
 	display: flex;
-	gap: 6px;
-	align-items: center;
-	/* pin to the viewport corner so the controls reach the absolute top-right */
-	position: fixed;
-	right: -6px;
-	top: -6px;
-	padding: 0;
-	margin: 0;
-	z-index: 100001;
+	position: absolute;
+	top: 0;
+	right: 0;
+	bottom: 0;
+	gap: 0;
+	align-items: stretch;
+	overflow: hidden;
 }
 
 .window-control {
@@ -518,13 +523,20 @@
 	align-items: center;
 	justify-content: center;
 	line-height: 0;
-	/* slightly larger hit area so corner clicks hit the control */
-	width: 40px;
-	height: 40px;
-	border-radius: 6px;
+	/* closely match Windows chrome hit area while staying inside renderer bounds */
+	width: 44px;
+	height: 100%;
+	border-radius: 0;
 	border: 1px solid transparent;
 	background: transparent;
 	color: var(--fg);
+	box-sizing: border-box;
+	margin: 0;
+}
+
+.window-control--ghost {
+	-webkit-app-region: no-drag;
+	padding: 0 6px;
 }
 
 .window-control svg {
@@ -540,7 +552,7 @@
 /* Slight visual nudge for the close icon to sit visually centered
    relative to the other icons. This compensates for differing glyph shapes. */
 .window-control--close svg {
-	/* no visual nudge here — keep icons visually consistent */
+	/* keep the icon centered now that the hit area is flush with the edge */
 	transform: none;
 }
 
@@ -566,6 +578,8 @@
 
 .window-control--close {
 	color: var(--fg);
+	border-top-right-radius: 0;
+	border-bottom-right-radius: 0;
 }
 
 .window-control--close:hover {

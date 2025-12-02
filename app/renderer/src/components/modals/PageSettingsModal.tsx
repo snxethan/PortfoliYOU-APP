@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { createPortal } from 'react-dom';
-import { X, RotateCcw, ChevronDown, ChevronRight } from 'lucide-react';
+import { X, RotateCcw, ChevronDown, ChevronRight, Trash2 } from 'lucide-react';
+import { useScrollLock } from "../../hooks/useScrollLock";
 
 export default function PageSettingsModal({
     title = "Page settings",
@@ -21,6 +22,8 @@ export default function PageSettingsModal({
     onSave: (opts: { name: string; starter: boolean; backgroundColor: string | null }) => void;
     onDelete: () => void;
 }) {
+    useScrollLock(true);
+
     const [name, setName] = useState(initialName || "");
     const [starter, setStarter] = useState<boolean>(Boolean(initialStarter));
     const [background, setBackground] = useState<string>((initialBackgroundColor || '').trim());
@@ -147,18 +150,19 @@ export default function PageSettingsModal({
                             themeBackground={themeBackground}
                         />
 
-                        <div className="flex justify-end items-center gap-2">
+                        <div className="flex justify-between items-center gap-2 mt-4">
                             <button
                                 type="button"
-                                className="btn btn-error btn-xs"
+                                className="btn btn-ghost btn-xxs text-red-400 border border-red-500/40 hover:bg-red-500/10"
                                 title="Delete page"
-                                aria-label="Delete page"
                                 onClick={() => { if (confirm('Delete this page? This cannot be undone.')) onDelete(); }}
                             >
-                                {/* Trash icon-only button */}
-                                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><path d="M10 11v6"></path><path d="M14 11v6"></path><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"></path></svg>
+                                <Trash2 size={14} />
+                                <span>Delete page</span>
                             </button>
-                            <button type="submit" className="btn btn-accent btn-xs" disabled={!name.trim()}>Save</button>
+                            <button type="submit" className="btn btn-outline btn-xs" disabled={!name.trim()}>
+                                Save changes
+                            </button>
                         </div>
                     </form>
                 </div>

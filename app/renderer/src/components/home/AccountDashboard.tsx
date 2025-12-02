@@ -33,9 +33,9 @@ export default function AccountDashboard({
                     </div>
                 </div>
                 <div className="flex items-center gap-2">
-                    <button className="btn btn-sm shadow-sm" onClick={onOpenSettings} title="Manage account">
+                    <button className="btn btn-sm shadow-sm" onClick={onOpenSettings} title="Open account settings">
                         <SettingsIcon size={14} />
-                        <span className="ml-2">Manage</span>
+                        <span className="ml-2">Account Settings</span>
                     </button>
                 </div>
             </div>

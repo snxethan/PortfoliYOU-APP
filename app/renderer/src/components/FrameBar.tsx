@@ -33,6 +33,15 @@ function IconFullscreen() {
     );
 }
 
+function IconDevtools() {
+    return (
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="3" />
+            <path d="M19.4 15a1 1 0 0 1 .2 1.1l-1.2 2.1a1 1 0 0 1-1.2.5l-2.2-.7a6 6 0 0 1-2.6 1.5l-.3 2.3a1 1 0 0 1-1 .9h-2.4a1 1 0 0 1-1-.9l-.3-2.3a6 6 0 0 1-2.6-1.5l-2.2.7a1 1 0 0 1-1.2-.5L4.4 16a1 1 0 0 1 .2-1.1l1.9-1.5a6.2 6.2 0 0 1 0-2.8L4.6 9a1 1 0 0 1-.2-1.1l1.2-2.1a1 1 0 0 1 1.2-.5l2.2.7a6 6 0 0 1 2.6-1.5l.3-2.3a1 1 0 0 1 1-.9h2.4a1 1 0 0 1 1 .9l.3 2.3a6 6 0 0 1 2.6 1.5l2.2-.7a1 1 0 0 1 1.2.5L19.6 8a1 1 0 0 1-.2 1.1L17.5 10.6a6.2 6.2 0 0 1 0 2.8Z" />
+        </svg>
+    );
+}
+
 export default function FrameBar() {
     const [maximized, setMaximized] = useState(false);
     const [dragToTop, setDragToTop] = useState(false);
@@ -49,8 +58,8 @@ export default function FrameBar() {
         // subscribe to main window events
         const unsubMax = window.api?.onWindowEvent?.('window-maximize', () => { setMaximized(true); setDragToTop(false); });
         const unsubUnmax = window.api?.onWindowEvent?.('window-unmaximize', () => { setMaximized(false); setDragToTop(false); });
-        const unsubMove = window.api?.onWindowEvent?.('window-move-top', (d) => setDragToTop(Boolean(d?.atTop)));
-        const unsubState = window.api?.onWindowEvent?.('window-maximize-state', (d) => { if (typeof d?.maximized === 'boolean') { setMaximized(Boolean(d.maximized)); if (d.maximized) setDragToTop(false); } });
+        const unsubMove = window.api?.onWindowEvent?.('window-move-top', (d: { atTop?: boolean }) => setDragToTop(Boolean(d?.atTop)));
+        const unsubState = window.api?.onWindowEvent?.('window-maximize-state', (d: { maximized?: boolean }) => { if (typeof d?.maximized === 'boolean') { setMaximized(Boolean(d.maximized)); if (d.maximized) setDragToTop(false); } });
 
         return () => {
             try { unsubMax?.(); } catch { /* ignore */ }
@@ -72,10 +81,24 @@ export default function FrameBar() {
     async function onClose() {
         try { await window.api?.windowClose?.(); } catch { /* ignore */ }
     }
+    async function onToggleDevtools() {
+        try { await window.api?.toggleDevTools?.(); } catch { /* ignore */ }
+    }
 
     return (
         <div className="window-frame">
-            <div className="window-frame__left" />
+            <div className="window-frame__left flex items-center pl-1" style={{ pointerEvents: 'auto' }}>
+                <button
+                    type="button"
+                    className="window-control window-control--ghost"
+                    title="Toggle DevTools"
+                    onClick={onToggleDevtools}
+                    onMouseDown={(e) => e.stopPropagation()}
+                    aria-label="Toggle DevTools"
+                >
+                    <IconDevtools />
+                </button>
+            </div>
             <div className="window-frame__center flex items-center justify-center gap-2" aria-hidden={false}>
                 <div className="relative flex items-center gap-2">
                     <img

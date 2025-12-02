@@ -1,0 +1,38 @@
+[
+  {
+    "origin": [
+      "http://localhost:5173",
+      "http://127.0.0.1:5173"
+    ],
+    "method": [
+      "GET",
+      "HEAD",
+      "OPTIONS",
+      "PUT",
+      "POST",
+      "DELETE"
+    ],
+    "responseHeader": [
+      "Authorization",
+      "Content-Type",
+      "x-goog-resumable"
+    ],
+    "maxAgeSeconds": 3600
+  },
+  {
+    "origin": [
+      "https://portfoli-you.web.app",
+      "https://portfoli-you.firebaseapp.com"
+    ],
+    "method": [
+      "GET",
+      "HEAD",
+      "OPTIONS"
+    ],
+    "responseHeader": [
+      "Authorization",
+      "Content-Type"
+    ],
+    "maxAgeSeconds": 3600
+  }
+]

@@ -12,6 +12,7 @@ import { ALLOWED_HTTP_SCHEME_LABEL } from "../../../../../shared/widgets/linkUrl
 import type { GridItem } from "../canvas/DraggableItem";
 
 import LinkPreviewPanel from "./LinkPreviewPanel";
+import { useScrollLock } from "../../../hooks/useScrollLock";
 
 type CarouselEditorItem = {
     id: string;
@@ -208,6 +209,7 @@ export default function ModifyWidgetModal({
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     onApplyProps: (props: any) => void;
 }) {
+    useScrollLock(true);
     const { selectedProject } = useProjects();
     const { add: notify } = useNotifications();
     const widgetName = item.title || item.type || 'Widget';
@@ -789,6 +791,14 @@ export default function ModifyWidgetModal({
 
     const pinDisabled = locked;
 
+    const handlePrimaryApply = () => {
+        if (zodSchema) {
+            applyForm();
+            return;
+        }
+        applyProps();
+    };
+
     return (
         <div
             className="fixed inset-0 z-[20000] flex items-center justify-center bg-black/50 backdrop-blur-sm"
@@ -798,11 +808,11 @@ export default function ModifyWidgetModal({
             tabIndex={-1}
         >
             <div
-                className="surface w-full max-w-4xl border border-[color:var(--border)] rounded-2xl max-h-[85vh] overflow-auto scrollable scrollable-container"
+                className="surface w-full max-w-4xl border border-[color:var(--border)] rounded-2xl max-h-[85vh] overflow-hidden flex flex-col"
                 onClick={(e) => e.stopPropagation()}
                 onKeyDown={handleEnterSubmitAnywhere}
             >
-                <div className="flex items-center justify-between px-4 py-3 border-b border-[color:var(--border)] modal-header-sticky">
+                <div className="flex items-center justify-between px-4 py-3 border-b border-[color:var(--border)]">
                     <div>
                         <h2 className="text-lg font-semibold">Modify Widget</h2>
                         <p className="text-xs text-[color:var(--fg-muted)]">Edit properties, layout and behavior for the selected widget</p>
@@ -812,7 +822,7 @@ export default function ModifyWidgetModal({
                     </button>
                 </div>
 
-                <div className="p-4 space-y-5 text-sm">
+                <div className="flex-1 overflow-y-auto p-4 space-y-5 text-sm scrollable scrollable-container">
                     {/* Component Properties */}
                     <div className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)]/90 overflow-hidden">
                         <button className="w-full flex items-center justify-between gap-2 px-4 py-2 text-left" onClick={toggleCompOpen} title={compOpen ? 'Collapse' : 'Expand'} aria-expanded={compOpen}>
@@ -1613,9 +1623,6 @@ export default function ModifyWidgetModal({
                                                 {appearanceFieldNodes}
                                             </div>
                                         )}
-                                        <div className="mt-3 flex items-center justify-end gap-2">
-                                            <button className="btn btn-outline btn-xs" onClick={() => { applyForm(); }} disabled={locked}>Apply</button>
-                                        </div>
                                         {defType === 'link' && (
                                             <LinkPreviewPanel rawUrl={linkRawUrl} fieldError={linkFieldError} disabled={locked} />
                                         )}
@@ -1747,32 +1754,41 @@ export default function ModifyWidgetModal({
                                         onKeyDown={handleCtrlEnterApplyJson}
                                     />
                                     {propsError && <div className="mt-1 text-xs text-red-500">{propsError}</div>}
-                                    <div className="mt-2 flex items-center justify-end gap-2">
-                                        <button className="btn btn-outline btn-xs" onClick={() => { applyProps(); }} disabled={locked}>Apply JSON</button>
-                                    </div>
                                 </div>
                             </div>
                         )}
                     </div>
                 </div>
-                {/* Footer actions: bottom-right delete icon to match page modal placement */}
-                {onDelete && !locked && (
-                    <div className="mt-4 flex items-center justify-end">
-                        <button
-                            className="inline-flex items-center justify-center p-2 rounded bg-red-500/10 text-red-500 border border-red-500/50 hover:bg-red-500/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400/70 focus-visible:ring-offset-2 focus-visible:ring-offset-[color:var(--surface)]"
-                            title="Delete widget"
-                            aria-label="Delete widget"
-                            onClick={() => {
-                                if (confirm('Delete this widget? This cannot be undone.')) {
-                                    onDelete();
-                                    notify({ type: 'warning', message: `${widgetName} deleted from the editor`, title: selectedProject?.name || 'Editor', persistent: false });
-                                }
-                            }}
-                        >
-                            <Trash2 size={14} />
+                <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 border-t border-[color:var(--border)] bg-[color:var(--surface)]/80">
+                    <div>
+                        {onDelete && !locked && (
+                            <button
+                                className="btn btn-error btn-xs inline-flex items-center gap-2"
+                                title="Delete widget"
+                                aria-label="Delete widget"
+                                onClick={() => {
+                                    if (confirm('Delete this widget? This cannot be undone.')) {
+                                        onDelete();
+                                        notify({ type: 'warning', message: `${widgetName} deleted from the editor`, title: selectedProject?.name || 'Editor', persistent: false });
+                                    }
+                                }}
+                            >
+                                <Trash2 size={14} />
+                                <span>Delete widget</span>
+                            </button>
+                        )}
+                    </div>
+                    <div className="flex items-center gap-2">
+                        {zodSchema && (
+                            <button className="btn btn-outline btn-xs" onClick={() => { applyProps(); }} disabled={locked} title="Apply raw JSON settings">
+                                Apply JSON
+                            </button>
+                        )}
+                        <button className="btn btn-outline btn-xs" onClick={handlePrimaryApply} disabled={locked}>
+                            Save changes
                         </button>
                     </div>
-                )}
+                </div>
             </div>
         </div>
     );

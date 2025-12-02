@@ -10,13 +10,15 @@ import { getPreviewState } from "../../lib/previewInterop";
 
 export default function PortfolioIsland(): React.ReactElement | null {
   const { user } = useAuth();
-  const { selectedProject, selectedProjectId, saving, lastSavedAt, saveProject, clearSelection, autosaveEnabled, setAutosaveEnabled } = useProjects();
+  const { selectedProject, selectedProjectId, saving, lastSavedAt, saveProject, saveCloudProjectNow, clearSelection, autosaveEnabled, setAutosaveEnabled, syncProject } = useProjects();
   const { notifications, add: notify } = useNotifications();
   const { openSettings } = usePortfolioSettings();
   const navigate = useNavigate();
   const location = useLocation();
   const pendingHighlightRef = React.useRef(false);
   const selectedProjectCloudId = selectedProject?._cloudId ?? selectedProjectId ?? (selectedProject as any)?.id ?? null;
+  const isCloudLinked = !!(selectedProject?._synced || selectedProject?._cloudId || selectedProject?.storage === 'cloud');
+  const isCloudProject = isCloudLinked;
   const [pinned, setPinned] = useState<boolean>(() => {
     try { return localStorage.getItem('py_island_pin') === '1'; } catch { return false; }
   });
@@ -27,6 +29,8 @@ export default function PortfolioIsland(): React.ReactElement | null {
       return Math.min(1, Math.max(0.25, v));
     } catch { return 0.95; }
   });
+  const [syncingProjectId, setSyncingProjectId] = useState<string | null>(null);
+  const syncingSelected = syncingProjectId === selectedProjectId;
   const savedText = useMemo(() => lastSavedAt ? new Date(lastSavedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : null, [lastSavedAt]);
   const hasSelection = !!selectedProjectCloudId;
   // When on the Home page with no selected portfolio, keep the island mounted
@@ -39,6 +43,7 @@ export default function PortfolioIsland(): React.ReactElement | null {
   const labelClass = "text-[10px] uppercase tracking-wide text-[color:var(--fg-muted)]";
   const segmentClass = "flex items-center gap-2 rounded-full border border-[color:var(--border)] bg-[color:var(--surface)]/60 px-3 py-1.5 shadow-sm flex-wrap text-[12px]";
   const actionBtnClass = "btn btn-ghost btn-sm flex items-center gap-1 text-[12px]";
+  const iconButtonBase = "btn btn-ghost p-2 w-9 h-9 inline-flex items-center justify-center rounded-md text-[color:var(--fg-muted)]";
   const statusChip = (
     <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-[color:var(--border)] bg-[color:var(--muted)]/30 text-[12px] font-semibold text-[color:var(--fg-muted)]">
       {saving ? (
@@ -145,7 +150,7 @@ export default function PortfolioIsland(): React.ReactElement | null {
           <div className="ml-2 flex items-center gap-1">
             <button
               type="button"
-              className={`btn btn-ghost p-2 w-9 h-9 inline-flex items-center justify-center rounded-md text-[color:var(--fg-muted)]`}
+              className={iconButtonBase}
               disabled={!hasSelection}
               title="Portfolio settings"
               onClick={() => handleOpenSettings('portfolio')}
@@ -154,12 +159,22 @@ export default function PortfolioIsland(): React.ReactElement | null {
             </button>
             <button
               type="button"
-              className={`btn btn-ghost p-2 w-9 h-9 inline-flex items-center justify-center rounded-md text-[color:var(--fg-muted)]`}
+              className={iconButtonBase}
               disabled={!hasSelection}
               title="Theme settings"
               onClick={() => handleOpenSettings('theme')}
             >
               <Palette size={16} />
+            </button>
+            <button
+              type="button"
+              className={`${iconButtonBase} ${isCloudLinked ? 'border border-[color:var(--accent)]/40 bg-[color:var(--accent)]/10 text-[color:var(--accent)] shadow-sm' : ''}`}
+              disabled={!hasSelection}
+              title={isCloudLinked ? 'Cloud portfolio' : 'Not in cloud'}
+              aria-pressed={isCloudLinked}
+              onClick={() => handleOpenSettings('cloud')}
+            >
+              <Cloud size={16} />
             </button>
           </div>
 
@@ -269,12 +284,6 @@ export default function PortfolioIsland(): React.ReactElement | null {
             )}
           </div>
 
-          {user && selectedProject?._synced && (
-            <div className="inline-flex items-center gap-1 px-3 py-1 rounded-full border border-[color:var(--border)] bg-[color:var(--muted)]/30 text-[11px] text-[color:var(--accent)]">
-              <Cloud size={12} />
-              Cloud linked
-            </div>
-          )}
           <div className="flex flex-col items-end gap-2 ml-auto">
             <div className="flex items-center gap-1">
               {pinned && (
@@ -364,6 +373,27 @@ export default function PortfolioIsland(): React.ReactElement | null {
 
           <div className={segmentClass}>
             <span className={labelClass}>Files</span>
+            {user && !isCloudProject && (
+              <button
+                type="button"
+                className="btn btn-accent btn-sm flex items-center gap-2 text-[12px] font-semibold shadow-lg shadow-[color:var(--accent)]/25"
+                disabled={!hasSelection || syncingSelected}
+                onClick={async () => {
+                  if (!selectedProjectId) return;
+                  setSyncingProjectId(selectedProjectId);
+                  try { await syncProject(selectedProjectId); }
+                  finally { setSyncingProjectId(null); }
+                }}
+                title={user ? 'Sync this project to the cloud' : 'Sign in to sync to cloud'}
+              >
+                {syncingSelected ? (
+                  <span className="w-3 h-3 border-2 border-[color:var(--border)] border-t-transparent rounded-full animate-spin" aria-hidden="true"></span>
+                ) : (
+                  <UploadCloud size={14} />
+                )}
+                <span>{syncingSelected ? 'Syncing…' : 'Sync to cloud'}</span>
+              </button>
+            )}
             <button
               type="button"
               className={actionBtnClass}
@@ -383,11 +413,18 @@ export default function PortfolioIsland(): React.ReactElement | null {
               type="button"
               className={actionBtnClass}
               disabled={!hasSelection}
-              onClick={() => selectedProjectId && saveProject(selectedProjectId)}
-              title="Save project"
+              onClick={() => {
+                if (!selectedProjectId) return;
+                if (isCloudProject) {
+                  void saveCloudProjectNow(selectedProjectId);
+                } else {
+                  void saveProject(selectedProjectId);
+                }
+              }}
+              title={isCloudProject ? 'Save to cloud' : 'Save project'}
             >
               <Save size={14} />
-              Save
+              {isCloudProject ? 'Sync' : 'Save'}
             </button>
             <button
               type="button"

@@ -7,7 +7,6 @@ import Dashboard from "../components/home/Dashboard";
 import NotificationsCenter from "../components/notifications/NotificationsCenter";
 import QuickstartPanel from "../components/home/QuickstartPanel";
 import ProjectsList from "../components/home/ProjectsList";
-import CloudProjectsList from "../components/home/CloudProjectsList";
 import AccountDashboard from "../components/home/AccountDashboard";
 import type { LocalProject } from "../components/home/ProjectsList";
 import { useAuth } from "../providers/AuthProvider";
@@ -19,48 +18,21 @@ import { usePortfolioSettings } from "../providers/PortfolioSettingsProvider";
 
 export default function HomePage() {
 	const { user } = useAuth();
-	const { projects, hasAny, importProject, selectProject, deleteProject, saveProject, selectedProjectId, cloudMaxProjects, cloudMaxStorageMB, cloudBytesUsed, cloudProjectsCount, listCloudProjects, getCloudObjectInfoByCloudId, reconcileCloudLinks } = useProjects();
+	const { projects, hasAny, importProject, selectProject, deleteProject, deleteCloudProjectByCloudId, saveProject, selectedProjectId, cloudMaxProjects, cloudMaxStorageMB, cloudBytesUsed, cloudProjectsCount } = useProjects();
 	const { notifications, dismiss, clearAll } = useNotifications();
 	const { openSettings, openCreate } = usePortfolioSettings();
 	const navigate = useNavigate();
-	const [cloudProjects, setCloudProjects] = useState<Array<{ id: string; name: string; updatedAt: string; storagePath: string }>>([]);
-	const [cloudInfo, setCloudInfo] = useState<Record<string, { storagePath: string; sizeBytes: number; updatedAt: string }>>({});
-	const [hoverLinkedId, setHoverLinkedId] = useState<string | null>(null);
+	const cloudPortfolioList = useMemo(() => projects.filter(p => (p as unknown as { storage?: string; _cloudId?: string }).storage === 'cloud' || Boolean((p as unknown as { _cloudId?: string })._cloudId)), [projects]);
 	const [accountOpen, setAccountOpen] = useState(false);
 
 	// No popup state needed; CTA is an inline centered section shown only when logged out
 
 	// Important: avoid conditional hook calls; compute recent without hooks
 	const recent = projects.slice(0, 6);
-	const [cloudRemoteCount, setCloudRemoteCount] = useState(0);
+	const cloudRemoteCount = useMemo(() => cloudPortfolioList.length, [cloudPortfolioList]);
 	const cloudQuota = cloudMaxProjects;
-
-	useEffect(() => {
-		let alive = true;
-		const fetchCloud = async () => {
-			if (!user) { if (alive) { setCloudRemoteCount(0); setCloudProjects([]); setCloudInfo({}); } return; }
-			try {
-				const list = await listCloudProjects();
-				if (!alive) return;
-				setCloudRemoteCount(list.length);
-				setCloudProjects(list);
-				// Reconcile local link flags with actual cloud state
-				reconcileCloudLinks(list.map(x => x.id));
-				const infoMap: Record<string, { storagePath: string; sizeBytes: number; updatedAt: string }> = {};
-				for (const item of list) {
-					try {
-						const inf = await getCloudObjectInfoByCloudId(item.id);
-						if (inf) infoMap[item.id] = inf;
-					} catch { /* ignore */ }
-				}
-				if (alive) setCloudInfo(infoMap);
-			} catch { /* ignore */ }
-		};
-		fetchCloud();
-		// periodic refresh every 60s when signed in
-		const interval = setInterval(() => { if (user) fetchCloud(); }, 60000);
-		return () => { alive = false; clearInterval(interval); };
-	}, [user, projects.map(p => p._cloudId ? p._cloudId : '').join(',')]);
+	const usageMb = useMemo(() => ((cloudBytesUsed || 0) / (1024 * 1024)).toFixed(2), [cloudBytesUsed]);
+	const projectCountStat = useMemo(() => cloudProjectsCount || cloudRemoteCount, [cloudProjectsCount, cloudRemoteCount]);
 	const [notificationsOpen, setNotificationsOpen] = useState(false);
 	const unseenCount = useMemo(() => notifications.length, [notifications.length]);
 	const [notificationsPulse, setNotificationsPulse] = useState(false);
@@ -187,42 +159,16 @@ export default function HomePage() {
 					<ProjectsList
 						projects={recent as unknown as LocalProject[]}
 						selectedProjectId={selectedProjectId}
-						hoverLinkedId={hoverLinkedId}
 						userSignedIn={!!user}
 						onSelect={(id) => selectProject(id)}
 						onDelete={(id, opts) => deleteProject(id, opts)}
+						onDeleteCloud={async (cloudId) => { await deleteCloudProjectByCloudId(cloudId); }}
 						onSaveAs={(id) => saveProject(id, { saveAs: true })}
 						onOpenFileLocation={async (filePath) => { if (window.api?.showItemInFolder) await window.api.showItemInFolder({ filePath }); }}
 						onOpenEditor={(id) => { selectProject(id); navigate('/editor'); }}
 						onOpenDeploy={(id) => { selectProject(id); navigate('/deploy'); }}
 						onOpenSettings={(id, section) => openSettings({ projectId: id, section })}
 					/>
-					{user && (
-						<CloudProjectsList
-							userSignedIn={!!user}
-							cloudProjects={cloudProjects}
-							cloudInfo={cloudInfo}
-							localProjects={projects.map(p => ({ id: p.id, _cloudId: (p as unknown as { _cloudId?: string })._cloudId }))}
-							selectedProjectId={selectedProjectId}
-							hoverLinkedId={hoverLinkedId}
-							setHoverLinkedId={setHoverLinkedId}
-							onRefresh={async () => {
-								try {
-									const list = await listCloudProjects();
-									setCloudRemoteCount(list.length);
-									setCloudProjects(list);
-									reconcileCloudLinks(list.map(x => x.id));
-									const infoMap: Record<string, { storagePath: string; sizeBytes: number; updatedAt: string }> = {};
-									for (const item of list) {
-										try { const inf = await getCloudObjectInfoByCloudId(item.id); if (inf) infoMap[item.id] = inf; } catch { /* ignore */ }
-									}
-									setCloudInfo(infoMap);
-								} catch { /* ignore */ }
-							}}
-							onSelectLocal={(id) => selectProject(id)}
-							onOpenSettings={(target) => openSettings({ projectId: target.projectId, cloudId: target.cloudId, section: 'cloud' })}
-						/>
-					)}
 				</div>
 			</section>
 
@@ -232,9 +178,9 @@ export default function HomePage() {
 					<div id="py-account" ref={accountRef}>
 						<AccountDashboard
 							userDisplay={(user?.email ?? user?.uid) as string}
-							usageMB={(((cloudBytesUsed && cloudBytesUsed > 0 ? cloudBytesUsed : Object.values(cloudInfo).reduce((a, b) => a + (b.sizeBytes || 0), 0)) / (1024 * 1024)).toFixed(2))}
+							usageMB={usageMb}
 							maxStorageMB={String(cloudMaxStorageMB || 1024)}
-							projectCount={(cloudProjectsCount && cloudProjectsCount > 0 ? cloudProjectsCount : cloudRemoteCount)}
+							projectCount={projectCountStat}
 							projectQuota={cloudQuota}
 							onOpenSettings={() => setAccountOpen(true)}
 							highlight={pulseAccount}

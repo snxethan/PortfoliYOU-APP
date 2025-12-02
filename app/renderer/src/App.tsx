@@ -59,45 +59,43 @@ export default function App() {
                 <GlobalPreviewStarter />
                 <GlobalZoomControls />
                 <NotificationsUI />
-                <div className="min-h-screen" style={{ paddingTop: 36 }}>
+                <div className="min-h-screen bg-[color:var(--bg)]" style={{ paddingTop: 'var(--frame-bar-h, 36px)' }}>
                   <FrameBar />
                   <Sidebar />
                   <div
-                    style={{ marginLeft: 'var(--sidebar-w,15rem)' }}
-                    className="min-h-0"
+                    style={{ marginLeft: 'var(--sidebar-w, 15rem)' }}
+                    className="min-h-screen flex flex-col px-8 pb-12 pt-6 transition-[margin-left] duration-200 min-w-0"
                   >
-                    <div className="min-h-screen flex flex-col">
-                      <PortfolioIsland />
-                      <main className="flex-1">
-                        <Suspense fallback={
-                          <div className="flex items-center justify-center py-16">
-                            <div className="w-10 h-10 border-4 border-[color:var(--border)] border-t-[color:var(--primary)] rounded-full animate-spin" />
-                          </div>
-                        }>
-                          <Routes>
-                            <Route path="/" element={<HomePage />} />
-                            {/* Backward-compat: redirect old Modify route to Editor */}
-                            <Route path="/modify" element={<LegacyModifyRedirect />} />
-                            <Route
-                              path="/editor"
-                              element={
-                                <ProtectedRoute>
-                                  <EditorPage />
-                                </ProtectedRoute>
-                              }
-                            />
-                            <Route
-                              path="/deploy"
-                              element={
-                                <ProtectedRoute>
-                                  <DeployPage />
-                                </ProtectedRoute>
-                              }
-                            />
-                          </Routes>
-                        </Suspense>
-                      </main>
-                    </div>
+                    <PortfolioIsland />
+                    <main className="flex-1 min-w-0">
+                      <Suspense fallback={
+                        <div className="flex items-center justify-center py-16">
+                          <div className="w-10 h-10 border-4 border-[color:var(--border)] border-t-[color:var(--primary)] rounded-full animate-spin" />
+                        </div>
+                      }>
+                        <Routes>
+                          <Route path="/" element={<HomePage />} />
+                          {/* Backward-compat: redirect old Modify route to Editor */}
+                          <Route path="/modify" element={<LegacyModifyRedirect />} />
+                          <Route
+                            path="/editor"
+                            element={
+                              <ProtectedRoute>
+                                <EditorPage />
+                              </ProtectedRoute>
+                            }
+                          />
+                          <Route
+                            path="/deploy"
+                            element={
+                              <ProtectedRoute>
+                                <DeployPage />
+                              </ProtectedRoute>
+                            }
+                          />
+                        </Routes>
+                      </Suspense>
+                    </main>
                   </div>
                 </div>
               </PortfolioSettingsProvider>
@@ -110,7 +108,7 @@ export default function App() {
 }
 
 function SaveHotkeys() {
-  const { selectedProjectId, saveProject } = useProjects();
+  const { selectedProjectId, selectedProject, saveProject, saveCloudProjectNow } = useProjects();
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
       const s = e.key.toLowerCase() === 's';
@@ -118,14 +116,18 @@ function SaveHotkeys() {
       if (mod && s) {
         e.preventDefault();
         if (selectedProjectId) {
-          // Ctrl+Shift+S => Save As
-          saveProject(selectedProjectId, { saveAs: e.shiftKey });
+          const isCloudProject = selectedProject && (selectedProject.storage ?? 'local') === 'cloud';
+          if (isCloudProject && !e.shiftKey) {
+            void saveCloudProjectNow(selectedProjectId);
+          } else {
+            saveProject(selectedProjectId, { saveAs: e.shiftKey });
+          }
         }
       }
     }
     window.addEventListener('keydown', onKeyDown, { capture: true });
     return () => window.removeEventListener('keydown', onKeyDown, { capture: true } as EventListenerOptions);
-  }, [selectedProjectId, saveProject]);
+  }, [selectedProjectId, selectedProject, saveProject, saveCloudProjectNow]);
   return null;
 }
 
