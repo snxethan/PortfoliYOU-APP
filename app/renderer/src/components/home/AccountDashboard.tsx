@@ -8,7 +8,6 @@ export default function AccountDashboard({
     projectCount,
     projectQuota,
     onOpenSettings,
-    highlight,
     linkedProviders,
 }: {
     userDisplay: string;
@@ -17,7 +16,6 @@ export default function AccountDashboard({
     projectCount: number;
     projectQuota: number;
     onOpenSettings: () => void;
-    highlight?: boolean;
     linkedProviders?: Array<{ providerId: string; email?: string | null; displayName?: string | null }>;
 }) {
     const providerIcons: Record<string, React.ComponentType<{ size?: number; className?: string }>> = {
@@ -32,7 +30,7 @@ export default function AccountDashboard({
     };
 
     return (
-        <div className={`surface border border-[color:var(--border)] rounded-2xl p-4 shadow-lg shadow-black/20 bg-[color:var(--surface)]/80 account-dashboard transition-all duration-300 ease-in-out ${highlight ? 'highlight-pulse' : ''}`} style={{ animation: 'py-pop 0.4s ease-out' }}>
+        <div className="surface border border-[color:var(--border)] rounded-2xl p-4 shadow-lg shadow-black/20 bg-[color:var(--surface)]/80 account-dashboard transition-all duration-300 ease-in-out" style={{ animation: 'py-pop 0.4s ease-out' }}>
             <div className="account-dashboard__header">
                 <div className="account-dashboard__identity">
                     <p className="section-title">Account dashboard</p>

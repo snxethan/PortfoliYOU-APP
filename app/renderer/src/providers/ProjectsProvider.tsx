@@ -6,9 +6,6 @@ import type { FirestoreError, Unsubscribe } from "firebase/firestore";
 import { ref as storageRef, uploadBytes, getDownloadURL, getMetadata, getBytes, deleteObject } from "firebase/storage";
 import JSZip from "jszip";
 
-import { idbGet, idbPut, computeHash, stores, AssetMeta } from "../lib/assetsStore";
-import { auth, db, storage } from "../lib/firebase";
-import { sanitizeVideoProps } from "../../../shared/widgets/videoProps";
 import type { VideoWidgetProps } from "../../../shared/widgets/videoProps";
 import type { Theme, ThemePatch } from "../themes/types";
 import { THEME_PRESETS, DEFAULT_THEME_PRESET_ID, getPresetById } from "../themes/presets";
@@ -16,12 +13,7 @@ import { createThemeFromPreset as createThemeFromPresetUtil, mergeTheme } from "
 
 import { useNotifications } from "./NotificationsProvider";
 
-type ZipEntry = {
-	async(type: 'arraybuffer'): Promise<ArrayBuffer>;
-	async(type: 'string'): Promise<string>;
-	dir: boolean;
-	name: string;
-};
+type ZipEntry = { dir: boolean; name: string };
 
 export type Page = {
 	pageId: string;
@@ -439,7 +431,7 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 		try {
 			const batch = writeBatch(db);
 			let writes = 0;
-			/* eslint-disable no-await-in-loop */
+
 			for (const [projectId, proj] of pendingEntries) {
 				if (!proj || (proj.storage ?? 'local') !== 'cloud') continue;
 				const ownerUid = proj.ownerUid || user.uid;
@@ -457,7 +449,7 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 				cloudLocalVersionRef.current[projectId] = sanitizedForCloud.updatedAt || '';
 				writes++;
 			}
-			/* eslint-enable no-await-in-loop */
+
 			if (!writes) {
 				state.saving = false;
 				return;
@@ -847,7 +839,7 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 			try {
 				const bytes = await getBytes(ref);
 				buffer = bytes.slice(0);
-			} catch (err) {
+			} catch {
 				try {
 					const url = entry?.downloadUrl || await getDownloadURL(ref);
 					const resp = await fetch(url, { cache: 'no-store' });

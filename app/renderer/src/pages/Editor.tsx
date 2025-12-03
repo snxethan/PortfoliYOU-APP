@@ -3,6 +3,7 @@ import type { CSSProperties } from "react";
 import { useNavigate } from "react-router-dom";
 import { ChevronsLeft, ChevronsRight, ChevronDown, ChevronRight, GripVertical, Settings } from "lucide-react";
 import { DndContext, PointerSensor, MouseSensor, TouchSensor, useSensor, useSensors, DragEndEvent, DragStartEvent, rectIntersection, DragOverlay, type Modifier } from "@dnd-kit/core";
+
 import { useProjects } from "../providers/ProjectsProvider";
 import { useNotifications } from '../providers/NotificationsProvider';
 import { usePortfolioSettings } from "../providers/PortfolioSettingsProvider";
@@ -17,11 +18,12 @@ import DragOverlayPreview from "../components/editor/DragOverlayPreview";
 import AssetsPanel from "../components/editor/widgets/AssetsPanel";
 import PreviewPopup from "../components/editor/PreviewPopup";
 import PagePreview from "../components/editor/PagePreview";
-import CanvasFullscreen from "./CanvasFullscreen";
 import { usePersistentFlag } from "../hooks/usePersistentFlag";
 import { getWidgetThemeSnapshot } from "../widgets/theme";
 import type { SelectionChangeOptions, MarqueeSelectionOptions } from "../components/editor/selection";
 import { WidgetsRegistry } from "../widgets/registry";
+
+import CanvasFullscreen from "./CanvasFullscreen";
 
 const COLS = 12;
 const DEFAULT_ROW_H = 32; // px height per row (content area)
@@ -68,16 +70,16 @@ function IconFullscreen() {
     </svg>
   );
 }
-function IconExitFullscreen() {
-  return (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M9 9L3 3" />
-      <path d="M15 9l6-6" />
-      <path d="M9 15l-6 6" />
-      <path d="M15 15l6 6" />
-    </svg>
-  );
-}
+// function IconExitFullscreen() {
+//   return (
+//     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+//       <path d="M9 9L3 3" />
+//       <path d="M15 9l6-6" />
+//       <path d="M9 15l-6 6" />
+//       <path d="M15 15l6 6" />
+//     </svg>
+//   );
+// }
 
 export default function EditorPage() {
   // Fullscreen state for canvas
@@ -426,7 +428,7 @@ export default function EditorPage() {
   // Adjust this value if you want a different minimum width.
   // NOTE: keep in sync with UI expectations.
 
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+
   const _paletteMinHint = 200;
   function togglePalette() {
     setPaletteCollapsed(prev => !prev);
@@ -513,7 +515,7 @@ export default function EditorPage() {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   // In-memory clipboard as fallback; cross-page copy/paste works via system clipboard
   const [clipboard, setClipboard] = useState<GridItem[] | null>(null);
-  const primarySelectedId = selectedIds.length ? selectedIds[selectedIds.length - 1] : null;
+  const _primarySelectedId = selectedIds.length ? selectedIds[selectedIds.length - 1] : null;
 
   const handleSelect = useCallback((id: string | null, opts?: SelectionChangeOptions) => {
     setSelectedIds((prev) => {
@@ -550,18 +552,19 @@ export default function EditorPage() {
     });
   }, []);
 
-  function withSelected(mut: (it: GridItem) => GridItem | GridItem[] | null, label: string) {
-    if (!primarySelectedId) return;
-    const src = items.find(i => i.id === primarySelectedId);
-    if (!src) return;
-    const result = mut(src);
-    if (!result) return;
-    if (Array.isArray(result)) {
-      commitUpdate(label, () => result);
-    } else {
-      commitUpdate(label, (prev) => prev.map(i => i.id === primarySelectedId ? result : i));
-    }
-  }
+  // Helper for selected item mutations (currently unused)
+  // function withSelected(mut: (it: GridItem) => GridItem | GridItem[] | null, label: string) {
+  //   if (!primarySelectedId) return;
+  //   const src = items.find(i => i.id === primarySelectedId);
+  //   if (!src) return;
+  //   const result = mut(src);
+  //   if (!result) return;
+  //   if (Array.isArray(result)) {
+  //     commitUpdate(label, () => result);
+  //   } else {
+  //     commitUpdate(label, (prev) => prev.map(i => i.id === primarySelectedId ? result : i));
+  //   }
+  // }
 
   useEffect(() => {
     setSelectedIds((prev) => {
@@ -1097,7 +1100,6 @@ export default function EditorPage() {
                       try { localStorage.setItem(`py_current_page_${projectId}`, newPageId); } catch { /* ignore */ }
                       replaceItems(getPageItems(projectId, newPageId) as GridItem[]);
                       setHistory(h => {
-                        let restoredId: string | null = null;
                         const entry: HistoryEntry = {
                           label: 'Duplicate page',
                           undo: (items) => items,
@@ -1110,7 +1112,6 @@ export default function EditorPage() {
                           onRedo: () => {
                             const redoPageId = duplicatePage(projectId, sourcePageId);
                             if (redoPageId) {
-                              restoredId = redoPageId;
                               setCurrentPageId(redoPageId);
                               replaceItems(getPageItems(projectId, redoPageId) as GridItem[]);
                             }
@@ -1720,7 +1721,6 @@ export default function EditorPage() {
             if (nextId) replaceItems(getPageItems(projectId, nextId) as GridItem[]); else replaceItems([]);
 
             setHistory(h => {
-              let restoredId: string | null = null;
               const entry: HistoryEntry = {
                 label: 'Delete page',
                 undo: (items) => items,
@@ -1728,7 +1728,6 @@ export default function EditorPage() {
                 onUndo: () => {
                   const nid = createPage(projectId, title);
                   if (nid) {
-                    restoredId = nid;
                     setPageItems(projectId, nid, serializeGridItems(snapItems));
                     if (snapBackground) setPageBackground(projectId, nid, snapBackground);
                     if (snapStarter) setPageStarter(projectId, nid, true);
@@ -1737,7 +1736,7 @@ export default function EditorPage() {
                   }
                 },
                 onRedo: () => {
-                  const target = restoredId || deletedPageId;
+                  const target = deletedPageId;
                   if (target) {
                     deletePage(projectId, target);
                     const remaining = (selectedProject.pageOrder || []).filter(id => id !== target);
@@ -1761,7 +1760,6 @@ export default function EditorPage() {
               try { localStorage.setItem(`py_current_page_${projectId}`, newPageId); } catch { /* ignore */ }
               replaceItems(getPageItems(projectId, newPageId) as GridItem[]);
               setHistory(h => {
-                let restoredId: string | null = null;
                 const entry: HistoryEntry = {
                   label: 'Duplicate page',
                   undo: (items) => items,
@@ -1774,7 +1772,6 @@ export default function EditorPage() {
                   onRedo: () => {
                     const redoPageId = duplicatePage(projectId, sourcePageId);
                     if (redoPageId) {
-                      restoredId = redoPageId;
                       setCurrentPageId(redoPageId);
                       replaceItems(getPageItems(projectId, redoPageId) as GridItem[]);
                     }

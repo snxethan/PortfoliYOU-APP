@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { AlertTriangle, CheckCircle2, Info, X, XCircle, AlertOctagon, ArrowUpCircle } from "lucide-react";
 
 import { useNotifications } from "../../providers/NotificationsProvider";
+
 import NotificationsCenter from "./NotificationsCenter";
 
 function typeIcon(type: string) {
@@ -56,6 +57,7 @@ export function NotificationStack() {
       setTimeout(() => {
         setHidden(prev => ({ ...prev, [id]: true }));
         setExiting(prev => {
+
           const { [id]: _, ...rest } = prev;
           return rest;
         });
@@ -196,7 +198,7 @@ export function NotificationStack() {
                           <button
                             type="button"
                             className="text-xs link-accent"
-                            onClick={async (e) => {
+                            onClick={async () => {
                               try {
                                 if ((window as any).api?.openPath) {
                                   await (window as any).api.openPath({ path: href.replace(/^file:\/\//, '') });
@@ -226,6 +228,7 @@ export function NotificationStack() {
                 setTimeout(() => {
                   dismiss(n.id);
                   setExiting(prev => {
+
                     const { [n.id]: _, ...rest } = prev;
                     return rest;
                   });

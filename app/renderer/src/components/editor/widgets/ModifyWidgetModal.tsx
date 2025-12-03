@@ -10,9 +10,9 @@ import { WidgetsRegistry } from "../../../widgets/registry";
 import type { CarouselItem } from "../../../widgets/defs/Carousel";
 import { ALLOWED_HTTP_SCHEME_LABEL } from "../../../../../shared/widgets/linkUrl";
 import type { GridItem } from "../canvas/DraggableItem";
+import { useScrollLock } from "../../../hooks/useScrollLock";
 
 import LinkPreviewPanel from "./LinkPreviewPanel";
-import { useScrollLock } from "../../../hooks/useScrollLock";
 
 type CarouselEditorItem = {
     id: string;
@@ -114,7 +114,6 @@ const URL_PROTOCOL_SUGGESTIONS = ['https://', 'http://', 'mailto:', 'tel:'] as c
 type AssetKind = 'image' | 'video' | 'media';
 
 function hasUrlValidation(field: z.ZodTypeAny) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const def: any = (field as unknown as { _def?: unknown })._def;
     const checks: Array<{ kind?: string }> = def?.checks ?? [];
     return checks.some(check => check.kind === 'url');
@@ -143,7 +142,6 @@ function inferAssetKind(defType: string | null, key: string): AssetKind | null {
 }
 
 function deriveNumberBounds(field: z.ZodNumber) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const def: any = (field as unknown as { _def?: unknown })._def;
     const checks: Array<{ kind: string; value?: number }> = def?.checks ?? [];
     let min: number | undefined;
@@ -175,7 +173,6 @@ function shouldUseTextareaField(defType: string | null, key: string) {
 
 function inferStringInputType(field: z.ZodTypeAny): 'text' | 'email' | 'url' {
     if (!(field instanceof z.ZodString)) return 'text';
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const def: any = (field as unknown as { _def?: unknown })._def;
     const checks: Array<{ kind?: string }> = def?.checks ?? [];
     if (checks.some(check => check.kind === 'email')) return 'email';
@@ -206,7 +203,6 @@ export default function ModifyWidgetModal({
     onSendBackward: () => void;
     onTogglePin: () => void;
     onToggleLock: () => void;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     onApplyProps: (props: any) => void;
 }) {
     useScrollLock(true);
@@ -382,14 +378,11 @@ export default function ModifyWidgetModal({
                     const shape = schema.shape;
                     const initial: Record<string, unknown> = {};
                     for (const key of Object.keys(shape)) {
-                        // eslint-disable-next-line @typescript-eslint/no-explicit-any
                         const current = (item.props as any)?.[key];
                         initial[key] = current !== undefined ? current : undefined;
                     }
-                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
                     setFormValues({ ...initial, ...(item.props as any) });
                     // Validate once to populate errors
-                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
                     const res = schema.safeParse({ ...initial, ...(item.props as any) });
                     if (!res.success) {
                         const errs: Record<string, string> = {};
@@ -496,14 +489,11 @@ export default function ModifyWidgetModal({
         if (!zodSchema) return null;
         const field = schema as z.ZodTypeAny;
         const isOptional = field instanceof z.ZodOptional;
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         let baseField: z.ZodTypeAny = isOptional ? (field._def as any).innerType as z.ZodTypeAny : field;
         if (baseField instanceof z.ZodDefault) {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
             baseField = (baseField._def as any).innerType as z.ZodTypeAny;
         }
         if (baseField instanceof z.ZodNullable) {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
             baseField = (baseField._def as any).innerType as z.ZodTypeAny;
         }
         const rawValue = formValues[key];
@@ -542,7 +532,6 @@ export default function ModifyWidgetModal({
         const disabled = locked;
         const isTargetPage = (defType === 'nav-link') && key === 'targetPageId' && (baseField instanceof z.ZodString);
         const isCarouselIntervalField = isCarousel && key === 'interval';
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const anyZ: any = z;
         const isEnum = baseField instanceof anyZ.ZodEnum;
         const isNativeEnum = baseField instanceof anyZ.ZodNativeEnum;
@@ -667,7 +656,6 @@ export default function ModifyWidgetModal({
                         <option value="" disabled>Select…</option>
                         {(() => {
                             // derive options for enum types
-                            // eslint-disable-next-line @typescript-eslint/no-explicit-any
                             const def: any = (baseField as any)._def;
                             let opts: string[] = [];
                             if (isEnum && Array.isArray(def?.values)) opts = def.values as string[];

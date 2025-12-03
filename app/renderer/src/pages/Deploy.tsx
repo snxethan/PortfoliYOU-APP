@@ -1,11 +1,12 @@
 import { useEffect, useState, useRef } from "react";
-import { ChevronDown, ChevronRight, Plus, Play, Square, Copy, ExternalLink, X, Eye, RefreshCw, SlidersHorizontal, Github, ListOrdered, Lightbulb, Rocket, Package, Server } from "lucide-react";
+import { ChevronDown, ChevronRight, Play, Square, Copy, ExternalLink, X, Eye, RefreshCw, SlidersHorizontal, Github, ListOrdered, Lightbulb, Rocket, Package, Server } from "lucide-react";
+import { useNavigate } from 'react-router-dom';
+
 import { useProjects } from "../providers/ProjectsProvider";
 import { startPreviewServer } from "../lib/previewServer";
 import { captureGlobalStyleSnapshot } from "../lib/styleSnapshot";
 import { usePortfolioSettings } from "../providers/PortfolioSettingsProvider";
 import { useAssets } from "../providers/AssetsProvider";
-import { useNavigate } from 'react-router-dom';
 import { getWidgetThemeSnapshot, themeSnapshotToCss } from "../widgets/theme";
 import { appendPreviewLog, clearPreviewLog, getPreviewLog, getPreviewState, setPreviewState } from "../lib/previewInterop";
 
@@ -75,10 +76,10 @@ export default function DeployPage() {
 		if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
 	}, [buildLog]);
 
-	const navigate = useNavigate();
-	const [status, setStatus] = useState<"online" | "offline" | "unknown">("unknown");
-	const [lastDeployed, setLastDeployed] = useState<string | null>(null);
-	const [previewAvailable, setPreviewAvailable] = useState(false);
+	const _navigate = useNavigate(); // Reserved for future use
+	const [_status, _setStatus] = useState<"online" | "offline" | "unknown">("unknown");
+	const [_lastDeployed, _setLastDeployed] = useState<string | null>(null);
+	const [_previewAvailable, _setPreviewAvailable] = useState(false);
 	const [previewRunning, setPreviewRunning] = useState(false);
 	const [previewLocalUrl, setPreviewLocalUrl] = useState<string | null>(null);
 	const [previewLanUrl, setPreviewLanUrl] = useState<string | null>(null);
@@ -86,7 +87,7 @@ export default function DeployPage() {
 	const [exporting, setExporting] = useState(false);
 	const [exportedFilePath, setExportedFilePath] = useState<string | null>(null);
 	const [includeAssets, setIncludeAssets] = useState(true);
-	const [basePath, setBasePath] = useState<string | null>(null);
+	const [_basePath, _setBasePath] = useState<string | null>(null);
 
 	function deriveDirFromPath(p?: string | null) {
 		if (!p) return null;
@@ -98,10 +99,10 @@ export default function DeployPage() {
 	}
 
 	useEffect(() => {
-		setStatus("unknown");
+		_setStatus("unknown");
 		try {
 			const candidate = deriveDirFromPath((selectedProject as any)?._filePath as string | undefined);
-			if (candidate) setBasePath(candidate);
+			if (candidate) _setBasePath(candidate);
 		} catch { /* ignore */ }
 	}, [selectedProject]);
 
@@ -997,13 +998,14 @@ export default function DeployPage() {
 	);
 }
 
-function StatusBadge({ status, large }: { status: "online" | "offline" | "unknown"; large?: boolean }) {
-	const size = large ? "w-5 h-5" : "w-3 h-3";
-	const common = `rounded-full ${size} inline-block`;
-	if (status === "online") return <span className={`${common} bg-[color:var(--success)]`} aria-label="online" />;
-	if (status === "offline") return <span className={`${common} bg-[color:var(--danger)]`} aria-label="offline" />;
-	return <span className={`${common} bg-[color:var(--fg-muted)]`} aria-label="unknown" />;
-}
+// StatusBadge component - reserved for future use
+// function StatusBadge({ status, large }: { status: "online" | "offline" | "unknown"; large?: boolean }) {
+// 	const size = large ? "w-5 h-5" : "w-3 h-3";
+// 	const common = `rounded-full ${size} inline-block`;
+// 	if (status === "online") return <span className={`${common} bg-[color:var(--success)]`} aria-label="online" />;
+// 	if (status === "offline") return <span className={`${common} bg-[color:var(--danger)]`} aria-label="offline" />;
+// 	return <span className={`${common} bg-[color:var(--fg-muted)]`} aria-label="unknown" />;
+// }
 
 function CollapsibleBlock({ storageKey, title, subtitle, children }: { storageKey: string; title: React.ReactNode; subtitle?: React.ReactNode; children?: React.ReactNode }) {
 	const [open, setOpen] = useState<boolean>(() => {

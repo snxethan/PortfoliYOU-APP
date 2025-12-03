@@ -1,9 +1,10 @@
-import fs from 'fs-extra';
 import path from 'path';
-import React from 'react';
+
+import fs from 'fs-extra';
+// import React from 'react';
 import ReactDOMServer from 'react-dom/server';
+
 import type { LocalProject, Widget, Page, PortfolioMeta } from '../providers/ProjectsProvider';
-import type { Theme } from '../themes/types';
 import { themeToCssVars, FALLBACK_THEME } from '../themes/utils';
 import { WidgetsRegistry } from '../widgets/registry';
 
@@ -39,7 +40,7 @@ export async function compileStaticSite(
         let def: any = undefined;
         try {
             def = await WidgetsRegistry.ensure(widget.type);
-        } catch (e) {
+        } catch {
             // ignore loader failures and fallback to registry.get
             def = WidgetsRegistry.get(widget.type);
         }
@@ -70,7 +71,7 @@ export async function compileStaticSite(
                     }
                 }
             }
-        } catch (e) {
+        } catch {
             // ignore CSS generation errors
         }
 
@@ -81,7 +82,7 @@ export async function compileStaticSite(
                 const inner = ReactDOMServer.renderToStaticMarkup(el as any);
                 // Wrap each widget with an instance-scoped class so per-instance CSS can target it
                 return `<div class="widget widget-instance-${widget.widgetId || widget.id}">${inner}</div>`;
-            } catch (e) {
+            } catch {
                 return `<div class="widget widget-instance-${widget.widgetId || widget.id}">[render error: ${String(e)}]</div>`;
             }
         }
@@ -160,7 +161,7 @@ body { margin: 0; font-family: system-ui, -apple-system, 'Segoe UI', Roboto, Int
         const rootLines = Object.entries(vars).map(([k, v]) => `${k}: ${v};`);
         themeCss = `:root {\n${rootLines.join('\n')}\n}\n`;
         themeCss += `body { color: var(--fg); background: var(--bg); font-family: var(--body-font); }\n`;
-    } catch (e) {
+    } catch {
         // fallback: minimal vars
         themeCss = `:root { --bg: #ffffff; --fg: #111827; --accent: #06b6d4; }\n`;
     }
@@ -182,10 +183,10 @@ body { margin: 0; font-family: system-ui, -apple-system, 'Segoe UI', Roboto, Int
                     const href = l.href;
                     if (!href) continue;
                     // attempt to fetch the stylesheet content
-                    // eslint-disable-next-line no-await-in-loop
+
                     const res = await fetch(href, { cache: 'no-store' });
                     if (res.ok) {
-                        // eslint-disable-next-line no-await-in-loop
+
                         const txt = await res.text();
                         tailwindCss += `/* source: ${href} */\n` + txt + '\n\n';
                     }
@@ -201,14 +202,14 @@ body { margin: 0; font-family: system-ui, -apple-system, 'Segoe UI', Roboto, Int
     // Write theme and tailwind aggregated assets
     try {
         await fs.writeFile(path.join(outputDir, 'assets', 'theme.css'), themeCss, 'utf8');
-    } catch (e) {
+    } catch {
         // ignore write error
     }
     try {
         if (tailwindCss.trim().length > 0) {
             await fs.writeFile(path.join(outputDir, 'assets', 'tailwind.css'), tailwindCss, 'utf8');
         }
-    } catch (e) {
+    } catch {
         // ignore
     }
 
@@ -227,21 +228,7 @@ body { margin: 0; font-family: system-ui, -apple-system, 'Segoe UI', Roboto, Int
     }
 }
 
-function renderWidget(widget: Widget, project: LocalProject): React.ReactElement {
-    const def = WidgetsRegistry.get(widget.type);
-    if (!def || !def.render) return React.createElement('div', {}, `[Unknown widget: ${widget.type}]`);
-    // Asset src handling
-    let props: any = {};
-    if (typeof widget.props === 'object' && widget.props !== null) {
-        props = { ...widget.props };
-    }
-    if (typeof props.src === 'string' && props.src.startsWith('asset://')) {
-        const hash = props.src.slice('asset://'.length);
-        props.src = `/assets/${hash}`;
-    }
-    // Add more asset fields as needed
-    return def.render(props);
-}
+// Note: server-side widget rendering is handled inline in renderWidgetToHtml
 
 function renderPageHtml(page: Page, widgetBodies: string, project: LocalProject, innerWidth: number, height: number): string {
     const meta = project.portfolioMeta as PortfolioMeta | undefined;

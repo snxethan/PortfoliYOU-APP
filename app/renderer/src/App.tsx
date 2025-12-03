@@ -1,9 +1,9 @@
 ﻿import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
 import { Suspense, lazy, useEffect, useState, useCallback, useRef } from "react";
+
 import { startPreviewServer } from "./lib/previewServer";
 import { captureGlobalStyleSnapshot } from "./lib/styleSnapshot";
 import { appendPreviewLog, setPreviewState } from "./lib/previewInterop";
-
 import Sidebar from "./components/Sidebar";
 import PortfolioIsland from "./components/portfolio-island/PortfolioIsland";
 import FrameBar from "./components/FrameBar";
@@ -297,7 +297,7 @@ function GlobalPreviewStarter() {
       window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'success', message: 'Local preview started', href: startRes.localUrl, ctaLabel: 'Open', persistent: false } }));
       setPreviewState(selectedProjectCloudId, { running: true, localUrl: startRes.localUrl, lanUrl: startRes.lanUrl });
       window.dispatchEvent(new CustomEvent('py:preview:state', { detail: { projectId: selectedProjectCloudId, running: true, localUrl: startRes.localUrl, lanUrl: startRes.lanUrl } }));
-    } catch (err) {
+    } catch {
       window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'error', message: 'Preview start failed', persistent: false } }));
     } finally {
       setStarting(false);
@@ -325,8 +325,8 @@ function GlobalPreviewStarter() {
       setPreviewState(selectedProjectCloudId, { running: false });
       window.dispatchEvent(new CustomEvent('py:preview:state', { detail: { projectId: selectedProjectCloudId, running: false } }));
       return true;
-    } catch (err) {
-      const errMsg = '❌ Failed to stop preview: ' + (err instanceof Error ? err.message : String(err));
+    } catch {
+      const errMsg = '❌ Failed to stop preview.';
       appendPreviewLog(selectedProjectCloudId, errMsg);
       try { window.dispatchEvent(new CustomEvent('py:preview:log', { detail: { line: errMsg, projectId: selectedProjectCloudId } })); } catch { }
       window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'error', message: errMsg, persistent: false } }));

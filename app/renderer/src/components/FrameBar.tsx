@@ -80,8 +80,17 @@ export default function FrameBar() {
         // subscribe to main window events
         const unsubMax = window.api?.onWindowEvent?.('window-maximize', () => { setMaximized(true); setDragToTop(false); });
         const unsubUnmax = window.api?.onWindowEvent?.('window-unmaximize', () => { setMaximized(false); setDragToTop(false); });
-        const unsubMove = window.api?.onWindowEvent?.('window-move-top', (d: { atTop?: boolean }) => setDragToTop(Boolean(d?.atTop)));
-        const unsubState = window.api?.onWindowEvent?.('window-maximize-state', (d: { maximized?: boolean }) => { if (typeof d?.maximized === 'boolean') { setMaximized(Boolean(d.maximized)); if (d.maximized) setDragToTop(false); } });
+        const unsubMove = window.api?.onWindowEvent?.('window-move-top', (d: unknown) => {
+            const data = d as { atTop?: boolean };
+            setDragToTop(Boolean(data?.atTop));
+        });
+        const unsubState = window.api?.onWindowEvent?.('window-maximize-state', (d: unknown) => {
+            const data = d as { maximized?: boolean };
+            if (typeof data?.maximized === 'boolean') {
+                setMaximized(Boolean(data.maximized));
+                if (data.maximized) setDragToTop(false);
+            }
+        });
 
         return () => {
             try { unsubMax?.(); } catch { /* ignore */ }

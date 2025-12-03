@@ -1,5 +1,5 @@
-import React, { useEffect, useRef, Suspense, useMemo, useState, useCallback } from "react";
-import { X, ChevronsLeft, ChevronsRight, ChevronDown, ChevronRight, ChevronUp, ChevronsDown, ChevronsUp, GripVertical } from "lucide-react";
+import React, { useEffect, Suspense, useMemo, useState } from "react";
+import { X, ChevronsLeft, ChevronsRight, ChevronDown, ChevronRight, ChevronsDown, ChevronsUp, GripVertical } from "lucide-react";
 import { DndContext, PointerSensor, MouseSensor, TouchSensor, useSensor, useSensors, DragEndEvent, DragStartEvent, rectIntersection, DragOverlay, type Modifier } from "@dnd-kit/core";
 
 import EditorSettings from "../components/editor/EditorSettings";

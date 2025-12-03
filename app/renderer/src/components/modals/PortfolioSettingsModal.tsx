@@ -328,7 +328,7 @@ export default function PortfolioSettingsModal({ open, mode, projectId, cloudId,
     const [cloudBusy, setCloudBusy] = useState(false);
     const targetCloudId = project?._cloudId || cloudId || null;
     const previewProjectId = project?._cloudId || project?.id || null;
-    const showCreateCloudToggle = isCreateMode && !!user;
+    const _showCreateCloudToggle = isCreateMode && !!user;
     const showCloudSection = isCreateMode || (!!user && !isCreateMode);
     const storageLimitBytes = Math.max(cloudMaxStorageMB || 0, 0) * 1024 * 1024;
     const normalizedProjectCap = cloudMaxProjects && cloudMaxProjects > 0 ? cloudMaxProjects : 0;

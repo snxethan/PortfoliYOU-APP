@@ -2,9 +2,11 @@ import fs from 'node:fs/promises';
 import fsSync from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+
 import { marked } from 'marked';
 import createDOMPurify from 'dompurify';
 import { JSDOM } from 'jsdom';
+
 import { FALLBACK_WIDGET_THEME, themeSnapshotToCss, type WidgetThemeSnapshot } from '../shared/staticStyles';
 import { normalizeExternalLinkUrl } from '../shared/widgets/linkUrl';
 import {
@@ -898,7 +900,7 @@ export async function buildStaticSite(payload: ProjectPayload & { useTempOutput?
         for (const pid of pages) {
             const pg = pagesMap[pid] || { title: String(pid) };
             const raw = String(pg.title || pid || 'page');
-            let base = slugify(raw) || String(pid).slice(0, 8);
+            const base = slugify(raw) || String(pid).slice(0, 8);
             // ensure uniqueness
             let candidate = base;
             let i = 1;
@@ -961,7 +963,7 @@ export async function buildStaticSite(payload: ProjectPayload & { useTempOutput?
 
             const title = escapeHtml(String(pg.title || project.portfolioMeta?.siteTitle || 'Portfolio'));
             const pageBg = pg.backgroundColor || themeSnapshot.background;
-            const html = `<!doctype html>\n<html lang="en">\n<head>\n  <meta charset="utf-8" />\n  <meta name="viewport" content="width=device-width,initial-scale=1" />\n  <title>${title}</title>\n  <link rel="stylesheet" href="./assets/tailwind.css" />\n  <link rel="stylesheet" href="./assets/theme.css" />\n  <link rel="stylesheet" href="./site.css" />\n</head>\n<body style="background:${pageBg};">\n  <div class="container">\n    <div class=\"page-canvas\" style=\"position:relative;height:${height}px;max-width:${innerWidth}px;margin:0 auto;\">\n      ${widgetBodies}\n    </div>\n  </div>\n  <script src="./site.js"></script>\n</body>\n</html>`;
+            const html = `<!doctype html>\n<html lang="en">\n<head>\n  <meta charset="utf-8" />\n  <meta name="viewport" content="width=device-width,initial-scale=1" />\n  <title>${title}</title>\n  <link rel="stylesheet" href="./assets/tailwind.css" />\n  <link rel="stylesheet" href="./assets/theme.css" />\n  <link rel="stylesheet" href="./site.css" />\n</head>\n<body style="background:${pageBg};">\n  <div class="container">\n    <div class="page-canvas" style="position:relative;height:${height}px;max-width:${innerWidth}px;margin:0 auto;">\n      ${widgetBodies}\n    </div>\n  </div>\n  <script src="./site.js"></script>\n</body>\n</html>`;
 
             // Use slugified filename
             await fs.writeFile(path.join(out, pageFilenameMap[pid]), html, 'utf8');
@@ -994,7 +996,7 @@ export async function buildStaticSite(payload: ProjectPayload & { useTempOutput?
         slides.forEach(function(s,i){s.style.display=(i===0?'block':'none');});
         setInterval(function(){slides[idx].style.display='none';idx=(idx+1)%slides.length;slides[idx].style.display='block';},3500);
     });
-    const emailPattern=/^.+@.+\..+$/;
+    const emailPattern=/^.+@.+[.].+$/;
     document.querySelectorAll('.widget-contact form[data-contact-widget]').forEach(function(form){
         const nameInput=form.querySelector('input[name="contact-name"]');
         const emailInput=form.querySelector('input[name="contact-email"]');

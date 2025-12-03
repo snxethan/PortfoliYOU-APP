@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { createPortal } from 'react-dom';
 import { X, RotateCcw, ChevronDown, ChevronRight, Trash2, Copy } from 'lucide-react';
+
 import { useScrollLock } from "../../hooks/useScrollLock";
 
 export default function PageSettingsModal({

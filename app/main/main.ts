@@ -11,6 +11,7 @@ import http from "node:http";
 import fs from "node:fs/promises";
 
 import { app, BrowserWindow, shell, ipcMain, dialog, Menu, clipboard } from "electron";
+
 import { startStaticServer, stopStaticServer, isServerRunning } from './staticServer';
 
 const isDev = !!process.env.VITE_DEV_SERVER_URL;
@@ -548,7 +549,7 @@ ipcMain.handle('py:embedDistIntoProject', async (_event, opts?: { projectFilePat
           }
         });
         targetPath = projectFilePath;
-      } catch (e) {
+      } catch {
         // If loading fails, continue with empty zip and allow save-as
         targetPath = undefined;
       }
@@ -646,7 +647,7 @@ ipcMain.handle('py:buildExportFolder', async (_event, opts?: { distDir?: string;
 
             // If the HTML references '/assets/...' but was served with a leading slash, the above ensures it points to local assets/
             // Ensure a <base href="./"> exists to make relative links work when opening files from disk and when served from a subpath
-            if (!/\<base\s+href=/i.test(txt)) {
+            if (!/< base\s+href=/i.test(txt)) {
               txt = txt.replace(/(<head[^>]*>)/i, `$1\n  <base href="./">`);
             }
 

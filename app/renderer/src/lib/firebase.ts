@@ -46,8 +46,7 @@ function resolveBucketUrl(): string {
 
     // If someone provided a web download host (e.g., "project.firebasestorage.app")
     // convert it to a bucket ID. Prefer projectId mapping when available.
-    const projId = (app.options as { projectId?: string }).projectId;
-    const lower = bucket.toLowerCase();
+    // const projId = (app.options as { projectId?: string }).projectId; // not used currently
     // Buckets can be named like "<project>.appspot.com" (legacy default) or any custom string,
     // including ones that end with `.firebasestorage.app`. Treat the provided host as the bucket
     // identifier instead of forcing an appspot suffix so custom/modern buckets work out of the box.

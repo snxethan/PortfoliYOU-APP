@@ -3,7 +3,6 @@ import { createPortal } from "react-dom";
 import { unlink } from "firebase/auth";
 import {
     AlertTriangle,
-    CheckCircle2,
     ChevronDown,
     ChevronRight,
     Chrome,
@@ -109,8 +108,6 @@ export default function AccountSettingsModal({ open, onClose }: { open: boolean;
         cloud: true
     });
     const [cloudAction, setCloudAction] = useState<{ id: string; kind: CloudActionKind } | null>(null);
-    const privacyUrl = `${ACCOUNT_PORTAL_BASE}/account/privacy`;
-    const supportUrl = `${ACCOUNT_PORTAL_BASE}/support`;
     const deleteAccountUrl = `${ACCOUNT_PORTAL_BASE}/account/delete`;
 
     const currentUser = useMemo(() => auth.currentUser ?? user, [user, refreshVersion]);

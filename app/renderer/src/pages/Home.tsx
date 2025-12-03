@@ -48,7 +48,7 @@ export default function HomePage() {
 	}, [notificationsOpen]);
 
 	useEffect(() => {
-		const handler = (e: any) => {
+		const handler = (_e: any) => {
 			try { setNotificationsOpen(v => !v); } catch { /* ignore */ }
 		};
 		window.addEventListener('py:toggle-notifications', handler as EventListener);
@@ -57,7 +57,7 @@ export default function HomePage() {
 
 	// Also respond to highlight requests specifically for notifications (from other UI)
 	useEffect(() => {
-		const onHighlight = (e: any) => {
+		const onHighlight = (_e: any) => {
 			try {
 				// ensure the center is open, then pulse
 				setNotificationsOpen(true);
@@ -176,7 +176,7 @@ export default function HomePage() {
 			{/* Account panel – show only when signed in */}
 			{user && (
 				<section>
-					<div id="py-account" ref={accountRef}>
+					<div id="py-account" ref={accountRef} className={`${pulseAccount ? 'highlight-pulse' : ''}`}>
 						<AccountDashboard
 							userDisplay={(user?.email ?? user?.uid) as string}
 							usageMB={usageMb}
@@ -184,7 +184,6 @@ export default function HomePage() {
 							projectCount={projectCountStat}
 							projectQuota={cloudQuota}
 							onOpenSettings={() => setAccountOpen(true)}
-							highlight={pulseAccount}
 							linkedProviders={auth.currentUser?.providerData || []}
 						/>
 					</div>
