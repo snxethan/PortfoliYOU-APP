@@ -49,6 +49,14 @@
 		--body-font: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
 		--font-scale: 1;
 		--color-scheme: dark;
+		/* Portfolio island tokens */
+		--island-radius: 1.6rem;
+		--island-section-radius: 1.2rem;
+		--island-elevation: 0 32px 70px -45px rgba(2, 6, 23, 0.9);
+		--island-section-shadow: 0 18px 45px -30px rgba(2, 6, 23, 0.65);
+		--island-motion-fast: clamp(120ms, 0.45vw, 210ms);
+		--island-motion-medium: clamp(170ms, 0.6vw, 300ms);
+		--island-motion-slow: clamp(230ms, 0.75vw, 420ms);
 	}
 
 	/* Light mode: white background, cyan highlights (accent becomes cyan) */
@@ -585,6 +593,203 @@
 .window-control--close:hover {
 	background: #c2410c;
 	color: #fff;
+}
+
+/* Portfolio island scaffolding ensures responsive behavior without shifting the primary styling. */
+.portfolio-island {
+	width: 100%;
+	min-width: min(320px, 100%);
+}
+
+.portfolio-island__surface {
+	min-height: 300px;
+	max-width: 100%;
+	overflow: hidden;
+	border-radius: 1.6rem;
+	position: relative;
+	isolation: isolate;
+	background: color-mix(in oklab, var(--surface) 98%, transparent);
+	box-shadow: var(--island-section-shadow, 0 18px 45px -28px rgba(15, 23, 42, 0.4));
+	transition: padding var(--island-motion-medium, 200ms) ease, box-shadow var(--island-motion-medium, 200ms) ease;
+}
+
+.portfolio-island__row {
+	width: 100%;
+}
+
+.portfolio-island__project-card {
+	min-width: min(320px, 100%);
+}
+
+
+.portfolio-island__project-row {
+	width: 100%;
+}
+
+.portfolio-island__project-button {
+	width: 100%;
+	min-height: 3.2rem;
+}
+
+.portfolio-island__project-meta {
+	min-width: 0;
+}
+
+.portfolio-island__project-actions {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.25rem;
+	margin-left: auto;
+}
+
+.portfolio-island__toolbar {
+	min-width: min(280px, 100%);
+}
+
+.portfolio-island__segment {
+	min-width: 0;
+	flex: 1 1 260px;
+	width: 100%;
+	display: flex;
+	flex-direction: column;
+	align-items: stretch;
+	gap: 0.45rem;
+	padding: 1rem 1.15rem;
+	border-radius: 1.35rem;
+	background-clip: padding-box;
+	background: color-mix(in oklab, var(--surface) 92%, transparent);
+	box-shadow: none;
+}
+
+.portfolio-island__segment-label {
+	flex: 0 0 auto;
+	display: flex;
+	align-items: center;
+	width: 100%;
+}
+
+.portfolio-island__segment-actions {
+	flex: 1 1 auto;
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.35rem;
+	margin-left: 0;
+	align-items: center;
+	width: 100%;
+}
+
+.portfolio-island__segment-action {
+	min-height: 2.1rem;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 0.3rem;
+	width: auto;
+	flex: 1 1 clamp(110px, 20%, 200px);
+	max-width: calc(20% - 0.35rem);
+	min-width: 110px;
+}
+
+.portfolio-island__segment-action.btn {
+	padding: 0.45rem 0.65rem;
+	font-size: 0.92rem;
+}
+
+
+.portfolio-island__status-chip {
+	min-width: 140px;
+}
+
+.portfolio-island__controls-slider {
+	background: color-mix(in oklab, var(--surface) 90%, transparent);
+	border-radius: 0.75rem;
+	max-width: min(240px, calc(100% - 3rem));
+	padding: 0.2rem 0.45rem;
+	border: 1px solid color-mix(in oklab, var(--border) 75%, transparent);
+	overflow: hidden;
+}
+
+.portfolio-island__controls-slider .accent-range {
+	flex: 1 1 auto;
+	min-width: 110px;
+	max-width: 160px;
+}
+
+.portfolio-island__badge {
+	top: clamp(-0.35rem, -0.4vw, -0.15rem);
+	right: clamp(-0.35rem, -0.4vw, -0.15rem);
+}
+
+@media (max-width: 960px) {
+	.portfolio-island__segment-actions {
+		justify-content: flex-start;
+	}
+
+	.portfolio-island__segment-action {
+		max-width: 100%;
+	}
+}
+
+@media (max-width: 640px) {
+	.portfolio-island__row {
+		flex-direction: column;
+	}
+
+	.portfolio-island__surface {
+		max-height: 85vh;
+	}
+
+	.portfolio-island__status-chip {
+		min-width: 0;
+	}
+}
+
+@media (max-width: 700px) {
+	.portfolio-island__surface {
+		padding: 2.5rem 1rem 4.75rem 1rem;
+	}
+
+	.portfolio-island__row {
+		gap: 0.75rem;
+	}
+
+	.portfolio-island__segment {
+		padding: 0.7rem 0.9rem;
+		border-radius: 0.85rem;
+		gap: 0.45rem;
+	}
+
+	.portfolio-island__segment-label span {
+		font-size: 0.65rem;
+		letter-spacing: 0.25em;
+	}
+
+	.portfolio-island__segment-actions {
+		gap: 0.35rem;
+	}
+
+	.portfolio-island__segment-action {
+		width: 100%;
+		justify-content: center;
+	}
+
+	.portfolio-island__segment-action.btn {
+		padding: 0.5rem 0.65rem;
+	}
+
+	.portfolio-island__project-button {
+		flex-direction: column;
+		align-items: flex-start;
+		gap: 0.65rem;
+	}
+
+	.portfolio-island__project-actions {
+		width: 100%;
+		margin-left: 0;
+		justify-content: flex-start;
+		flex-wrap: wrap;
+	}
+
 }
 
 /* Portfolio island: use CSS variable --island-opacity (0.25 - 1) to control background transparency
