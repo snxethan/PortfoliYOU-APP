@@ -1,4 +1,4 @@
-﻿import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
+﻿import { HashRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
 import { Suspense, lazy, useEffect, useState, useCallback, useRef } from "react";
 
 import { startPreviewServer } from "./lib/previewServer";
@@ -50,7 +50,7 @@ export default function App() {
 
   return (
     <ErrorBoundary>
-      <BrowserRouter>
+      <HashRouter>
         <NotificationsProvider>
           <ProjectsProvider>
             <AssetsProvider>
@@ -66,7 +66,7 @@ export default function App() {
                     style={{ marginLeft: 'var(--sidebar-w, 15rem)' }}
                     className="min-h-screen flex flex-col px-8 pb-12 pt-6 transition-[margin-left] duration-200 min-w-0"
                   >
-                    <PortfolioIsland />
+                    <PortfolioIslandWrapper />
                     <main className="flex-1 min-w-0">
                       <Suspense fallback={
                         <div className="flex items-center justify-center py-16">
@@ -102,7 +102,7 @@ export default function App() {
             </AssetsProvider>
           </ProjectsProvider>
         </NotificationsProvider>
-      </BrowserRouter>
+      </HashRouter>
     </ErrorBoundary>
   );
 }
@@ -133,6 +133,14 @@ function SaveHotkeys() {
 
 const MIN_APP_ZOOM = 0.8;
 const MAX_APP_ZOOM = 1.6;
+
+function PortfolioIslandWrapper() {
+  const location = useLocation();
+  const { selectedProjectId } = useProjects();
+  // Show island when there's a selected project, even on home page
+  // The island itself handles its visibility state
+  return <PortfolioIsland />;
+}
 
 function GlobalZoomControls() {
   const location = useLocation();

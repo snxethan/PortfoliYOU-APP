@@ -1,13 +1,11 @@
 import '../types/electron.d.ts';
 import React, { createContext, useContext, useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { onAuthStateChanged } from "firebase/auth";
+import { auth, db, storage } from "../lib/firebase";
 import { collection, doc, getDoc, getDocs, setDoc, serverTimestamp, query, where, orderBy, onSnapshot, writeBatch, deleteDoc } from "firebase/firestore";
 import type { FirestoreError, Unsubscribe } from "firebase/firestore";
 import { ref as storageRef, uploadBytes, getDownloadURL, getMetadata, getBytes, deleteObject } from "firebase/storage";
 import JSZip from "jszip";
-
-// Initialized Firebase instances (auth, db, storage)
-import { auth, db, storage } from "../lib/firebase";
 
 import type { VideoWidgetProps } from "../../../shared/widgets/videoProps";
 import type { Theme, ThemePatch } from "../themes/types";

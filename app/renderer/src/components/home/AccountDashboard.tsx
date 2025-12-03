@@ -33,10 +33,12 @@ export default function AccountDashboard({
         <div className="surface border border-[color:var(--border)] rounded-2xl p-4 shadow-lg shadow-black/20 bg-[color:var(--surface)]/80 account-dashboard transition-all duration-300 ease-in-out" style={{ animation: 'py-pop 0.4s ease-out' }}>
             <div className="account-dashboard__header">
                 <div className="account-dashboard__identity">
-                    <p className="section-title">Account dashboard</p>
-                    <p className="text-sm text-[color:var(--fg)] mt-0.5 leading-tight break-words">
-                        <span className="font-medium">{userDisplay}</span>
-                    </p>
+                    <div className="flex flex-col gap-1">
+                        <p className="section-title">Account dashboard</p>
+                        <p className="text-sm text-[color:var(--fg-muted)] leading-tight break-words">
+                            <span className="font-medium text-[color:var(--fg)]">{userDisplay}</span>
+                        </p>
+                    </div>
                 </div>
                 <div className="account-dashboard__actions">
                     <button className="btn btn-sm shadow-sm account-dashboard__settings-btn" onClick={onOpenSettings} title="Open account settings">

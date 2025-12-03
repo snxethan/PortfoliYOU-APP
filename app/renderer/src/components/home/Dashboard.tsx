@@ -30,15 +30,23 @@ export default function Dashboard({
                         />
                     </div>
                     <div className="portfolio-workspace-card__text">
-                        <p className="text-xs uppercase tracking-[0.2em] text-[color:var(--fg-muted)] mb-1">portfoliyou.snxethan.dev</p>
+                        <a
+                            href="https://portfoliyou.snxethan.dev"
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-xs uppercase tracking-[0.2em] text-[color:var(--fg-muted)] mb-1 inline-block cursor-pointer hover:text-[color:var(--accent)] transition-colors"
+                            title="Visit portfoliyou.snxethan.dev"
+                        >
+                            portfoliyou.snxethan.dev
+                        </a>
                         <h1 className="section-title text-2xl tracking-tight">Portfoli-YOU</h1>
                         <p className="text-sm text-[color:var(--fg-muted)]">A Portfolio for you, by you.</p>
                     </div>
                 </div>
                 <div className="portfolio-workspace-card__tabs">
-                    <a className="portfolio-workspace-card__tab btn btn-ghost btn-sm" href="https://portfoliyou.snxethan.dev" target="_blank" rel="noreferrer">Website</a>
-                    <a className="portfolio-workspace-card__tab btn btn-ghost btn-sm" href="https://portfoliyou.snxethan.dev/about" target="_blank" rel="noreferrer">FAQs</a>
-                    <a className="portfolio-workspace-card__tab btn btn-ghost btn-sm" href="https://portfoliyou.snxethan.dev/changelog" target="_blank" rel="noreferrer">Changelog</a>
+                    <a className="portfolio-workspace-card__tab btn btn-ghost btn-sm hover:bg-[color:var(--muted)] hover:border-[color:var(--border)] transition-colors" href="https://portfoliyou.snxethan.dev" target="_blank" rel="noreferrer">Website</a>
+                    <a className="portfolio-workspace-card__tab btn btn-ghost btn-sm hover:bg-[color:var(--muted)] hover:border-[color:var(--border)] transition-colors" href="https://portfoliyou.snxethan.dev/about" target="_blank" rel="noreferrer">FAQs</a>
+                    <a className="portfolio-workspace-card__tab btn btn-ghost btn-sm hover:bg-[color:var(--muted)] hover:border-[color:var(--border)] transition-colors" href="https://portfoliyou.snxethan.dev/changelog" target="_blank" rel="noreferrer">Changelog</a>
                 </div>
             </div>
             <div className="portfolio-workspace-card__cta">

@@ -100,6 +100,22 @@ export default function FrameBar() {
         };
     }, []);
 
+    // Sync zoom state with document.body.style.zoom (updated by Electron keyboard shortcuts)
+    useEffect(() => {
+        const syncZoom = () => {
+            const currentZoom = parseFloat(document.body.style.zoom || '1');
+            setZoom(currentZoom);
+        };
+
+        // Initial sync
+        syncZoom();
+
+        // Poll for changes (Electron's built-in zoom doesn't fire events)
+        const interval = setInterval(syncZoom, 100);
+
+        return () => clearInterval(interval);
+    }, []);
+
     async function onMinimize() {
         try { await window.api?.windowMinimize?.(); } catch { /* ignore */ }
     }
@@ -117,18 +133,22 @@ export default function FrameBar() {
     }
 
     function handleZoomIn() {
-        setZoom(prev => Math.min(prev + 0.1, 2));
-        document.body.style.zoom = String(Math.min(zoom + 0.1, 2));
+        const currentZoom = parseFloat(document.body.style.zoom || '1');
+        const newZoom = Math.min(currentZoom + 0.1, 2);
+        document.body.style.zoom = String(newZoom);
+        setZoom(newZoom);
     }
 
     function handleZoomOut() {
-        setZoom(prev => Math.max(prev - 0.1, 0.5));
-        document.body.style.zoom = String(Math.max(zoom - 0.1, 0.5));
+        const currentZoom = parseFloat(document.body.style.zoom || '1');
+        const newZoom = Math.max(currentZoom - 0.1, 0.8);
+        document.body.style.zoom = String(newZoom);
+        setZoom(newZoom);
     }
 
     return (
         <div className="window-frame">
-            <div className="window-frame__left flex items-center pl-1 gap-1" style={{ pointerEvents: 'auto' }}>
+            <div className="window-frame__left">
                 <button
                     type="button"
                     className="window-control"
@@ -139,31 +159,31 @@ export default function FrameBar() {
                 >
                     <IconDevtools />
                 </button>
-                <div className="flex items-center gap-0.5 ml-1">
-                    <button
-                        type="button"
-                        className="window-control"
-                        title="Zoom Out"
-                        onClick={handleZoomOut}
-                        onMouseDown={(e) => e.stopPropagation()}
-                        aria-label="Zoom Out"
-                        disabled={zoom <= 0.5}
-                    >
-                        <IconZoomOut />
-                    </button>
-                    <span className="text-[10px] text-[color:var(--fg-muted)] px-1 min-w-[32px] text-center select-none">{Math.round(zoom * 100)}%</span>
-                    <button
-                        type="button"
-                        className="window-control"
-                        title="Zoom In"
-                        onClick={handleZoomIn}
-                        onMouseDown={(e) => e.stopPropagation()}
-                        aria-label="Zoom In"
-                        disabled={zoom >= 2}
-                    >
-                        <IconZoomIn />
-                    </button>
+                <button
+                    type="button"
+                    className="window-control"
+                    title="Zoom Out"
+                    onClick={handleZoomOut}
+                    onMouseDown={(e) => e.stopPropagation()}
+                    aria-label="Zoom Out"
+                    disabled={zoom <= 0.8}
+                >
+                    <IconZoomOut />
+                </button>
+                <div className="flex items-center justify-center px-2 h-full" style={{ minWidth: '48px' }}>
+                    <span className="text-[10px] text-[color:var(--fg-muted)] select-none">{Math.round(zoom * 100)}%</span>
                 </div>
+                <button
+                    type="button"
+                    className="window-control"
+                    title="Zoom In"
+                    onClick={handleZoomIn}
+                    onMouseDown={(e) => e.stopPropagation()}
+                    aria-label="Zoom In"
+                    disabled={zoom >= 2}
+                >
+                    <IconZoomIn />
+                </button>
             </div>
             <div className="window-frame__center flex items-center justify-center gap-2" aria-hidden={false}>
                 <div className="relative flex items-center gap-2">

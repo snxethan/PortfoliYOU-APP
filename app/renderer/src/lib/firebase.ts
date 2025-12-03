@@ -1,4 +1,7 @@
 // Import the functions you need from the SDKs you need
+// For Electron packaged apps: The app now uses signInWithRedirect for OAuth (not popup).
+// Firebase auth redirect works with file:// protocol. Your authDomain (portfoli-you.firebaseapp.com)
+// should already be in Firebase Console > Authentication > Authorized domains by default.
 import { initializeApp } from "firebase/app";
 import { getAuth, setPersistence, browserLocalPersistence } from "firebase/auth";
 import { getFirestore, enableIndexedDbPersistence } from "firebase/firestore";

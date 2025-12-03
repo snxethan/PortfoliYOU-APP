@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useState } from "react";
 import { onAuthStateChanged, type User } from "firebase/auth";
 
 import { auth } from "../lib/firebase";
+import { checkRedirectResult } from "../lib/auth";
 
 interface AuthContextType {
   user: User | null;
@@ -15,8 +16,13 @@ export const useAuth = () => useContext(AuthCtx);
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
-  
+
   useEffect(() => {
+    // Check for OAuth redirect result first (for Electron production builds)
+    checkRedirectResult().catch((err) => {
+      console.warn('Redirect result check failed:', err);
+    });
+
     // Centralized onAuthStateChanged - single source of truth for auth state
     const unsub = onAuthStateChanged(auth, (newUser) => {
       if (newUser) {
@@ -39,6 +45,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     });
     return unsub;
   }, []);
-  
+
   return <AuthCtx.Provider value={{ user, loading }}>{children}</AuthCtx.Provider>;
 }

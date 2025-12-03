@@ -19,6 +19,7 @@ export default function PortfolioIsland(): React.ReactElement | null {
   const selectedProjectCloudId = selectedProject?._cloudId ?? selectedProjectId ?? (selectedProject as any)?.id ?? null;
   const isCloudLinked = !!(selectedProject?._synced || selectedProject?._cloudId || selectedProject?.storage === 'cloud');
   const isCloudProject = isCloudLinked;
+  const [animKey, setAnimKey] = React.useState(0);
   const [pinned, setPinned] = useState<boolean>(() => {
     try { return localStorage.getItem('py_island_pin') === '1'; } catch { return false; }
   });
@@ -40,6 +41,14 @@ export default function PortfolioIsland(): React.ReactElement | null {
   // When on the Home page with no selected portfolio, keep the island mounted
   // but visually hide it to avoid changing hook order during quick selection changes.
   const shouldVisuallyHide = location.pathname === '/' && !hasSelection;
+
+  // Trigger animation on route change
+  React.useEffect(() => {
+    if (!shouldVisuallyHide) {
+      setAnimKey(prev => prev + 1);
+    }
+  }, [location.pathname, shouldVisuallyHide]);
+
   // When pinned, keep the island positioned beneath the fixed FrameBar (36px / top-9)
   const containerClass = `${pinned ? 'sticky top-9' : 'relative'} px-4 pt-4`;
   const containerStyle = useMemo(() => ({ zIndex: pinned ? 1200 : 900 }), [pinned]);
@@ -131,6 +140,7 @@ export default function PortfolioIsland(): React.ReactElement | null {
 
   return (
     <div
+      key={animKey}
       className={`portfolio-island ${containerClass} ${shouldVisuallyHide ? 'opacity-0 pointer-events-none h-0 overflow-hidden' : ''}`}
       style={{ ...containerStyle, animation: shouldVisuallyHide ? undefined : 'py-pop 0.4s ease-out' }}
     >
@@ -155,10 +165,10 @@ export default function PortfolioIsland(): React.ReactElement | null {
                 }}
               >
                 <div className="portfolio-island__project-meta flex flex-col min-w-0">
-                  <span className="text-base font-semibold leading-tight truncate">
+                  <span className="text-base font-semibold leading-tight break-words">
                     {selectedProject ? selectedProject.name : 'No Portfolio Selected'}
                   </span>
-                  <span className="text-xs text-[color:var(--fg-muted)]">{selectedProject?.description}</span>
+                  <span className="text-xs text-[color:var(--fg-muted)] break-words">{selectedProject?.description}</span>
                 </div>
                 <div className="portfolio-island__project-actions flex flex-wrap items-center gap-1 mt-2">
                   {statusChip}

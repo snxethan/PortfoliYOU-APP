@@ -1,10 +1,16 @@
 import {
-  GoogleAuthProvider, signInWithPopup,
+  GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult,
   createUserWithEmailAndPassword, signInWithEmailAndPassword,
   sendEmailVerification, signOut
 } from "firebase/auth";
 
 import { auth } from "./firebase";
+
+// Detect if we're in an Electron production build (file:// protocol)
+const isElectronProduction = () => {
+  if (typeof window === 'undefined') return false;
+  return window.location.protocol === 'file:';
+};
 
 export const signInGoogle = async () => {
   const provider = new GoogleAuthProvider();
@@ -12,7 +18,10 @@ export const signInGoogle = async () => {
   provider.setCustomParameters({
     prompt: 'select_account'
   });
+
   try {
+    // Always use popup, even in Electron production
+    // The main process is configured to allow Google auth popups
     const result = await signInWithPopup(auth, provider);
     console.log('✅ Google Sign-In Success:', {
       email: result.user.email,
@@ -26,6 +35,25 @@ export const signInGoogle = async () => {
     console.error('❌ Google Sign-In Error:', error);
     // TODO: Analytics - Track sign-in failure
     // analytics.logEvent('login_failed', { method: 'google', error: error.code });
+    throw error;
+  }
+};
+
+// Check for redirect result after OAuth redirect (for Electron production)
+export const checkRedirectResult = async () => {
+  try {
+    const result = await getRedirectResult(auth);
+    if (result?.user) {
+      console.log('✅ Google Sign-In Success (redirect):', {
+        email: result.user.email,
+        uid: result.user.uid,
+        provider: 'google.com'
+      });
+      return result.user;
+    }
+    return null;
+  } catch (error: unknown) {
+    console.error('❌ Redirect Result Error:', error);
     throw error;
   }
 };

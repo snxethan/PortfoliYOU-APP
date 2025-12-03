@@ -15,7 +15,6 @@ export default function SignInCard() {
   const [pw, setPw] = useState("");
   const [msg, setMsg] = useState<string | null>(null);
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
-  // Hooks must not be conditionally rendered; declare here
   const [accountSettingsOpen, setAccountSettingsOpen] = useState(false);
 
   const handleGoogleSignIn = async () => {
@@ -145,6 +144,7 @@ export default function SignInCard() {
       </div>
     );
   }
+
   const verified = user.emailVerified ?? false;
   return (
     <div className="space-y-3">

@@ -76,6 +76,17 @@
       "app/**",
       "dist/**",
       "out/**"
-    ]
+    ],
+    "win": {
+      "icon": "app/renderer/public/icon.png",
+      "artifactName": "Portfoli-YOU-${version}.exe"
+    },
+    "mac": {
+      "icon": "app/renderer/public/icon.png",
+      "artifactName": "Portfoli-YOU-${version}.dmg"
+    },
+    "linux": {
+      "icon": "app/renderer/public/icon.png"
+    }
   }
 }

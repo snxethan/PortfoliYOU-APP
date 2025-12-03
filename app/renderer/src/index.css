@@ -606,10 +606,16 @@
 }
 
 .window-frame__left {
+	-webkit-app-region: no-drag;
 	min-width: 56px;
 	display: flex;
 	align-items: center;
-	gap: 8px;
+	gap: 0;
+}
+
+.window-frame__left .window-control {
+	width: 44px;
+	height: 100%;
 }
 
 
@@ -740,27 +746,30 @@
 .portfolio-island__project-button {
 	width: 100%;
 	min-height: 3.2rem;
-	min-width: min(360px, 100%);
+	min-width: 0;
 	display: flex;
-	flex-direction: row;
+	flex-direction: column;
 	align-items: stretch;
-	justify-content: space-between;
-	gap: clamp(0.75rem, 1vw, 1.35rem);
-	overflow: hidden;
+	justify-content: flex-start;
+	gap: clamp(0.5rem, 1vw, 0.75rem);
+	overflow: visible;
 }
 
 .portfolio-island__project-meta {
 	min-width: 0;
 	flex: 1 1 auto;
+	word-wrap: break-word;
+	overflow-wrap: break-word;
 }
 
 .portfolio-island__project-actions {
-	display: inline-flex;
+	display: flex;
 	align-items: center;
 	gap: 0.35rem;
 	flex-wrap: wrap;
-	justify-content: flex-end;
-	flex: 0 0 auto;
+	justify-content: flex-start;
+	flex: 1 1 auto;
+	min-width: 0;
 }
 
 .portfolio-island__badge {
