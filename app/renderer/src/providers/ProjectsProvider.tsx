@@ -6,6 +6,9 @@ import type { FirestoreError, Unsubscribe } from "firebase/firestore";
 import { ref as storageRef, uploadBytes, getDownloadURL, getMetadata, getBytes, deleteObject } from "firebase/storage";
 import JSZip from "jszip";
 
+// Initialized Firebase instances (auth, db, storage)
+import { auth, db, storage } from "../lib/firebase";
+
 import type { VideoWidgetProps } from "../../../shared/widgets/videoProps";
 import type { Theme, ThemePatch } from "../themes/types";
 import { THEME_PRESETS, DEFAULT_THEME_PRESET_ID, getPresetById } from "../themes/presets";
