@@ -293,6 +293,7 @@ type ProjectsCtx = {
 	reconcileCloudLinks: (knownCloudIds: string[]) => void;
 	// Pages
 	createPage: (projectId: string, title?: string) => string | null;
+	duplicatePage: (projectId: string, pageId: string) => string | null;
 	renamePage: (projectId: string, pageId: string, newTitle: string) => void;
 	deletePage: (projectId: string, pageId: string) => void;
 	setPageStarter: (projectId: string, pageId: string, starter: boolean) => void;
@@ -1239,6 +1240,58 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 				}
 				notify({ type: 'success', message: `Page "${page.title}" created`, title: nextProj.name, persistent: false });
 				return pid;
+			},
+			duplicatePage: (projectId: string, pageId: string) => {
+				const idx = projects.findIndex(p => p.id === projectId); if (idx < 0) return null;
+				const proj = projects[idx];
+				const sourcePage = proj.pages[pageId]; if (!sourcePage) return null;
+				const isCloud = !!proj._cloudId;
+				const current = proj.pageOrder?.length ?? 0;
+				if (isCloud && current >= 10) {
+					window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'warn', message: 'Cloud projects can have up to 10 pages. Delete a page to add another.' } }));
+					return null;
+				}
+				const newPageId = `page_${crypto.randomUUID()}`;
+				const order = current;
+				const newPage: Page = {
+					...sourcePage,
+					pageId: newPageId,
+					title: `${sourcePage.title} copy`,
+					order,
+					widgets: [], // Will be populated with duplicated widgets
+					createdAt: now(),
+					updatedAt: now(),
+				};
+				// Duplicate all widgets from the source page
+				const sourceWidgetIds = sourcePage.widgets || [];
+				const newWidgetIds: string[] = [];
+				const newWidgets: Record<string, Widget> = {};
+				for (const oldWidId of sourceWidgetIds) {
+					const oldWidget = proj.widgets[oldWidId];
+					if (!oldWidget) continue;
+					const newWidId = `widget_${crypto.randomUUID()}`;
+					newWidgetIds.push(newWidId);
+					newWidgets[newWidId] = {
+						...oldWidget,
+						widgetId: newWidId,
+						createdAt: now(),
+						updatedAt: now(),
+					};
+				}
+				newPage.widgets = newWidgetIds;
+				const nextProj: LocalProject = {
+					...proj,
+					pageOrder: [...proj.pageOrder, newPageId],
+					pages: { ...proj.pages, [newPageId]: newPage },
+					widgets: { ...proj.widgets, ...newWidgets },
+					updatedAt: now(),
+				} as LocalProject;
+				const next = [...projects]; next[idx] = nextProj; setProjects(next); writeStore(next);
+				if (!isCloud) {
+					notify({ type: 'info', message: 'Adding more pages increases your project file size.', title: nextProj.name, persistent: false });
+				}
+				notify({ type: 'success', message: `Page "${newPage.title}" created from duplicate`, title: nextProj.name, persistent: false });
+				return newPageId;
 			},
 			renamePage: (projectId: string, pageId: string, newTitle: string) => {
 				const idx = projects.findIndex(p => p.id === projectId); if (idx < 0) return;

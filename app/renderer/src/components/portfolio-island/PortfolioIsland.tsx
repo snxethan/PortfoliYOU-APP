@@ -22,6 +22,7 @@ export default function PortfolioIsland(): React.ReactElement | null {
   const [pinned, setPinned] = useState<boolean>(() => {
     try { return localStorage.getItem('py_island_pin') === '1'; } catch { return false; }
   });
+  const [pinAnimation, setPinAnimation] = useState<'none' | 'bounce'>('none');
   const [opacity, setOpacity] = useState<number>(() => {
     try {
       const v = Number(localStorage.getItem('py_island_opacity'));
@@ -131,10 +132,10 @@ export default function PortfolioIsland(): React.ReactElement | null {
   return (
     <div
       className={`portfolio-island ${containerClass} ${shouldVisuallyHide ? 'opacity-0 pointer-events-none h-0 overflow-hidden' : ''}`}
-      style={containerStyle}
+      style={{ ...containerStyle, animation: shouldVisuallyHide ? undefined : 'py-pop 0.4s ease-out' }}
     >
       <div
-        className={`portfolio-island__surface surface relative border border-[color:var(--border)] rounded-2xl ${compactMode ? 'px-3 pt-4 pb-4 sm:pt-5 sm:pb-6 lg:pb-5 sm:pr-5' : 'px-4 pt-5 pb-5 sm:pt-6 sm:pb-6 lg:pb-5 sm:pr-6'} shadow-lg bg-[color:var(--surface)]/85 transition w-full overflow-x-hidden ${hasSelection ? 'ring-2 ring-[color:var(--accent)]/45 ring-offset-2 ring-offset-[color:var(--bg,transparent)]' : 'ring-2 ring-[color:var(--accent)]/25 ring-offset-2 ring-offset-[color:var(--bg,transparent)]'} ${compactMode ? 'portfolio-island__surface--compact' : ''}`}
+        className={`portfolio-island__surface surface relative border border-[color:var(--border)] rounded-2xl ${compactMode ? 'px-3 pt-4 pb-4 sm:pt-5 sm:pb-6 lg:pb-5 sm:pr-5' : 'px-4 pt-5 pb-5 sm:pt-6 sm:pb-6 lg:pb-5 sm:pr-6'} shadow-lg bg-[color:var(--surface)]/85 transition-all duration-300 ease-in-out w-full overflow-x-hidden ${hasSelection ? 'ring-2 ring-[color:var(--accent)]/45 ring-offset-2 ring-offset-[color:var(--bg,transparent)]' : 'ring-2 ring-[color:var(--accent)]/25 ring-offset-2 ring-offset-[color:var(--bg,transparent)]'} ${compactMode ? 'portfolio-island__surface--compact' : ''}`}
         style={islandStyle}
       >
         <div className="portfolio-island__row mt-1 flex flex-wrap w-full gap-2 items-stretch sm:items-start">
@@ -159,10 +160,11 @@ export default function PortfolioIsland(): React.ReactElement | null {
                   </span>
                   <span className="text-xs text-[color:var(--fg-muted)]">{selectedProject?.description}</span>
                 </div>
-                <div className="portfolio-island__project-actions flex flex-wrap items-center gap-1">
+                <div className="portfolio-island__project-actions flex flex-wrap items-center gap-1 mt-2">
+                  {statusChip}
                   <button
                     type="button"
-                    className={iconButtonBase}
+                    className={`${iconButtonBase} ${!compactMode ? 'gap-1.5' : ''}`}
                     disabled={!hasSelection}
                     title="Portfolio settings"
                     onClick={(e) => {
@@ -171,10 +173,11 @@ export default function PortfolioIsland(): React.ReactElement | null {
                     }}
                   >
                     <Settings size={16} />
+                    {!compactMode && <span className="text-xs">Settings</span>}
                   </button>
                   <button
                     type="button"
-                    className={iconButtonBase}
+                    className={`${iconButtonBase} ${!compactMode ? 'gap-1.5' : ''}`}
                     disabled={!hasSelection}
                     title="Theme settings"
                     onClick={(e) => {
@@ -183,10 +186,11 @@ export default function PortfolioIsland(): React.ReactElement | null {
                     }}
                   >
                     <Palette size={16} />
+                    {!compactMode && <span className="text-xs">Theme</span>}
                   </button>
                   <button
                     type="button"
-                    className={`${iconButtonBase} ${isCloudLinked ? 'border border-[color:var(--accent)]/40 bg-[color:var(--accent)]/10 text-[color:var(--accent)] shadow-sm' : ''}`}
+                    className={`${iconButtonBase} ${!compactMode ? 'gap-1.5' : ''} ${isCloudLinked ? 'border border-[color:var(--accent)]/40 bg-[color:var(--accent)]/10 text-[color:var(--accent)] shadow-sm' : ''}`}
                     disabled={!hasSelection}
                     title={isCloudLinked ? 'Cloud portfolio' : 'Not in cloud'}
                     aria-pressed={isCloudLinked}
@@ -196,10 +200,11 @@ export default function PortfolioIsland(): React.ReactElement | null {
                     }}
                   >
                     <Cloud size={16} />
+                    {!compactMode && <span className="text-xs">Cloud</span>}
                   </button>
                   <button
                     type="button"
-                    className={`${iconButtonBase} relative`}
+                    className={`${iconButtonBase} ${!compactMode ? 'gap-1.5' : ''} relative`}
                     title="Notifications"
                     aria-label="Notifications"
                     onClick={(e) => {
@@ -220,13 +225,13 @@ export default function PortfolioIsland(): React.ReactElement | null {
                         {notifications.length}
                       </span>
                     )}
+                    {!compactMode && <span className="text-xs">Notifications</span>}
                   </button>
                 </div>
               </div>
             </div>
           </div>
           <div className="portfolio-island__toolbar flex flex-1 sm:flex-[0_0_auto] flex-wrap items-center gap-2 w-full sm:w-auto justify-end min-w-0">
-            {statusChip}
             {pinned && (
               <div className="portfolio-island__controls-slider flex flex-1 items-center gap-2 px-2 min-w-0">
                 <label className="text-[10px] text-[color:var(--fg-muted)] whitespace-nowrap">Opacity</label>
@@ -252,20 +257,26 @@ export default function PortfolioIsland(): React.ReactElement | null {
             )}
             <button
               type="button"
-              className={iconButtonBase}
+              className={`${iconButtonBase} ${!compactMode ? 'gap-1.5' : ''}`}
               title={pinned ? "Unpin island from top" : "Pin island to top"}
               aria-pressed={pinned}
-              onClick={() => setPinned(prev => {
-                const next = !prev;
-                try { localStorage.setItem('py_island_pin', next ? '1' : '0'); } catch { /* ignore */ }
-                return next;
-              })}
+              style={{ animation: pinAnimation === 'bounce' ? 'py-bounce 0.4s ease-in-out' : undefined }}
+              onClick={() => {
+                setPinned(prev => {
+                  const next = !prev;
+                  try { localStorage.setItem('py_island_pin', next ? '1' : '0'); } catch { /* ignore */ }
+                  setPinAnimation('bounce');
+                  setTimeout(() => setPinAnimation('none'), 400);
+                  return next;
+                });
+              }}
             >
               {pinned ? <Pin size={16} /> : <PinOff size={16} />}
+              {!compactMode && <span className="text-xs">{pinned ? 'Unpin' : 'Pin'}</span>}
             </button>
             <button
               type="button"
-              className={iconButtonBase}
+              className={`${iconButtonBase} ${!compactMode ? 'gap-1.5' : ''}`}
               title={compactMode ? 'Expand island layout' : 'Compact island layout'}
               aria-pressed={compactMode}
               onClick={() => {
@@ -277,10 +288,11 @@ export default function PortfolioIsland(): React.ReactElement | null {
               }}
             >
               {compactMode ? <Expand size={16} /> : <Minimize2 size={16} />}
+              {!compactMode && <span className="text-xs">Compact</span>}
             </button>
             <button
               type="button"
-              className={iconButtonBase}
+              className={`${iconButtonBase} ${!compactMode ? 'gap-1.5' : ''}`}
               disabled={!hasSelection}
               title="Close current portfolio"
               onClick={() => {
@@ -290,6 +302,7 @@ export default function PortfolioIsland(): React.ReactElement | null {
               }}
             >
               <X size={16} />
+              {!compactMode && <span className="text-xs">Close</span>}
             </button>
           </div>
         </div>
@@ -308,6 +321,7 @@ export default function PortfolioIsland(): React.ReactElement | null {
                     title="Stop preview (handled by Deployer)"
                     aria-label="Stop preview"
                     className={dangerActionClass}
+                    style={{ animation: 'py-fade-in 0.2s ease-out' }}
                     onClick={() => {
                       try { window.dispatchEvent(new CustomEvent('py:preview-stop-request', { detail: { projectId: selectedProjectCloudId } })); } catch { /* ignore */ }
                     }}
@@ -323,6 +337,7 @@ export default function PortfolioIsland(): React.ReactElement | null {
                         title="Reload preview (rebuild + restart)"
                         aria-label="Reload preview"
                         className={actionBtnClass}
+                        style={{ animation: 'py-fade-in 0.2s ease-out' }}
                         onClick={() => {
                           if (!hasSelection) return;
                           notify({ type: 'info', message: 'Reloading preview…', persistent: false });
@@ -340,6 +355,7 @@ export default function PortfolioIsland(): React.ReactElement | null {
                         target="_blank"
                         rel="noreferrer"
                         className={actionBtnClass}
+                        style={{ animation: 'py-fade-in 0.2s ease-out' }}
                         onClick={async (e) => {
                           try {
                             e.preventDefault();
@@ -352,12 +368,12 @@ export default function PortfolioIsland(): React.ReactElement | null {
                         {renderLabel('Open')}
                       </a>
                       {previewLanState ? (
-                        <a title="Open LAN preview" aria-label="Open LAN preview" href={previewLanState} target="_blank" rel="noreferrer" className={actionBtnClass}>
+                        <a title="Open LAN preview" aria-label="Open LAN preview" href={previewLanState} target="_blank" rel="noreferrer" className={actionBtnClass} style={{ animation: 'py-fade-in 0.2s ease-out' }}>
                           <ExternalLink size={14} />
                           {renderLabel('Open LAN')}
                         </a>
                       ) : (
-                        <button type="button" title="Open LAN preview (not available)" aria-label="Open LAN preview" className={actionBtnClass} disabled>
+                        <button type="button" title="Open LAN preview (not available)" aria-label="Open LAN preview" className={actionBtnClass} disabled style={{ animation: 'py-fade-in 0.2s ease-out' }}>
                           <ExternalLink size={14} />
                           {renderLabel('Open LAN')}
                         </button>
@@ -371,6 +387,7 @@ export default function PortfolioIsland(): React.ReactElement | null {
                   title="Start local preview"
                   aria-label="Start preview"
                   className={primaryActionClass}
+                  style={{ animation: 'py-fade-in 0.2s ease-out' }}
                   disabled={!hasSelection}
                   onClick={async () => {
                     if (!hasSelection) return;

@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from "react";
-import { Plus, Edit3, Trash2, Settings, RotateCcw, Palette } from 'lucide-react';
+import { Plus, Edit3, Trash2, Settings, RotateCcw, Palette, Copy } from 'lucide-react';
 
 const HEX_COLOR_RE = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i;
 const DEFAULT_PAGE_BG = '#ffffff';
@@ -11,6 +11,7 @@ export type PageSettingsProps = {
     currentPageId: string | null;
     onSelectPage: (id: string | null) => void;
     onCreatePage: () => void;
+    onDuplicatePage: () => void;
     onRenameInline: (newName: string) => void;
     onDeleteCurrentPage: () => void;
     onOpenSettings: () => void;
@@ -27,6 +28,7 @@ export default function PageSettings({
     currentPageId,
     onSelectPage,
     onCreatePage,
+    onDuplicatePage,
     onRenameInline,
     onDeleteCurrentPage,
     onOpenSettings,
@@ -132,6 +134,10 @@ export default function PageSettings({
                         <button className="btn btn-ghost btn-xs flex items-center gap-2 flex-shrink-0" title="New page" aria-label="New page" onClick={() => onCreatePage()}>
                             <Plus size={14} />
                             <span className="text-xs">New page</span>
+                        </button>
+                        <button className="btn btn-ghost btn-xs flex items-center gap-2 flex-shrink-0" title="Duplicate page" aria-label="Duplicate page" onClick={() => onDuplicatePage()} disabled={!currentPageId}>
+                            <Copy size={14} />
+                            <span className="text-xs">Duplicate</span>
                         </button>
                         <button className="btn btn-ghost btn-xs text-red-500 border border-red-500/40 hover:bg-red-500/10 flex items-center gap-2 flex-shrink-0" title="Delete current page" aria-label="Delete page" onClick={() => onDeleteCurrentPage()} disabled={!currentPageId}>
                             <Trash2 size={14} />

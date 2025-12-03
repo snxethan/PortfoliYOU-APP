@@ -82,7 +82,7 @@ function IconExitFullscreen() {
 export default function EditorPage() {
   // Fullscreen state for canvas
   const [isCanvasFullscreen, setIsCanvasFullscreen] = useState(false);
-  const { selectedProject, createPage, deletePage, renamePage, getPageItems, setPageItems, setPageStarter, setPageBackground, activeTheme, updateTheme } = useProjects();
+  const { selectedProject, createPage, duplicatePage, deletePage, renamePage, getPageItems, setPageItems, setPageStarter, setPageBackground, activeTheme, updateTheme } = useProjects();
   const { add: notify } = useNotifications();
   const { openSettings } = usePortfolioSettings();
 
@@ -264,35 +264,46 @@ export default function EditorPage() {
   }, [persistItems]);
 
   function undo() {
+    console.log('UNDO called. History length:', history.length);
+    if (history.length === 0) return;
+    const entry = history[history.length - 1];
+    console.log('Undoing:', entry.label);
+
     setItems(prev => {
-      if (history.length === 0) return prev;
-      const entry = history[history.length - 1];
       const undone = entry.undo(prev);
       itemsRef.current = undone;
       persistItems(undone);
-      setHistory(h => h.slice(0, -1));
-      setRedoStack(r => [...r, entry]);
-      // Run side-effect for page-level actions (create/delete/rename)
-      entry.onUndo?.();
-      // notify user of successful undo
-      try { notify({ type: 'info', message: `Undid: ${entry.label}`, title: selectedProject?.name, persistent: false }); } catch { /* noop */ }
       return undone;
     });
+
+    setHistory(h => h.slice(0, -1));
+    setRedoStack(r => [...r, entry]);
+
+    // Run side-effect for page-level actions (create/delete/rename) after state updates
+    entry.onUndo?.();
+
+    // notify user of successful undo
+    try { notify({ type: 'info', message: `Undid: ${entry.label}`, title: selectedProject?.name, persistent: false }); } catch { /* noop */ }
   }
 
   function redo() {
+    if (redoStack.length === 0) return;
+    const entry = redoStack[redoStack.length - 1];
+
     setItems(prev => {
-      if (redoStack.length === 0) return prev;
-      const entry = redoStack[redoStack.length - 1];
       const redone = entry.redo(prev);
       itemsRef.current = redone;
       persistItems(redone);
-      setRedoStack(r => r.slice(0, -1));
-      setHistory(h => [...h, entry]);
-      entry.onRedo?.();
-      try { notify({ type: 'info', message: `Redid: ${entry.label}`, title: selectedProject?.name, persistent: false }); } catch { /* noop */ }
       return redone;
     });
+
+    setRedoStack(r => r.slice(0, -1));
+    setHistory(h => [...h, entry]);
+
+    // Run side-effect for page-level actions after state updates
+    entry.onRedo?.();
+
+    try { notify({ type: 'info', message: `Redid: ${entry.label}`, title: selectedProject?.name, persistent: false }); } catch { /* noop */ }
   }
 
   const canUndo = history.length > 0;
@@ -500,6 +511,7 @@ export default function EditorPage() {
 
   // Selection + keyboard shortcuts
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  // In-memory clipboard as fallback; cross-page copy/paste works via system clipboard
   const [clipboard, setClipboard] = useState<GridItem[] | null>(null);
   const primarySelectedId = selectedIds.length ? selectedIds[selectedIds.length - 1] : null;
 
@@ -559,6 +571,177 @@ export default function EditorPage() {
       return next.length === prev.length ? prev : next;
     });
   }, [items]);
+
+  // Global keyboard shortcuts for copy/paste/cut/duplicate/undo/redo
+  useEffect(() => {
+    async function handleGlobalKeyboard(e: KeyboardEvent) {
+      // Do not interfere with typing in inputs/textareas
+      const t = e.target as HTMLElement;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.getAttribute('contenteditable') === 'true')) return;
+
+      const meta = e.ctrlKey || e.metaKey;
+
+      // Undo (Ctrl/Cmd+Z)
+      if (meta && !e.shiftKey && e.key.toLowerCase() === 'z') {
+        e.preventDefault();
+        if (canUndo) {
+          undo();
+        }
+        return;
+      }
+
+      // Redo (Ctrl/Cmd+Y or Ctrl/Cmd+Shift+Z)
+      if ((meta && e.key.toLowerCase() === 'y') || (meta && e.shiftKey && e.key.toLowerCase() === 'z')) {
+        e.preventDefault();
+        if (canRedo) {
+          redo();
+        }
+        return;
+      }
+
+      // Copy (Ctrl/Cmd+C)
+      if (meta && e.key.toLowerCase() === 'c' && selectedIds.length) {
+        e.preventDefault();
+        const selectedSet = new Set(selectedIds);
+        const snapshot = items.filter((it) => selectedSet.has(it.id)).map((it) => ({ ...it }));
+        if (!snapshot.length) return;
+        setClipboard(snapshot);
+        try {
+          const payload = serializeClipboardItems(snapshot);
+          if (payload !== null) {
+            if (window.api?.clipboardWrite) {
+              void window.api.clipboardWrite({ text: CLIPBOARD_MARKER_MULTI + payload });
+            } else {
+              try { navigator.clipboard?.writeText(CLIPBOARD_MARKER_MULTI + payload); } catch { /* ignore */ }
+            }
+          }
+        } catch { /* ignore */ }
+        return;
+      }
+
+      // Cut (Ctrl/Cmd+X)
+      if (meta && e.key.toLowerCase() === 'x' && selectedIds.length) {
+        e.preventDefault();
+        const selectedSet = new Set(selectedIds);
+        const snapshot = items.filter((it) => selectedSet.has(it.id)).map((it) => ({ ...it }));
+        if (!snapshot.length) return;
+        setClipboard(snapshot);
+        try {
+          const payload = serializeClipboardItems(snapshot);
+          if (payload !== null) {
+            if (window.api?.clipboardWrite) {
+              void window.api.clipboardWrite({ text: CLIPBOARD_MARKER_MULTI + payload });
+            } else {
+              try { navigator.clipboard?.writeText(CLIPBOARD_MARKER_MULTI + payload); } catch { /* ignore */ }
+            }
+          }
+        } catch { /* ignore */ }
+        const removedTitles: string[] = [];
+        commitUpdate('Cut items', (prev) => {
+          prev.forEach((item) => { if (selectedSet.has(item.id)) removedTitles.push(item.title); });
+          if (!removedTitles.length) return prev;
+          return prev.filter((item) => !selectedSet.has(item.id));
+        });
+        removedTitles.forEach((title) => notifyWidgetChange('delete', title));
+        setSelectedIds([]);
+        return;
+      }
+
+      // Paste (Ctrl/Cmd+V)
+      if (meta && e.key.toLowerCase() === 'v') {
+        e.preventDefault();
+        // Try system clipboard first
+        let payloadText: string | null = null;
+        try {
+          if (window.api?.clipboardRead) {
+            const res = await window.api.clipboardRead();
+            if (res && res.ok && typeof res.text === 'string') payloadText = res.text;
+          } else {
+            try { payloadText = await navigator.clipboard?.readText(); } catch { payloadText = null; }
+          }
+        } catch { payloadText = null; }
+
+        let clipboardItems: GridItem[] | null = null;
+        if (payloadText && payloadText.startsWith(CLIPBOARD_MARKER_MULTI)) {
+          try { clipboardItems = JSON.parse(payloadText.slice(CLIPBOARD_MARKER_MULTI.length)); } catch { clipboardItems = null; }
+        } else if (payloadText && payloadText.startsWith(CLIPBOARD_MARKER_SINGLE)) {
+          try {
+            const legacy = JSON.parse(payloadText.slice(CLIPBOARD_MARKER_SINGLE.length));
+            clipboardItems = legacy ? [legacy] : null;
+          } catch { clipboardItems = null; }
+        }
+        // Fallback to in-memory clipboard state
+        if (!clipboardItems || clipboardItems.length === 0) {
+          clipboardItems = clipboard ? clipboard.map((it) => ({ ...it })) : null;
+        }
+        if (!clipboardItems || clipboardItems.length === 0) return;
+        const createdIds: string[] = [];
+        const clones = clipboardItems.map((item, idx) => {
+          const nid = typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : Math.random().toString(36).slice(2, 9);
+          createdIds.push(nid);
+          const width = Math.max(1, item.w ?? 1);
+          const height = Math.max(1, item.h ?? 1);
+          const offset = idx + 1;
+          const nx = Math.max(0, Math.min((item.x ?? 0) + offset, COLS - width));
+          const ny = Math.max(0, (item.y ?? 0) + offset);
+          return { ...item, id: nid, x: nx, y: ny, w: width, h: height, title: ((item.title || 'Widget') + ' copy') };
+        });
+        commitUpdate(clones.length > 1 ? 'Paste items' : 'Paste item', (prev) => {
+          const norm = normalizeZ(prev);
+          let nextZ = norm.length;
+          const stamped = clones.map((clone) => ({ ...clone, z: nextZ++ }));
+          return [...norm, ...stamped];
+        });
+        clones.forEach((clone) => notifyWidgetChange('create', clone.title));
+        setSelectedIds(createdIds);
+        return;
+      }
+
+      // Duplicate (Ctrl/Cmd+D)
+      if (meta && e.key.toLowerCase() === 'd' && selectedIds.length) {
+        e.preventDefault();
+        const selectedSet = new Set(selectedIds);
+        const sourceItems = items.filter((it) => selectedSet.has(it.id));
+        if (!sourceItems.length) return;
+        const duplicatedIds: string[] = [];
+        const duplicates = sourceItems.map((src, idx) => {
+          const nid = typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : Math.random().toString(36).slice(2, 9);
+          duplicatedIds.push(nid);
+          const nx = Math.min(COLS - src.w, src.x + 1 + idx);
+          const ny = src.y + 1 + idx;
+          return { ...src, id: nid, x: Math.max(0, nx), y: Math.max(0, ny), title: `${src.title} copy` };
+        });
+        commitUpdate(duplicates.length > 1 ? 'Duplicate items' : 'Duplicate item', (prev) => {
+          const norm = normalizeZ(prev);
+          let nextZ = norm.length;
+          const stamped = duplicates.map((dup) => ({ ...dup, z: nextZ++ }));
+          return [...norm, ...stamped];
+        });
+        duplicates.forEach((dup) => notifyWidgetChange('create', dup.title));
+        setSelectedIds(duplicatedIds);
+        return;
+      }
+
+      // Delete (Delete or Backspace key)
+      if (selectedIds.length && (e.key === 'Delete' || e.key === 'Backspace')) {
+        e.preventDefault();
+        const selectedSet = new Set(selectedIds);
+        const removed: GridItem[] = [];
+        commitUpdate('Delete items', (prev) => {
+          prev.forEach((item) => { if (selectedSet.has(item.id)) removed.push(item); });
+          if (!removed.length) return prev;
+          return prev.filter((item) => !selectedSet.has(item.id));
+        });
+        removed.forEach((item) => notifyWidgetChange('delete', item.title));
+        setSelectedIds([]);
+        return;
+      }
+    }
+
+    window.addEventListener('keydown', handleGlobalKeyboard, true);
+    return () => window.removeEventListener('keydown', handleGlobalKeyboard, true);
+  }, [selectedIds, items, clipboard, commitUpdate, notifyWidgetChange, undo, redo, canUndo, canRedo]);
+
   async function onKeyDown(e: React.KeyboardEvent<HTMLDivElement>) {
     // Do not interfere with typing in inputs/textareas
     const t = e.target as HTMLElement;
@@ -597,129 +780,7 @@ export default function EditorPage() {
       setSelectedIds([]);
       return;
     }
-    // Copy/Cut/Paste/Duplicate
-    const meta = e.ctrlKey || e.metaKey;
-    if (meta && e.key.toLowerCase() === 'c' && selectedIds.length) {
-      e.preventDefault();
-      const selectedSet = new Set(selectedIds);
-      const snapshot = items.filter((it) => selectedSet.has(it.id)).map((it) => ({ ...it }));
-      if (!snapshot.length) return;
-      setClipboard(snapshot);
-      try {
-        const payload = serializeClipboardItems(snapshot);
-        if (payload !== null) {
-          if (window.api?.clipboardWrite) {
-            void window.api.clipboardWrite({ text: CLIPBOARD_MARKER_MULTI + payload });
-          } else {
-            try { navigator.clipboard?.writeText(CLIPBOARD_MARKER_MULTI + payload); } catch { /* ignore */ }
-          }
-        }
-      } catch { /* ignore */ }
-      return;
-    }
-    if (meta && e.key.toLowerCase() === 'x' && selectedIds.length) {
-      e.preventDefault();
-      const selectedSet = new Set(selectedIds);
-      const snapshot = items.filter((it) => selectedSet.has(it.id)).map((it) => ({ ...it }));
-      if (!snapshot.length) return;
-      setClipboard(snapshot);
-      try {
-        const payload = serializeClipboardItems(snapshot);
-        if (payload !== null) {
-          if (window.api?.clipboardWrite) {
-            void window.api.clipboardWrite({ text: CLIPBOARD_MARKER_MULTI + payload });
-          } else {
-            try { navigator.clipboard?.writeText(CLIPBOARD_MARKER_MULTI + payload); } catch { /* ignore */ }
-          }
-        }
-      } catch { /* ignore */ }
-      const removedTitles: string[] = [];
-      commitUpdate('Cut items', (prev) => {
-        prev.forEach((item) => { if (selectedSet.has(item.id)) removedTitles.push(item.title); });
-        if (!removedTitles.length) return prev;
-        return prev.filter((item) => !selectedSet.has(item.id));
-      });
-      removedTitles.forEach((title) => notifyWidgetChange('delete', title));
-      setSelectedIds([]);
-      return;
-    }
-    if (meta && e.key.toLowerCase() === 'v') {
-      e.preventDefault();
-      // Delegate to async paste handler so we can await clipboard in a safe scope
-      void handlePasteFromClipboard();
-      return;
-    }
-    // Async paste helper (declared just before next keyboard cases)
-    async function handlePasteFromClipboard() {
-      // Try system clipboard first
-      let payloadText: string | null = null;
-      try {
-        if (window.api?.clipboardRead) {
-          const res = await window.api.clipboardRead();
-          if (res && res.ok && typeof res.text === 'string') payloadText = res.text;
-        } else {
-          try { payloadText = await navigator.clipboard?.readText(); } catch { payloadText = null; }
-        }
-      } catch { payloadText = null; }
-
-      let clipboardItems: GridItem[] | null = null;
-      if (payloadText && payloadText.startsWith(CLIPBOARD_MARKER_MULTI)) {
-        try { clipboardItems = JSON.parse(payloadText.slice(CLIPBOARD_MARKER_MULTI.length)); } catch { clipboardItems = null; }
-      } else if (payloadText && payloadText.startsWith(CLIPBOARD_MARKER_SINGLE)) {
-        try {
-          const legacy = JSON.parse(payloadText.slice(CLIPBOARD_MARKER_SINGLE.length));
-          clipboardItems = legacy ? [legacy] : null;
-        } catch { clipboardItems = null; }
-      }
-      // Fallback to in-memory clipboard state
-      if (!clipboardItems || clipboardItems.length === 0) {
-        clipboardItems = clipboard ? clipboard.map((it) => ({ ...it })) : null;
-      }
-      if (!clipboardItems || clipboardItems.length === 0) return;
-      const createdIds: string[] = [];
-      const clones = clipboardItems.map((item, idx) => {
-        const nid = typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : Math.random().toString(36).slice(2, 9);
-        createdIds.push(nid);
-        const width = Math.max(1, item.w ?? 1);
-        const height = Math.max(1, item.h ?? 1);
-        const offset = idx + 1;
-        const nx = Math.max(0, Math.min((item.x ?? 0) + offset, COLS - width));
-        const ny = Math.max(0, (item.y ?? 0) + offset);
-        return { ...item, id: nid, x: nx, y: ny, w: width, h: height, title: ((item.title || 'Widget') + ' copy') };
-      });
-      commitUpdate(clones.length > 1 ? 'Paste items' : 'Paste item', (prev) => {
-        const norm = normalizeZ(prev);
-        let nextZ = norm.length;
-        const stamped = clones.map((clone) => ({ ...clone, z: nextZ++ }));
-        return [...norm, ...stamped];
-      });
-      clones.forEach((clone) => notifyWidgetChange('create', clone.title));
-      setSelectedIds(createdIds);
-    }
-
-    if (meta && e.key.toLowerCase() === 'd' && selectedIds.length) {
-      e.preventDefault();
-      const selectedSet = new Set(selectedIds);
-      const sourceItems = items.filter((it) => selectedSet.has(it.id));
-      if (!sourceItems.length) return;
-      const duplicatedIds: string[] = [];
-      const duplicates = sourceItems.map((src, idx) => {
-        const nid = typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : Math.random().toString(36).slice(2, 9);
-        duplicatedIds.push(nid);
-        const nx = Math.min(COLS - src.w, src.x + 1 + idx);
-        const ny = src.y + 1 + idx;
-        return { ...src, id: nid, x: Math.max(0, nx), y: Math.max(0, ny), title: `${src.title} copy` };
-      });
-      commitUpdate(duplicates.length > 1 ? 'Duplicate items' : 'Duplicate item', (prev) => {
-        const norm = normalizeZ(prev);
-        let nextZ = norm.length;
-        const stamped = duplicates.map((dup) => ({ ...dup, z: nextZ++ }));
-        return [...norm, ...stamped];
-      });
-      duplicates.forEach((dup) => notifyWidgetChange('create', dup.title));
-      setSelectedIds(duplicatedIds);
-      return;
-    }
+    // Note: Copy/Cut/Paste/Duplicate are now handled by global keyboard shortcuts (see useEffect above)
   }
 
   // Active drag preview for palette items
@@ -915,7 +976,7 @@ export default function EditorPage() {
         </div>
       )}
 
-      <section className="surface border border-[color:var(--border)] rounded-2xl p-6 shadow-lg shadow-black/20 overflow-hidden overflow-x-hidden">
+      <section className="surface border border-[color:var(--border)] rounded-2xl p-6 shadow-lg shadow-black/20 overflow-hidden overflow-x-hidden" style={{ animation: 'py-pop 0.4s ease-out' }}>
         {/* Workspace label */}
         <p className="section-title">Portfolio Editor workspace</p>
         <p className="text-sm text-[color:var(--fg-muted)]">Edit, manage and build your portfolio in a single workspace.</p>
@@ -986,11 +1047,12 @@ export default function EditorPage() {
                   }}
                   onCreatePage={() => {
                     if (!selectedProject) return;
-                    const prevId = currentPageId;
-                    const id = createPage(selectedProject.id) || null;
-                    if (id) {
-                      setCurrentPageId(id);
-                      try { localStorage.setItem(`py_current_page_${selectedProject.id}`, id); } catch { /* ignore */ }
+                    const projectId = selectedProject.id;
+                    const prevPageId = currentPageId;
+                    const newPageId = createPage(projectId) || null;
+                    if (newPageId) {
+                      setCurrentPageId(newPageId);
+                      try { localStorage.setItem(`py_current_page_${projectId}`, newPageId); } catch { /* ignore */ }
                       replaceItems([]);
                       setHistory(h => {
                         const entry: HistoryEntry = {
@@ -998,19 +1060,59 @@ export default function EditorPage() {
                           undo: (items) => items,
                           redo: (items) => items,
                           onUndo: () => {
-                            deletePage(selectedProject.id, id);
-                            const backId = prevId || (selectedProject.pageOrder?.[0] || null);
+                            console.log('UNDO: Create page');
+                            deletePage(projectId, newPageId);
+                            // Get fresh page order after deletion
+                            const proj = selectedProject;
+                            const backId = prevPageId && proj?.pages[prevPageId] ? prevPageId : (proj?.pageOrder?.[0] || null);
                             if (backId) {
                               setCurrentPageId(backId);
-                              const loaded = getPageItems(selectedProject.id, backId) as GridItem[];
+                              const loaded = getPageItems(projectId, backId) as GridItem[];
                               replaceItems(loaded);
                             }
                           },
                           onRedo: () => {
-                            const newId = createPage(selectedProject.id);
-                            if (newId) {
-                              setCurrentPageId(newId);
+                            console.log('REDO: Create page');
+                            const redoPageId = createPage(projectId);
+                            if (redoPageId) {
+                              setCurrentPageId(redoPageId);
                               replaceItems([]);
+                            }
+                          }
+                        };
+                        console.log('Adding Create page to history. New length:', h.length + 1);
+                        return [...h, entry];
+                      });
+                      setRedoStack([]);
+                    }
+                  }}
+                  onDuplicatePage={() => {
+                    if (!selectedProject || !currentPageId) return;
+                    const projectId = selectedProject.id;
+                    const sourcePageId = currentPageId;
+                    const sourcePageItems = getPageItems(projectId, sourcePageId) as GridItem[];
+                    const newPageId = duplicatePage(projectId, sourcePageId);
+                    if (newPageId) {
+                      setCurrentPageId(newPageId);
+                      try { localStorage.setItem(`py_current_page_${projectId}`, newPageId); } catch { /* ignore */ }
+                      replaceItems(getPageItems(projectId, newPageId) as GridItem[]);
+                      setHistory(h => {
+                        let restoredId: string | null = null;
+                        const entry: HistoryEntry = {
+                          label: 'Duplicate page',
+                          undo: (items) => items,
+                          redo: (items) => items,
+                          onUndo: () => {
+                            deletePage(projectId, newPageId);
+                            setCurrentPageId(sourcePageId);
+                            replaceItems(sourcePageItems);
+                          },
+                          onRedo: () => {
+                            const redoPageId = duplicatePage(projectId, sourcePageId);
+                            if (redoPageId) {
+                              restoredId = redoPageId;
+                              setCurrentPageId(redoPageId);
+                              replaceItems(getPageItems(projectId, redoPageId) as GridItem[]);
                             }
                           }
                         };
@@ -1021,7 +1123,9 @@ export default function EditorPage() {
                   }}
                   onRenameInline={(newName: string) => {
                     if (!selectedProject || !currentPageId) return;
-                    const oldTitle = selectedProject.pages[currentPageId]?.title || 'Untitled';
+                    const projectId = selectedProject.id;
+                    const pageId = currentPageId;
+                    const oldTitle = selectedProject.pages[pageId]?.title || 'Untitled';
                     const trimmed = (newName || '').trim();
                     if (!trimmed || trimmed === oldTitle) return;
                     // history entry
@@ -1030,15 +1134,15 @@ export default function EditorPage() {
                         label: 'Rename page',
                         undo: (items) => items,
                         redo: (items) => items,
-                        onUndo: () => { renamePage(selectedProject.id, currentPageId, oldTitle); },
-                        onRedo: () => { renamePage(selectedProject.id, currentPageId, trimmed); },
+                        onUndo: () => { renamePage(projectId, pageId, oldTitle); },
+                        onRedo: () => { renamePage(projectId, pageId, trimmed); },
                       } as HistoryEntry;
                       return [...h, entry];
                     });
                     setRedoStack([]);
-                    renamePage(selectedProject.id, currentPageId, trimmed);
-                    try { localStorage.setItem(`py_current_page_${selectedProject.id}`, currentPageId); } catch { /* ignore */ }
-                    try { replaceItems(getPageItems(selectedProject.id, currentPageId) as GridItem[]); } catch { /* ignore */ }
+                    renamePage(projectId, pageId, trimmed);
+                    try { localStorage.setItem(`py_current_page_${projectId}`, pageId); } catch { /* ignore */ }
+                    try { replaceItems(getPageItems(projectId, pageId) as GridItem[]); } catch { /* ignore */ }
                   }}
                   onOpenSettings={() => {
                     if (!selectedProject || !currentPageId) return;
@@ -1051,16 +1155,19 @@ export default function EditorPage() {
                     if (!selectedProject || !currentPageId) return;
                     const total = selectedProject.pageOrder?.length ?? 0;
                     if (total <= 1) return;
-                    const title = selectedProject.pages[currentPageId]?.title || 'Untitled';
+                    const projectId = selectedProject.id;
+                    const deletedPageId = currentPageId;
+                    const title = selectedProject.pages[deletedPageId]?.title || 'Untitled';
                     const ok = window.confirm(`Delete page "${title}"? This cannot be undone.`);
                     if (!ok) return;
-                    const snapItems = getPageItems(selectedProject.id, currentPageId) as GridItem[];
-                    const removedId = currentPageId;
-                    const remaining = (selectedProject.pageOrder || []).filter(id => id !== currentPageId);
+                    const snapItems = getPageItems(projectId, deletedPageId) as GridItem[];
+                    const snapBackground = selectedProject.pages[deletedPageId]?.backgroundColor;
+                    const snapStarter = Boolean(selectedProject.pages[deletedPageId]?.starter);
+                    const remaining = (selectedProject.pageOrder || []).filter(id => id !== deletedPageId);
                     const nextId = remaining[0] || null;
-                    deletePage(selectedProject.id, removedId);
+                    deletePage(projectId, deletedPageId);
                     setCurrentPageId(nextId);
-                    if (nextId) replaceItems(getPageItems(selectedProject.id, nextId) as GridItem[]); else replaceItems([]);
+                    if (nextId) replaceItems(getPageItems(projectId, nextId) as GridItem[]); else replaceItems([]);
                     setHistory(h => {
                       let restoredId: string | null = null;
                       const entry: HistoryEntry = {
@@ -1068,22 +1175,25 @@ export default function EditorPage() {
                         undo: (items) => items,
                         redo: (items) => items,
                         onUndo: () => {
-                          const nid = createPage(selectedProject.id);
+                          const nid = createPage(projectId, title);
                           if (nid) {
                             restoredId = nid;
-                            renamePage(selectedProject.id, nid, title);
-                            setPageItems(selectedProject.id, nid, serializeGridItems(snapItems));
+                            setPageItems(projectId, nid, serializeGridItems(snapItems));
+                            if (snapBackground) setPageBackground(projectId, nid, snapBackground);
+                            if (snapStarter) setPageStarter(projectId, nid, true);
                             setCurrentPageId(nid);
-                            replaceItems(getPageItems(selectedProject.id, nid) as GridItem[]);
+                            replaceItems(getPageItems(projectId, nid) as GridItem[]);
                           }
                         },
                         onRedo: () => {
-                          const target = restoredId || removedId;
+                          const target = restoredId || deletedPageId;
                           if (target) {
-                            deletePage(selectedProject.id, target);
-                            const fallback = (selectedProject.pageOrder?.[0]) || null;
+                            deletePage(projectId, target);
+                            // Get fresh project state after deletion
+                            const proj = selectedProject;
+                            const fallback = proj?.pageOrder?.[0] || null;
                             setCurrentPageId(fallback);
-                            if (fallback) replaceItems(getPageItems(selectedProject.id, fallback) as GridItem[]);
+                            if (fallback) replaceItems(getPageItems(projectId, fallback) as GridItem[]);
                           }
                         },
                       };
@@ -1331,7 +1441,7 @@ export default function EditorPage() {
 
                   {/* Widget Sidebar (collapsible) */}
                   <aside
-                    className={`relative surface p-4 border border-[color:var(--border)] rounded-2xl shadow-lg bg-[color:var(--surface)]/80 overflow-hidden ${previewMode ? 'opacity-50 pointer-events-none' : ''} flex flex-col palette-full-height`}
+                    className={`relative surface p-4 border border-[color:var(--border)] rounded-2xl shadow-lg bg-[color:var(--surface)]/80 overflow-hidden ${previewMode ? 'opacity-50 pointer-events-none' : ''} flex flex-col palette-full-height transition-all duration-300 ease-in-out`}
                     style={palettePanelStyle}
                     onPointerDown={(e) => {
                       // allow starting a resize when pointer is near the left edge of the aside
@@ -1396,7 +1506,7 @@ export default function EditorPage() {
                           </button>
                         </div>
                         <div className="p-2 overflow-auto grow space-y-3 scrollable scrollable-container">
-                          <section className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)]/90 shadow-sm">
+                          <section className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)]/90 shadow-sm transition-all duration-200 ease-in-out">
                             <div className="px-4 pt-1 pb-1">
                               <button
                                 className="w-full flex items-center justify-between gap-2 px-4 py-2 text-left"
@@ -1411,7 +1521,7 @@ export default function EditorPage() {
                               </button>
                             </div>
                             {widgetsOpen && (
-                              <div className="p-3 pt-0">
+                              <div className="p-3 pt-0 animate-[py-fade-in_0.2s_ease-out]">
                                 <Suspense fallback={<div className="text-xs text-[color:var(--fg-muted)] p-2">Loading widgets…</div>}>
                                   <WidgetsPalette />
                                 </Suspense>
@@ -1419,7 +1529,7 @@ export default function EditorPage() {
                             )}
                           </section>
 
-                          <section className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)]/90 shadow-sm">
+                          <section className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)]/90 shadow-sm transition-all duration-200 ease-in-out">
                             <div className="px-4 pt-1 pb-1">
                               <button
                                 className="w-full flex items-center justify-between gap-2 px-4 py-2 text-left"
@@ -1434,7 +1544,7 @@ export default function EditorPage() {
                               </button>
                             </div>
                             {assetsOpen && (
-                              <div className="p-3 pt-0">
+                              <div className="p-3 pt-0 animate-[py-fade-in_0.2s_ease-out]">
                                 <AssetsPanel hideHeader />
                               </div>
                             )}
@@ -1451,7 +1561,7 @@ export default function EditorPage() {
       </section>
 
       {/* Theme subsection under Portfolio Canvas */}
-      <div className="mt-4 surface rounded-2xl border border-[color:var(--border)] shadow-lg bg-[color:var(--surface)] p-4">
+      <div className="mt-4 surface rounded-2xl border border-[color:var(--border)] shadow-lg shadow-black/20 bg-[color:var(--surface)] p-4" style={{ animation: 'py-pop 0.4s ease-out' }}>
         <div className="w-full">
           <div>
             <p className="section-title">Theme</p>
@@ -1561,6 +1671,8 @@ export default function EditorPage() {
           onSave={({ name, starter, backgroundColor }) => {
             const trimmed = (name || '').trim();
             if (!trimmed) { setRenameModalOpen(false); return; }
+            const projectId = selectedProject.id;
+            const pageId = currentPageId;
             const oldTitle = renameOldTitle || 'Untitled';
             // Add history entry
             setHistory(h => {
@@ -1568,20 +1680,20 @@ export default function EditorPage() {
                 label: 'Rename page',
                 undo: (items) => items,
                 redo: (items) => items,
-                onUndo: () => { renamePage(selectedProject.id, currentPageId, oldTitle); },
-                onRedo: () => { renamePage(selectedProject.id, currentPageId, trimmed); },
+                onUndo: () => { renamePage(projectId, pageId, oldTitle); },
+                onRedo: () => { renamePage(projectId, pageId, trimmed); },
               } as HistoryEntry;
               return [...h, entry];
             });
             setRedoStack([]);
-            renamePage(selectedProject.id, currentPageId, trimmed);
-            setPageBackground(selectedProject.id, currentPageId, backgroundColor);
+            renamePage(projectId, pageId, trimmed);
+            setPageBackground(projectId, pageId, backgroundColor);
             // Update starter setting
-            try { setPageStarter(selectedProject.id, currentPageId, Boolean(starter)); } catch { /* ignore */ }
+            try { setPageStarter(projectId, pageId, Boolean(starter)); } catch { /* ignore */ }
             try {
-              try { localStorage.setItem(`py_current_page_${selectedProject.id}`, currentPageId); } catch { /* ignore */ }
-              setCurrentPageId(currentPageId);
-              replaceItems(getPageItems(selectedProject.id, currentPageId) as GridItem[]);
+              try { localStorage.setItem(`py_current_page_${projectId}`, pageId); } catch { /* ignore */ }
+              setCurrentPageId(pageId);
+              replaceItems(getPageItems(projectId, pageId) as GridItem[]);
             } catch { /* ignore */ }
             setRenameModalOpen(false);
           }}
@@ -1594,12 +1706,84 @@ export default function EditorPage() {
               notify({ type: 'warn', message: 'A portfolio needs at least one page.', title: selectedProject.name, persistent: false });
               return;
             }
-            deletePage(selectedProject.id, currentPageId);
-            // pick next page
-            const remaining = (selectedProject.pageOrder || []).filter(id => id !== currentPageId);
+            const projectId = selectedProject.id;
+            const deletedPageId = currentPageId;
+            const title = selectedProject.pages[deletedPageId]?.title || 'Untitled';
+            const snapItems = getPageItems(projectId, deletedPageId) as GridItem[];
+            const snapBackground = selectedProject.pages[deletedPageId]?.backgroundColor;
+            const snapStarter = Boolean(selectedProject.pages[deletedPageId]?.starter);
+            const remaining = (selectedProject.pageOrder || []).filter(id => id !== deletedPageId);
             const nextId = remaining[0] || null;
+
+            deletePage(projectId, deletedPageId);
             setCurrentPageId(nextId);
-            if (nextId) replaceItems(getPageItems(selectedProject.id, nextId) as GridItem[]); else replaceItems([]);
+            if (nextId) replaceItems(getPageItems(projectId, nextId) as GridItem[]); else replaceItems([]);
+
+            setHistory(h => {
+              let restoredId: string | null = null;
+              const entry: HistoryEntry = {
+                label: 'Delete page',
+                undo: (items) => items,
+                redo: (items) => items,
+                onUndo: () => {
+                  const nid = createPage(projectId, title);
+                  if (nid) {
+                    restoredId = nid;
+                    setPageItems(projectId, nid, serializeGridItems(snapItems));
+                    if (snapBackground) setPageBackground(projectId, nid, snapBackground);
+                    if (snapStarter) setPageStarter(projectId, nid, true);
+                    setCurrentPageId(nid);
+                    replaceItems(getPageItems(projectId, nid) as GridItem[]);
+                  }
+                },
+                onRedo: () => {
+                  const target = restoredId || deletedPageId;
+                  if (target) {
+                    deletePage(projectId, target);
+                    const remaining = (selectedProject.pageOrder || []).filter(id => id !== target);
+                    const fallback = remaining[0] || null;
+                    setCurrentPageId(fallback);
+                    if (fallback) replaceItems(getPageItems(projectId, fallback) as GridItem[]); else replaceItems([]);
+                  }
+                }
+              };
+              return [...h, entry];
+            });
+            setRedoStack([]);
+          }}
+          onDuplicate={() => {
+            const projectId = selectedProject.id;
+            const sourcePageId = currentPageId;
+            const sourcePageItems = getPageItems(projectId, sourcePageId) as GridItem[];
+            const newPageId = duplicatePage(projectId, sourcePageId);
+            if (newPageId) {
+              setCurrentPageId(newPageId);
+              try { localStorage.setItem(`py_current_page_${projectId}`, newPageId); } catch { /* ignore */ }
+              replaceItems(getPageItems(projectId, newPageId) as GridItem[]);
+              setHistory(h => {
+                let restoredId: string | null = null;
+                const entry: HistoryEntry = {
+                  label: 'Duplicate page',
+                  undo: (items) => items,
+                  redo: (items) => items,
+                  onUndo: () => {
+                    deletePage(projectId, newPageId);
+                    setCurrentPageId(sourcePageId);
+                    replaceItems(sourcePageItems);
+                  },
+                  onRedo: () => {
+                    const redoPageId = duplicatePage(projectId, sourcePageId);
+                    if (redoPageId) {
+                      restoredId = redoPageId;
+                      setCurrentPageId(redoPageId);
+                      replaceItems(getPageItems(projectId, redoPageId) as GridItem[]);
+                    }
+                  }
+                };
+                return [...h, entry];
+              });
+              setRedoStack([]);
+            }
           }}
         />
       )}
@@ -1677,6 +1861,15 @@ export default function EditorPage() {
           createPage={() => {
             if (selectedProject) {
               createPage(selectedProject.id);
+            }
+          }}
+          duplicatePage={() => {
+            if (selectedProject && currentPageId) {
+              const newId = duplicatePage(selectedProject.id, currentPageId);
+              if (newId) {
+                setCurrentPageId(newId);
+                replaceItems(getPageItems(selectedProject.id, newId) as GridItem[]);
+              }
             }
           }}
           renamePage={(name: string) => {

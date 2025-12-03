@@ -42,9 +42,31 @@ function IconDevtools() {
     );
 }
 
+function IconZoomIn() {
+    return (
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="11" cy="11" r="8" />
+            <path d="m21 21-4.35-4.35" />
+            <line x1="11" y1="8" x2="11" y2="14" />
+            <line x1="8" y1="11" x2="14" y2="11" />
+        </svg>
+    );
+}
+
+function IconZoomOut() {
+    return (
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="11" cy="11" r="8" />
+            <path d="m21 21-4.35-4.35" />
+            <line x1="8" y1="11" x2="14" y2="11" />
+        </svg>
+    );
+}
+
 export default function FrameBar() {
     const [maximized, setMaximized] = useState(false);
     const [dragToTop, setDragToTop] = useState(false);
+    const [zoom, setZoom] = useState(1);
 
     useEffect(() => {
         // query initial state
@@ -85,12 +107,22 @@ export default function FrameBar() {
         try { await window.api?.toggleDevTools?.(); } catch { /* ignore */ }
     }
 
+    function handleZoomIn() {
+        setZoom(prev => Math.min(prev + 0.1, 2));
+        document.body.style.zoom = String(Math.min(zoom + 0.1, 2));
+    }
+
+    function handleZoomOut() {
+        setZoom(prev => Math.max(prev - 0.1, 0.5));
+        document.body.style.zoom = String(Math.max(zoom - 0.1, 0.5));
+    }
+
     return (
         <div className="window-frame">
-            <div className="window-frame__left flex items-center pl-1" style={{ pointerEvents: 'auto' }}>
+            <div className="window-frame__left flex items-center pl-1 gap-1" style={{ pointerEvents: 'auto' }}>
                 <button
                     type="button"
-                    className="window-control window-control--ghost"
+                    className="window-control"
                     title="Toggle DevTools"
                     onClick={onToggleDevtools}
                     onMouseDown={(e) => e.stopPropagation()}
@@ -98,6 +130,31 @@ export default function FrameBar() {
                 >
                     <IconDevtools />
                 </button>
+                <div className="flex items-center gap-0.5 ml-1">
+                    <button
+                        type="button"
+                        className="window-control"
+                        title="Zoom Out"
+                        onClick={handleZoomOut}
+                        onMouseDown={(e) => e.stopPropagation()}
+                        aria-label="Zoom Out"
+                        disabled={zoom <= 0.5}
+                    >
+                        <IconZoomOut />
+                    </button>
+                    <span className="text-[10px] text-[color:var(--fg-muted)] px-1 min-w-[32px] text-center select-none">{Math.round(zoom * 100)}%</span>
+                    <button
+                        type="button"
+                        className="window-control"
+                        title="Zoom In"
+                        onClick={handleZoomIn}
+                        onMouseDown={(e) => e.stopPropagation()}
+                        aria-label="Zoom In"
+                        disabled={zoom >= 2}
+                    >
+                        <IconZoomIn />
+                    </button>
+                </div>
             </div>
             <div className="window-frame__center flex items-center justify-center gap-2" aria-hidden={false}>
                 <div className="relative flex items-center gap-2">

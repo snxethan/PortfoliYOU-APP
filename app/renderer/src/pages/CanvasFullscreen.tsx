@@ -68,6 +68,7 @@ export type CanvasFullscreenProps = {
     currentPageId: string | null;
     setCurrentPageId: (id: string | null) => void;
     createPage: () => void;
+    duplicatePage: () => void;
     renamePage: (name: string) => void;
     deletePage: (projectId: string, pageId: string) => void;
     openSettings: () => void;
@@ -154,6 +155,7 @@ export default function CanvasFullscreen(props: CanvasFullscreenProps) {
         currentPageId,
         setCurrentPageId,
         createPage,
+        duplicatePage,
         renamePage,
         deletePage,
         openSettings,
@@ -213,10 +215,10 @@ export default function CanvasFullscreen(props: CanvasFullscreenProps) {
         : { width: paletteWidth, minWidth: 260, maxWidth: 520 };
 
     return (
-        <div className="fixed flex flex-col bg-[color:var(--bg)] overflow-auto" style={{ top: 'var(--frame-bar-h, 36px)', left: 0, right: 0, bottom: 0, zIndex: 9999 }}>
+        <div className="fixed flex flex-col bg-[color:var(--bg)] overflow-auto" style={{ top: 'var(--frame-bar-h, 36px)', left: 0, right: 0, bottom: 0, zIndex: 9999, animation: 'py-pop 0.3s ease-out' }}>
             {/* Header: Editor and Page Settings */}
             <div
-                className={`w-full flex flex-col bg-[color:var(--muted)] border-b border-[color:var(--border)]/30 shadow-lg flex-shrink-0 relative ${headerCollapsed ? 'cursor-pointer' : ''}`}
+                className={`w-full flex flex-col bg-[color:var(--muted)] border-b border-[color:var(--border)]/30 shadow-lg flex-shrink-0 relative transition-all duration-300 ease-in-out ${headerCollapsed ? 'cursor-pointer' : ''}`}
                 style={{ boxShadow: '0 4px 12px -2px rgba(0, 0, 0, 0.3)' }}
                 onClick={(e) => {
                     if (headerCollapsed && !(e.target as HTMLElement).closest('button[title="Exit Fullscreen"]')) {
@@ -308,6 +310,7 @@ export default function CanvasFullscreen(props: CanvasFullscreenProps) {
                                     currentPageId={currentPageId}
                                     onSelectPage={setCurrentPageId}
                                     onCreatePage={createPage}
+                                    onDuplicatePage={duplicatePage}
                                     onRenameInline={renamePage}
                                     onDeleteCurrentPage={() => {
                                         if (selectedProject && currentPageId) {

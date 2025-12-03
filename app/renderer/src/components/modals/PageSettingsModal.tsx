@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { createPortal } from 'react-dom';
-import { X, RotateCcw, ChevronDown, ChevronRight, Trash2 } from 'lucide-react';
+import { X, RotateCcw, ChevronDown, ChevronRight, Trash2, Copy } from 'lucide-react';
 import { useScrollLock } from "../../hooks/useScrollLock";
 
 export default function PageSettingsModal({
@@ -12,6 +12,7 @@ export default function PageSettingsModal({
     onCancel,
     onSave,
     onDelete,
+    onDuplicate,
 }: {
     title?: string;
     initialName?: string;
@@ -21,6 +22,7 @@ export default function PageSettingsModal({
     onCancel: () => void;
     onSave: (opts: { name: string; starter: boolean; backgroundColor: string | null }) => void;
     onDelete: () => void;
+    onDuplicate?: () => void;
 }) {
     useScrollLock(true);
 
@@ -68,7 +70,7 @@ export default function PageSettingsModal({
                     </div>
                 </button>
                 {expanded[key] && (
-                    <div className="border-t border-[color:var(--border)] bg-[color:var(--muted)]/20 p-4 space-y-3">
+                    <div className="border-t border-[color:var(--border)] bg-[color:var(--muted)]/20 p-4 space-y-3 animate-[py-fade-in_0.2s_ease-out]">
                         {children}
                     </div>
                 )}
@@ -124,6 +126,7 @@ export default function PageSettingsModal({
         >
             <div
                 className="surface w-full max-w-lg border border-[color:var(--border)] rounded-2xl max-h-[85vh] overflow-auto scrollable scrollable-container"
+                style={{ animation: 'py-pop 0.25s ease-out' }}
                 onClick={(e) => e.stopPropagation()}
             >
                 <div className="flex items-center justify-between px-4 py-3 border-b border-[color:var(--border)] modal-header-sticky">
@@ -151,15 +154,28 @@ export default function PageSettingsModal({
                         />
 
                         <div className="flex justify-between items-center gap-2 mt-4">
-                            <button
-                                type="button"
-                                className="btn btn-ghost btn-xxs text-red-400 border border-red-500/40 hover:bg-red-500/10"
-                                title="Delete page"
-                                onClick={() => { if (confirm('Delete this page? This cannot be undone.')) onDelete(); }}
-                            >
-                                <Trash2 size={14} />
-                                <span>Delete page</span>
-                            </button>
+                            <div className="flex items-center gap-2">
+                                <button
+                                    type="button"
+                                    className="btn btn-ghost btn-xxs text-red-400 border border-red-500/40 hover:bg-red-500/10"
+                                    title="Delete page"
+                                    onClick={() => { if (confirm('Delete this page? This cannot be undone.')) onDelete(); }}
+                                >
+                                    <Trash2 size={14} />
+                                    <span>Delete page</span>
+                                </button>
+                                {onDuplicate && (
+                                    <button
+                                        type="button"
+                                        className="btn btn-ghost btn-xxs"
+                                        title="Duplicate page"
+                                        onClick={() => { onDuplicate(); onCancel(); }}
+                                    >
+                                        <Copy size={14} />
+                                        <span>Duplicate</span>
+                                    </button>
+                                )}
+                            </div>
                             <button type="submit" className="btn btn-outline btn-xs" disabled={!name.trim()}>
                                 Save changes
                             </button>

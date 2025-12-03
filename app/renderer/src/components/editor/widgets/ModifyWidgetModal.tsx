@@ -809,6 +809,7 @@ export default function ModifyWidgetModal({
         >
             <div
                 className="surface w-full max-w-4xl border border-[color:var(--border)] rounded-2xl max-h-[85vh] overflow-hidden flex flex-col"
+                style={{ animation: 'py-pop 0.25s ease-out' }}
                 onClick={(e) => e.stopPropagation()}
                 onKeyDown={handleEnterSubmitAnywhere}
             >

@@ -443,7 +443,7 @@ export default function PortfolioSettingsModal({ open, mode, projectId, cloudId,
                 {status && <span className="text-[10px] uppercase tracking-wide text-[color:var(--fg-muted)]">{status}</span>}
             </button>
             {expanded[key] && (
-                <div className="border-t border-[color:var(--border)] bg-[color:var(--muted)]/20 p-4 space-y-3">
+                <div className="border-t border-[color:var(--border)] bg-[color:var(--muted)]/20 p-4 space-y-3 animate-[py-fade-in_0.2s_ease-out]">
                     {children}
                 </div>
             )}
@@ -962,7 +962,7 @@ export default function PortfolioSettingsModal({ open, mode, projectId, cloudId,
 
     return (
         <div className="fixed inset-0 z-[100000] flex items-center justify-center bg-black/60 backdrop-blur" onClick={onClose}>
-            <div className="surface w-full max-w-2xl border border-[color:var(--border)] rounded-md shadow-2xl" onClick={e => e.stopPropagation()}>
+            <div className="surface w-full max-w-2xl border border-[color:var(--border)] rounded-md shadow-2xl" style={{ animation: 'py-pop 0.25s ease-out' }} onClick={e => e.stopPropagation()}>
                 <div className="flex items-center justify-between px-4 py-3 border-b border-[color:var(--border)]">
                     <div>
                         <h2 className="text-lg font-semibold">Portfolio settings</h2>

@@ -12,7 +12,7 @@ export default function Dashboard({
 }) {
     const badge = notifBadge > 0 ? notifBadge : null;
     return (
-        <section className="surface border border-[color:var(--border)] rounded-2xl shadow-lg shadow-black/20 portfolio-workspace-card">
+        <section className="surface border border-[color:var(--border)] rounded-2xl shadow-lg shadow-black/20 portfolio-workspace-card" style={{ animation: 'py-pop 0.4s ease-out' }}>
             <div className="portfolio-workspace-card__header">
                 <div className="portfolio-workspace-card__identity">
                     <div className="portfolio-workspace-card__logo-block relative">

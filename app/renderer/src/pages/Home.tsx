@@ -14,6 +14,7 @@ import { useProjects } from "../providers/ProjectsProvider";
 // CTA is now shown via a popup from the sidebar Account section when not signed in
 import { useNotifications } from "../providers/NotificationsProvider";
 import { usePortfolioSettings } from "../providers/PortfolioSettingsProvider";
+import { auth } from "../lib/firebase";
 
 
 export default function HomePage() {
@@ -132,7 +133,7 @@ export default function HomePage() {
 			{/* Centered CTA under title is now shown inside Dashboard; no extra CTA block here */}
 			{/* Notification center area on Home for managing/dismissing persistent notifications */}
 			{notificationsOpen && (
-				<div className={`relative surface border border-[color:var(--border)] rounded-2xl p-4 shadow-lg bg-[color:var(--surface)]/85 ${notificationsPulse ? 'highlight-pulse' : ''}`}>
+				<div className={`relative surface border border-[color:var(--border)] rounded-2xl p-4 shadow-lg shadow-black/20 bg-[color:var(--surface)]/85 ${notificationsPulse ? 'highlight-pulse' : ''}`} style={{ animation: 'py-pop 0.3s ease-out' }}>
 					<NotificationsCenter
 						notifications={notifications}
 						onDismiss={dismiss}
@@ -144,7 +145,7 @@ export default function HomePage() {
 			{/* 2nd section: portfolios (local + cloud) and account */}
 			{/* Portfolios section */}
 			<section>
-				<div id="py-list" ref={listRef} className={`surface border border-[color:var(--border)] rounded-2xl p-6 shadow-lg shadow-black/20 portfolio-workspace ${pulseList ? 'highlight-pulse' : ''}`}>
+				<div id="py-list" ref={listRef} className={`surface border border-[color:var(--border)] rounded-2xl p-6 shadow-lg shadow-black/20 portfolio-workspace ${pulseList ? 'highlight-pulse' : ''}`} style={{ animation: 'py-pop 0.4s ease-out' }}>
 					<div className="flex flex-col gap-1">
 						<p className="section-title">Portfolio workspace</p>
 						<p className="text-sm text-[color:var(--fg-muted)]">Create, manage, and load your portfolios in a single workspace.</p>
@@ -184,6 +185,7 @@ export default function HomePage() {
 							projectQuota={cloudQuota}
 							onOpenSettings={() => setAccountOpen(true)}
 							highlight={pulseAccount}
+							linkedProviders={auth.currentUser?.providerData || []}
 						/>
 					</div>
 				</section>
