@@ -3,7 +3,6 @@ import type { CSSProperties } from "react";
 import { useNavigate } from "react-router-dom";
 import { ChevronsLeft, ChevronsRight, ChevronDown, ChevronRight, GripVertical, Settings } from "lucide-react";
 import { DndContext, PointerSensor, MouseSensor, TouchSensor, useSensor, useSensors, DragEndEvent, DragStartEvent, rectIntersection, DragOverlay, type Modifier } from "@dnd-kit/core";
-
 import { useProjects } from "../providers/ProjectsProvider";
 import { useNotifications } from '../providers/NotificationsProvider';
 import { usePortfolioSettings } from "../providers/PortfolioSettingsProvider";
@@ -18,6 +17,7 @@ import DragOverlayPreview from "../components/editor/DragOverlayPreview";
 import AssetsPanel from "../components/editor/widgets/AssetsPanel";
 import PreviewPopup from "../components/editor/PreviewPopup";
 import PagePreview from "../components/editor/PagePreview";
+import CanvasFullscreen from "./CanvasFullscreen";
 import { usePersistentFlag } from "../hooks/usePersistentFlag";
 import { getWidgetThemeSnapshot } from "../widgets/theme";
 import type { SelectionChangeOptions, MarqueeSelectionOptions } from "../components/editor/selection";
@@ -58,7 +58,30 @@ function serializeGridItems(list: GridItem[]) {
   }));
 }
 
+function IconFullscreen() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M8 3H5a2 2 0 0 0-2 2v3" />
+      <path d="M16 3h3a2 2 0 0 1 2 2v3" />
+      <path d="M8 21H5a2 2 0 0 1-2-2v-3" />
+      <path d="M16 21h3a2 2 0 0 0 2-2v-3" />
+    </svg>
+  );
+}
+function IconExitFullscreen() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M9 9L3 3" />
+      <path d="M15 9l6-6" />
+      <path d="M9 15l-6 6" />
+      <path d="M15 15l6 6" />
+    </svg>
+  );
+}
+
 export default function EditorPage() {
+  // Fullscreen state for canvas
+  const [isCanvasFullscreen, setIsCanvasFullscreen] = useState(false);
   const { selectedProject, createPage, deletePage, renamePage, getPageItems, setPageItems, setPageStarter, setPageBackground, activeTheme, updateTheme } = useProjects();
   const { add: notify } = useNotifications();
   const { openSettings } = usePortfolioSettings();
@@ -398,6 +421,7 @@ export default function EditorPage() {
     setPaletteCollapsed(prev => !prev);
   }
   const paletteRef = useRef<HTMLDivElement | null>(null);
+  const gridContainerRef = useRef<HTMLDivElement | null>(null);
 
   const beginResizePalette = useCallback((event: React.PointerEvent | PointerEvent) => {
     const ev = event as PointerEvent;
@@ -409,11 +433,26 @@ export default function EditorPage() {
     }
     const startX = ev.clientX;
     const startWidth = Math.max(paletteMinWidth, paletteWidth || 200);
+
+    // Get the grid container to calculate total available space
+    const gridEl = gridContainerRef.current;
+    const gridRect = gridEl?.getBoundingClientRect();
+
     const handleMove = (move: PointerEvent) => {
       // For a right-side sidebar, moving pointer left should increase palette width,
       // so compute delta relative to the startX accordingly.
       const delta = startX - move.clientX;
-      const next = Math.min(paletteMaxWidth, Math.max(paletteMinWidth, Math.round(startWidth + delta)));
+
+      // Calculate dynamic max width based on available space
+      let effectiveMaxWidth = paletteMaxWidth;
+      if (gridRect) {
+        // The grid container width is the total space available
+        // Leave at least 300px for the canvas area
+        const availableForPalette = gridRect.width - 300;
+        effectiveMaxWidth = Math.min(paletteMaxWidth, Math.max(paletteMinWidth, availableForPalette));
+      }
+
+      const next = Math.min(effectiveMaxWidth, Math.max(paletteMinWidth, Math.round(startWidth + delta)));
       setPaletteWidth(next);
       try { localStorage.setItem('py_palette_w', String(Math.round(next))); } catch { /* ignore */ }
     };
@@ -1059,10 +1098,24 @@ export default function EditorPage() {
 
 
           {/* Portfolio Canvas subsection (contains canvas and dashboard) */}
-          <div className="mt-4 rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)]/90 p-4">
-            <div className="flex flex-col gap-1">
-              <p className="text-xs uppercase tracking-wide text-[color:var(--fg-muted)]">Portfolio Canvas</p>
-              <p className="text-sm text-[color:var(--fg-muted)]">Canvas and dashboard for arranging pages and widgets.</p>
+          <div
+            className="mt-4 rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)]/90 p-4 flex flex-col"
+            style={{ overflowX: 'hidden', overflowY: 'visible' }}
+          >
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex flex-col gap-1">
+                <p className="text-xs uppercase tracking-wide text-[color:var(--fg-muted)]">Portfolio Canvas</p>
+                <p className="text-sm text-[color:var(--fg-muted)]">Canvas and dashboard for arranging pages and widgets.</p>
+              </div>
+              <button
+                type="button"
+                className="ml-auto btn btn-ghost flex items-center gap-1 rounded-full"
+                title="Fullscreen Canvas"
+                onClick={() => setIsCanvasFullscreen(true)}
+                style={{ minWidth: 36, minHeight: 36 }}
+              >
+                <IconFullscreen />
+              </button>
             </div>
             <div className="mt-4">
               <DndContext
@@ -1178,7 +1231,8 @@ export default function EditorPage() {
                   <DragOverlayPreview activeDrag={activeDrag} onMeasure={(size) => { dragOverlaySize.current = size; }} />
                 </DragOverlay>
                 <div
-                  className="h-full grid gap-0 min-h-[28rem] items-stretch"
+                  ref={gridContainerRef}
+                  className="grid gap-0 items-stretch"
                   style={{
                     gridTemplateColumns: paletteCollapsed ? 'minmax(0,1fr) 32px' : `minmax(0,1fr) ${Math.round(paletteWidth)}px`,
                   }}
@@ -1186,90 +1240,93 @@ export default function EditorPage() {
                   tabIndex={0}
                 >
                   {/* Canvas or Preview inside a page-like viewport */}
-                  <div
-                    className="h-full min-h-0"
-                    ref={canvasWrapperRef}
-                    onPointerDown={(e) => {
-                      // allow starting a resize when clicking on the canvas near the right edge
-                      try {
-                        const el = canvasWrapperRef.current;
-                        if (!el) return;
-                        const rect = el.getBoundingClientRect();
-                        const distFromRight = rect.right - e.clientX;
-                        // if pointer is within 48px of the canvas right edge, start resize
-                        if (distFromRight <= 48 && distFromRight >= 0) {
-                          beginResizePalette(e as unknown as PointerEvent);
-                        }
-                      } catch { /* ignore */ }
-                    }}
-                  >
-                    <ViewportSurface
-                      pageWidth={pageWidth}
-                      pageHeight={pageHeight}
-                      setPageWidth={setPageWidth}
-                      setPageHeight={setPageHeight}
-                      heightMode={heightMode}
-                      previewMode={previewMode}
-                      cols={COLS}
-                      rowH={DEFAULT_ROW_H}
-                      gap={gap}
-                      items={items}
-                      onItemsChange={replaceItems}
-                      showGrid={showGrid}
-                      selectedIds={selectedIds}
-                      onSelect={handleSelect}
-                      onMarqueeSelect={handleMarqueeSelect}
-                      onDelete={(id) => {
-                        let removedTitle: string | undefined;
-                        commitUpdate("Delete item", (prev) => {
-                          const tgt = prev.find(i => i.id === id);
-                          if (!tgt) return prev;
-                          removedTitle = tgt.title;
-                          return prev.filter((it) => it.id !== id);
-                        });
-                        if (removedTitle) notifyWidgetChange('delete', removedTitle);
+                  <div style={{ width: '100%', overflow: 'auto', position: 'relative', minWidth: 0 }}>
+                    {/* Fluid wrapper, no fixed pixel width. Canvas content handles its own width. */}
+                    <div
+                      style={{ position: 'relative' }}
+                      ref={canvasWrapperRef}
+                      onPointerDown={(e) => {
+                        // allow starting a resize when clicking on the canvas near the right edge
+                        try {
+                          const el = canvasWrapperRef.current;
+                          if (!el) return;
+                          const rect = el.getBoundingClientRect();
+                          const distFromRight = rect.right - e.clientX;
+                          // if pointer is within 48px of the canvas right edge, start resize
+                          if (distFromRight <= 48 && distFromRight >= 0) {
+                            beginResizePalette(e as unknown as PointerEvent);
+                          }
+                        } catch { /* ignore */ }
                       }}
-                      onDuplicate={(id) => {
-                        let duplicateTitle: string | undefined;
-                        commitUpdate("Duplicate item", (prev) => {
-                          const src = prev.find((it) => it.id === id);
-                          if (!src) return prev;
-                          duplicateTitle = src.title + " copy";
-                          const nid = typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : Math.random().toString(36).slice(2, 9);
-                          const nx = Math.min(COLS - src.w, src.x + 1);
-                          const ny = src.y + 1;
-                          const norm = normalizeZ(prev);
-                          const maxZ = norm.length; // place duplicate on top
-                          return [...norm, { ...src, id: nid, x: nx, y: ny, title: duplicateTitle, z: maxZ }];
-                        });
-                        if (duplicateTitle) notifyWidgetChange('create', duplicateTitle);
-                      }}
-                      onMoveStart={handleItemMoveStart}
-                      onMoveEnd={handleItemMoveEnd}
-                      onBringToFront={bringToFront}
-                      onSendToBack={sendToBack}
-                      onBringForward={bringForward}
-                      onSendBackward={sendBackward}
-                      onTogglePin={togglePin}
-                      onOpenModify={openModify}
-                      onDropAsset={(id, hash) => {
-                        // Only handle for Image widgets: set src to asset://hash
-                        commitUpdate('Set image from asset', (prev) => prev.map(it => it.id === id && it.type === 'image' ? { ...it, props: { ...(it.props as Record<string, unknown>), src: `asset://${hash}` } } : it));
-                      }}
-                      onNavigatePage={(pid) => {
-                        if (!selectedProject) return;
-                        setCurrentPageId(pid);
-                        try { localStorage.setItem(`py_current_page_${selectedProject.id}`, pid); } catch { /* ignore */ }
-                      }}
-                      currentPageId={currentPageId || undefined}
-                      zoom={zoom}
-                      minZoom={MIN_ZOOM}
-                      maxZoom={MAX_ZOOM}
-                      onZoomChange={applyZoom}
-                      pageBackground={effectivePageBackground}
-                      theme={activeTheme}
-                      themeSnapshot={widgetThemeSnapshot}
-                    />
+                    >
+                      <ViewportSurface
+                        pageWidth={pageWidth}
+                        pageHeight={pageHeight}
+                        setPageWidth={setPageWidth}
+                        setPageHeight={setPageHeight}
+                        heightMode={heightMode}
+                        previewMode={previewMode}
+                        cols={COLS}
+                        rowH={DEFAULT_ROW_H}
+                        gap={gap}
+                        items={items}
+                        onItemsChange={replaceItems}
+                        showGrid={showGrid}
+                        selectedIds={selectedIds}
+                        onSelect={handleSelect}
+                        onMarqueeSelect={handleMarqueeSelect}
+                        onDelete={(id) => {
+                          let removedTitle: string | undefined;
+                          commitUpdate("Delete item", (prev) => {
+                            const tgt = prev.find(i => i.id === id);
+                            if (!tgt) return prev;
+                            removedTitle = tgt.title;
+                            return prev.filter((it) => it.id !== id);
+                          });
+                          if (removedTitle) notifyWidgetChange('delete', removedTitle);
+                        }}
+                        onDuplicate={(id) => {
+                          let duplicateTitle: string | undefined;
+                          commitUpdate("Duplicate item", (prev) => {
+                            const src = prev.find((it) => it.id === id);
+                            if (!src) return prev;
+                            duplicateTitle = src.title + " copy";
+                            const nid = typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : Math.random().toString(36).slice(2, 9);
+                            const nx = Math.min(COLS - src.w, src.x + 1);
+                            const ny = src.y + 1;
+                            const norm = normalizeZ(prev);
+                            const maxZ = norm.length; // place duplicate on top
+                            return [...norm, { ...src, id: nid, x: nx, y: ny, title: duplicateTitle, z: maxZ }];
+                          });
+                          if (duplicateTitle) notifyWidgetChange('create', duplicateTitle);
+                        }}
+                        onMoveStart={handleItemMoveStart}
+                        onMoveEnd={handleItemMoveEnd}
+                        onBringToFront={bringToFront}
+                        onSendToBack={sendToBack}
+                        onBringForward={bringForward}
+                        onSendBackward={sendBackward}
+                        onTogglePin={togglePin}
+                        onOpenModify={openModify}
+                        onDropAsset={(id, hash) => {
+                          // Only handle for Image widgets: set src to asset://hash
+                          commitUpdate('Set image from asset', (prev) => prev.map(it => it.id === id && it.type === 'image' ? { ...it, props: { ...(it.props as Record<string, unknown>), src: `asset://${hash}` } } : it));
+                        }}
+                        onNavigatePage={(pid) => {
+                          if (!selectedProject) return;
+                          setCurrentPageId(pid);
+                          try { localStorage.setItem(`py_current_page_${selectedProject.id}`, pid); } catch { /* ignore */ }
+                        }}
+                        currentPageId={currentPageId || undefined}
+                        zoom={zoom}
+                        minZoom={MIN_ZOOM}
+                        maxZoom={MAX_ZOOM}
+                        onZoomChange={applyZoom}
+                        pageBackground={effectivePageBackground}
+                        theme={activeTheme}
+                        themeSnapshot={widgetThemeSnapshot}
+                      />
+                    </div>
                   </div>
 
                   {/* Widget Sidebar (collapsible) */}
@@ -1304,7 +1361,7 @@ export default function EditorPage() {
                         <div
                           ref={paletteRef}
                           className="absolute top-0 bottom-0 w-10 cursor-ew-resize z-10 flex items-center justify-center text-[color:var(--fg-muted)] no-touch-action"
-                          style={{ left: '-12px' }}
+                          style={{ left: '-28px' }}
                           onPointerDown={beginResizePalette}
                           role="presentation"
                           title="Resize dashboard"
@@ -1315,7 +1372,7 @@ export default function EditorPage() {
                           </div>
                         </div>
                         <div
-                          className="px-3 pt-4 pb-3 relative palette-header"
+                          className="px-3 pt-4 pb-3 flex items-start justify-between gap-2"
                           onPointerDown={(e) => {
                             // start resize when pointer is near the left edge (wider hit area)
                             const el = paletteRef.current || (e.currentTarget && (e.currentTarget as HTMLElement).closest('.palette-full-height') as HTMLElement | null);
@@ -1328,9 +1385,9 @@ export default function EditorPage() {
                             }
                           }}
                         >
-                          <p className="text-xs uppercase tracking-wide text-[color:var(--fg-muted)]">Canvas Dashboard</p>
+                          <p className="text-xs uppercase tracking-wide text-[color:var(--fg-muted)] flex-shrink-0">Canvas Dashboard</p>
                           <button
-                            className="absolute right-2 top-1 btn btn-ghost btn-xs p-1"
+                            className="btn btn-ghost btn-xs p-1 flex-shrink-0"
                             title="Collapse palette"
                             onClick={togglePalette}
                             aria-label="Collapse widget palette"
@@ -1568,6 +1625,92 @@ export default function EditorPage() {
             onApplyProps={(parsed) => commitUpdate("Update widget settings", (prev) => prev.map(it => it.id === editingItem!.id ? { ...it, props: parsed } : it))}
           />
         </Suspense>
+      )}
+
+      {/* Fullscreen Canvas Page */}
+      {isCanvasFullscreen && (
+        <CanvasFullscreen
+          pageWidth={pageWidth}
+          pageHeight={pageHeight}
+          setPageWidth={setPageWidth}
+          setPageHeight={setPageHeight}
+          heightMode={heightMode}
+          setHeightMode={applyHeightMode}
+          zoom={zoom}
+          onZoomIn={zoomIn}
+          onZoomOut={zoomOut}
+          onResetZoom={resetZoom}
+          applyZoom={applyZoom}
+          gap={gap}
+          setGap={setGap}
+          showGrid={showGrid}
+          toggleGrid={toggleGrid}
+          items={items}
+          replaceItems={replaceItems}
+          selectedIds={selectedIds}
+          handleSelect={handleSelect}
+          handleMarqueeSelect={handleMarqueeSelect}
+          commitUpdate={commitUpdate}
+          notifyWidgetChange={notifyWidgetChange}
+          normalizeZ={normalizeZ}
+          handleItemMoveStart={handleItemMoveStart}
+          handleItemMoveEnd={handleItemMoveEnd}
+          bringToFront={bringToFront}
+          sendToBack={sendToBack}
+          bringForward={bringForward}
+          sendBackward={sendBackward}
+          togglePin={togglePin}
+          openModify={openModify}
+          previewMode={previewMode}
+          togglePreviewMode={togglePreviewMode}
+          activeView={activeView}
+          setDesktopView={setDesktopView}
+          setMobileView={setMobileView}
+          canUndo={canUndo}
+          canRedo={canRedo}
+          undo={undo}
+          redo={redo}
+          onOpenWebpage={openWebpage}
+          selectedProject={selectedProject}
+          currentPageId={currentPageId}
+          setCurrentPageId={setCurrentPageId}
+          createPage={() => {
+            if (selectedProject) {
+              createPage(selectedProject.id);
+            }
+          }}
+          renamePage={(name: string) => {
+            if (selectedProject && currentPageId) {
+              renamePage(selectedProject.id, currentPageId, name);
+            }
+          }}
+          deletePage={deletePage}
+          openSettings={openSettings}
+          pageBackground={pageBackground}
+          themeBackground={themeBackground}
+          setPageBackground={setPageBackground}
+          activeTheme={activeTheme}
+          widgetThemeSnapshot={widgetThemeSnapshot}
+          effectivePageBackground={effectivePageBackground}
+          canvasWrapperRef={canvasWrapperRef as React.RefObject<HTMLDivElement>}
+          beginResizePalette={beginResizePalette}
+          paletteCollapsed={paletteCollapsed}
+          togglePalette={togglePalette}
+          paletteWidth={paletteWidth}
+          paletteRef={paletteRef}
+          widgetsOpen={widgetsOpen}
+          toggleWidgetsOpen={toggleWidgetsOpen}
+          assetsOpen={assetsOpen}
+          toggleAssetsOpen={toggleAssetsOpen}
+          activeDrag={activeDrag}
+          setActiveDrag={setActiveDrag}
+          dragPointerStart={dragPointerStart}
+          dragPointerLast={dragPointerLast}
+          dragOverlaySize={dragOverlaySize}
+          dragPointerOffset={dragPointerOffset}
+          onKeyDown={onKeyDown}
+          onExit={() => setIsCanvasFullscreen(false)}
+        />
       )}
     </div>
   );

@@ -495,7 +495,7 @@
 	gap: 8px;
 	padding: 0 12px;
 	border-bottom: 1px solid color-mix(in oklab, var(--border) 90%, transparent);
-	background: color-mix(in oklab, var(--surface) 94%, transparent);
+	background: var(--surface);
 	z-index: 200000;
 	box-sizing: border-box;
 }
