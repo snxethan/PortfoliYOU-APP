@@ -145,7 +145,7 @@ export default function ViewportSurface(props: ViewportSurfaceProps) {
             <div className="flex justify-center">
                 <div
                     className={"min-h-[28rem] border border-[color:var(--border)] shadow-sm rounded-md relative " + (heightMode === 'fixed' ? 'overflow-y-auto overflow-x-hidden' : 'overflow-visible')}
-                    style={{ width: scaledWidth, minHeight: scaledHeight, backgroundColor: canvasBackground }}
+                    style={{ width: scaledWidth, height: scaledHeight, maxHeight: scaledHeight, minHeight: scaledHeight, maxWidth: scaledWidth, backgroundColor: canvasBackground }}
                     data-testid="viewport-surface"
                     data-mode={previewMode ? 'preview' : 'edit'}
                 >

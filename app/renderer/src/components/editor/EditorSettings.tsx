@@ -56,16 +56,15 @@ export default function EditorSettings(props: EditorSettingsProps) {
         onResetZoom,
     } = props;
 
-    const groupClass = "flex flex-none flex-wrap items-center gap-2 md:gap-3 px-3 py-2 rounded-xl border border-[color:var(--border)] bg-[color:var(--surface)]/70 shadow-sm";
-    const groupGrowClass = `${groupClass} flex-1 min-w-[200px]`;
+    const baseGroupClass = "flex flex-col gap-2 px-3 py-2 rounded-xl border border-[color:var(--border)] bg-[color:var(--surface)]/70 shadow-sm min-w-0 w-full";
+    const cardPaddingClass = "w-full";
     const groupLabelClass = "text-[10px] uppercase tracking-wide text-[color:var(--fg-muted)]";
-    const previewDisabledClass = "";
 
     return (
-        <div className="flex flex-wrap md:flex-nowrap items-stretch gap-3 w-full">
-            <div className={groupClass}>
+        <div className="grid w-full gap-4" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))' }}>
+            <div className={`${baseGroupClass} ${cardPaddingClass}`}>
                 <span className={groupLabelClass}>Mode</span>
-                <div className="flex items-center gap-1">
+                <div className="inline-flex items-center gap-1 flex-wrap">
                     <button
                         className={`btn btn-accent btn-sm flex items-center gap-2 text-[12px] font-semibold shadow-lg shadow-[color:var(--accent)]/25 ${previewMode ? 'nav-active' : ''}`}
                         onClick={togglePreviewMode}
@@ -75,37 +74,45 @@ export default function EditorSettings(props: EditorSettingsProps) {
                         {previewMode ? <Eye size={14} /> : <Pencil size={14} />}
                         <span className="ml-1">{previewMode ? 'Displaying' : 'Editing'}</span>
                     </button>
+                    {onOpenWebpage && (
+                        <button className="btn btn-ghost btn-xs flex items-center gap-1" onClick={onOpenWebpage} title="Open preview" type="button">
+                            <Eye size={12} />
+                            <span className="text-[10px] uppercase tracking-wide">Preview</span>
+                        </button>
+                    )}
                 </div>
             </div>
 
-            <div className={`${groupGrowClass} ${previewDisabledClass}`}>
+            <div className={`${baseGroupClass} ${cardPaddingClass}`}>
                 <span className={groupLabelClass}>Layout</span>
-                <label className="flex items-center gap-1 text-xs text-[color:var(--fg-muted)]" title="Grid gap (px, decimals allowed)">
-                    <span>Gap</span>
-                    <input
-                        type="number"
-                        className="input w-16 text-xs"
-                        min={0}
-                        max={48}
-                        step={0.5}
-                        value={gap}
-                        onChange={(e) => {
-                            const v = Number(e.target.value);
-                            const clamped = Number.isNaN(v) ? 0 : Math.max(0, v);
-                            setGap(clamped);
-                        }}
-                    />
-                    <span className="text-[10px]">px</span>
-                </label>
-                <button className={`btn btn-ghost btn-xs flex items-center gap-1 ${showGrid ? 'nav-active' : ''}`} title="Toggle grid overlay" onClick={toggleGrid}>
-                    <GridIcon size={14} />
-                    Grid
-                </button>
+                <div className="inline-flex items-center gap-2 flex-wrap">
+                    <label className="flex flex-wrap items-center gap-1 text-xs text-[color:var(--fg-muted)] min-w-0" title="Grid gap (px, decimals allowed)">
+                        <span>Gap</span>
+                        <input
+                            type="number"
+                            className="input w-16 text-xs"
+                            min={0}
+                            max={48}
+                            step={0.5}
+                            value={gap}
+                            onChange={(e) => {
+                                const v = Number(e.target.value);
+                                const clamped = Number.isNaN(v) ? 0 : Math.max(0, v);
+                                setGap(clamped);
+                            }}
+                        />
+                        <span className="text-[10px]">px</span>
+                    </label>
+                    <button className={`btn btn-ghost btn-xs flex items-center gap-1 ${showGrid ? 'nav-active' : ''}`} title="Toggle grid overlay" onClick={toggleGrid}>
+                        <GridIcon size={14} />
+                        Grid
+                    </button>
+                </div>
             </div>
 
-            <div className={`${groupGrowClass} ${previewDisabledClass}`}>
+            <div className={`${baseGroupClass} ${cardPaddingClass}`}>
                 <span className={groupLabelClass}>Canvas</span>
-                <div className="flex items-center gap-1" title="Canvas zoom">
+                <div className="flex flex-wrap items-center gap-1" title="Canvas zoom">
                     <button className="btn btn-ghost btn-xs" onClick={onZoomOut} aria-label="Zoom out">
                         <Minus size={14} />
                     </button>
@@ -121,37 +128,41 @@ export default function EditorSettings(props: EditorSettingsProps) {
                 </div>
             </div>
 
-            <div className={`${groupGrowClass} ${previewDisabledClass}`}>
+            <div className={`${baseGroupClass} ${cardPaddingClass}`}>
                 <span className={groupLabelClass}>Viewport</span>
-                <div className="flex items-center gap-1" title="Viewport size">
-                    <button className={`btn btn-ghost btn-xs ${activeView === 'desktop' ? 'nav-active' : ''}`} onClick={setDesktopView} aria-label="Desktop view">
-                        <MonitorSmartphone size={14} />
-                    </button>
-                    <button className={`btn btn-ghost btn-xs ${activeView === 'mobile' ? 'nav-active' : ''}`} onClick={setMobileView} aria-label="Mobile view">
-                        <Smartphone size={14} />
-                    </button>
-                    <span className="text-[11px] text-[color:var(--fg-muted)] whitespace-nowrap">{pageWidth} × {pageHeight}px</span>
-                </div>
-                <div className="flex items-center gap-1 border-l border-[color:var(--border)] pl-2 ml-2" title="Page height behavior">
-                    <button className={`btn btn-ghost btn-xs ${heightMode === 'expand' ? 'nav-active' : ''}`} onClick={() => setHeightMode('expand')}>
-                        Auto
-                    </button>
-                    <button className={`btn btn-ghost btn-xs ${heightMode === 'fixed' ? 'nav-active' : ''}`} onClick={() => setHeightMode('fixed')}>
-                        Scroll
-                    </button>
+                <div className="flex flex-col gap-2 w-full" title="Viewport size and behavior">
+                    <div className="inline-flex items-center gap-1 flex-wrap md:flex-nowrap min-w-0">
+                        <button className={`btn btn-ghost btn-xs ${activeView === 'desktop' ? 'nav-active' : ''}`} onClick={setDesktopView} aria-label="Desktop view">
+                            <MonitorSmartphone size={14} />
+                        </button>
+                        <button className={`btn btn-ghost btn-xs ${activeView === 'mobile' ? 'nav-active' : ''}`} onClick={setMobileView} aria-label="Mobile view">
+                            <Smartphone size={14} />
+                        </button>
+                        <span className="text-[11px] text-[color:var(--fg-muted)] whitespace-nowrap min-w-0">{pageWidth} × {pageHeight}px</span>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-1 pt-2 mt-1 md:pt-0 md:mt-0" title="Page height behavior">
+                        <button className={`btn btn-ghost btn-xs ${heightMode === 'expand' ? 'nav-active' : ''}`} onClick={() => setHeightMode('expand')}>
+                            Auto
+                        </button>
+                        <button className={`btn btn-ghost btn-xs ${heightMode === 'fixed' ? 'nav-active' : ''}`} onClick={() => setHeightMode('fixed')}>
+                            Scroll
+                        </button>
+                    </div>
                 </div>
             </div>
 
-            <div className={groupClass}>
+            <div className={`${baseGroupClass} ${cardPaddingClass}`}>
                 <span className={groupLabelClass}>History</span>
-                <button className="btn btn-ghost btn-xs flex items-center gap-1 disabled:opacity-60" title="Undo (Ctrl+Z)" onClick={undo} disabled={!canUndo} data-testid="undo-btn">
-                    <Undo size={16} />
-                    Undo
-                </button>
-                <button className="btn btn-ghost btn-xs flex items-center gap-1 disabled:opacity-60" title="Redo (Ctrl+Y)" onClick={redo} disabled={!canRedo} data-testid="redo-btn">
-                    <Redo size={16} />
-                    Redo
-                </button>
+                <div className="inline-flex items-center gap-2 flex-wrap">
+                    <button className="btn btn-ghost btn-xs flex items-center gap-1 disabled:opacity-60" title="Undo (Ctrl+Z)" onClick={undo} disabled={!canUndo} data-testid="undo-btn">
+                        <Undo size={16} />
+                        Undo
+                    </button>
+                    <button className="btn btn-ghost btn-xs flex items-center gap-1 disabled:opacity-60" title="Redo (Ctrl+Y)" onClick={redo} disabled={!canRedo} data-testid="redo-btn">
+                        <Redo size={16} />
+                        Redo
+                    </button>
+                </div>
             </div>
         </div>
     );
