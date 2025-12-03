@@ -35,7 +35,7 @@ self.onmessage = async (ev: MessageEvent<Request>) => {
                     // a.buffer is ArrayBuffer; JSZip accepts Uint8Array or ArrayBuffer
                     folder?.file(a.hash, a.buffer);
                     if (a.meta) folder?.file(`${a.hash}.meta.json`, JSON.stringify(a.meta));
-                } catch (err) {
+                } catch {
                     // ignore single asset failures
                 }
             }
@@ -44,10 +44,10 @@ self.onmessage = async (ev: MessageEvent<Request>) => {
         const base64 = await zip.generateAsync({ type: 'base64' });
         const resp: Response = { type: 'success', base64 };
         // Transfer nothing back (base64 is small-ish string)
-        (self as any).postMessage(resp);
+        (self as unknown as DedicatedWorkerGlobalScope).postMessage(resp);
     } catch (err) {
         const e = err instanceof Error ? err.message : String(err);
         const resp: Response = { type: 'error', error: e };
-        (self as any).postMessage(resp);
+        (self as unknown as DedicatedWorkerGlobalScope).postMessage(resp);
     }
 };

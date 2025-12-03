@@ -47,20 +47,95 @@ export default function Sidebar() {
       });
     };
     const onPulse = (ev: Event) => {
-      const detail = (ev as CustomEvent | undefined)?.detail as any;
+      const detail = (ev as CustomEvent | undefined)?.detail as unknown;
       // If event originated from the sidebar itself, ignore to avoid double-highlighting
-      if (detail && detail.origin === 'sidebar') return;
+      if (detail && typeof (detail as Record<string, unknown>).origin === 'string' && (detail as Record<string, unknown>).origin === 'sidebar') return;
       triggerPulse(setPulseAccount, 'acc');
     };
     window.addEventListener('py:highlight-account', onPulse);
     return () => { window.removeEventListener('py:highlight-account', onPulse); clearTimer('acc'); };
   }, []);
-  const zoomViewport = 'calc(100vh / var(--py-app-zoom, 1))';
+
+  // Listen for external resize-start events and also start resize when user pointerdowns
+  // near the right edge of the sidebar (so dragging from the content edge works).
+  useEffect(() => {
+    function beginResizeFromEvent(e: any) {
+      try {
+        const detail = e?.detail || {};
+        const startX = typeof detail.startX === 'number' ? detail.startX : undefined;
+        if (typeof startX === 'number') {
+          if (collapsed) setCollapsed(false);
+          const startW = sidebarWidth;
+          const handleMove = (move: PointerEvent) => {
+            const delta = move.clientX - startX;
+            const next = Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, startW + delta));
+            setSidebarWidth(next);
+            try { localStorage.setItem('py_sidebar_w', String(Math.round(next))); } catch { /* ignore */ }
+          };
+          const handleUp = () => {
+            window.removeEventListener('pointermove', handleMove);
+            window.removeEventListener('pointerup', handleUp);
+          };
+          window.addEventListener('pointermove', handleMove);
+          window.addEventListener('pointerup', handleUp);
+        }
+      } catch { /* ignore */ }
+    }
+    window.addEventListener('py:sidebar-begin-resize', beginResizeFromEvent as EventListener);
+
+    const THRESHOLD = 48; // px from sidebar right edge into the content area
+    function onGlobalPointerDown(ev: PointerEvent) {
+      try {
+        if (ev.button !== 0) return; // only primary button
+        const clientX = ev.clientX;
+        const collapsedPx = 44; // approx 2.75rem
+        const sidebarRight = collapsed ? collapsedPx : sidebarWidth;
+        // if pointer is just to the right of the sidebar (within threshold), begin resize
+        if (clientX >= sidebarRight && clientX <= sidebarRight + THRESHOLD) {
+          if (collapsed) setCollapsed(false);
+          const startX = clientX;
+          const startW = collapsed ? Math.max(SIDEBAR_MIN, sidebarWidth) : sidebarWidth;
+          const handleMove = (move: PointerEvent) => {
+            const delta = move.clientX - startX;
+            const next = Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, startW + delta));
+            setSidebarWidth(next);
+            try { localStorage.setItem('py_sidebar_w', String(Math.round(next))); } catch { /* ignore */ }
+          };
+          const handleUp = () => {
+            window.removeEventListener('pointermove', handleMove);
+            window.removeEventListener('pointerup', handleUp);
+          };
+          window.addEventListener('pointermove', handleMove);
+          window.addEventListener('pointerup', handleUp);
+        }
+      } catch { /* ignore */ }
+    }
+    window.addEventListener('pointerdown', onGlobalPointerDown as EventListener);
+
+    return () => {
+      window.removeEventListener('py:sidebar-begin-resize', beginResizeFromEvent as EventListener);
+      window.removeEventListener('pointerdown', onGlobalPointerDown as EventListener);
+    };
+  }, [collapsed, sidebarWidth]);
+  // zoomViewport removed — unused
+  const sidebarWidthValue = collapsed ? '2.75rem' : `${Math.round(sidebarWidth)}px`;
+
   return (
     <aside
-      className="fixed left-0 top-9 bottom-0 border-r border-[color:var(--border)] bg-[color:var(--muted)] flex flex-col"
-      style={{ width: 'var(--sidebar-w,15rem)', zIndex: 90 }}
+      className="fixed left-0 bottom-0 border-r border-[color:var(--border)] bg-[color:var(--muted)] flex flex-col"
+      style={{ width: sidebarWidthValue, zIndex: 90, top: 'calc(var(--frame-bar-h, 36px) + 1px)' }}
     >
+      {!collapsed && (
+        <div
+          aria-hidden="true"
+          className="absolute right-0 top-0 bottom-0 w-3 cursor-ew-resize z-30 no-touch-action"
+          onPointerDown={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            window.dispatchEvent(new CustomEvent('py:sidebar-begin-resize', { detail: { startX: e.clientX } }));
+          }}
+        />
+      )}
       {/* Resize handle: visible only when sidebar is expanded. Centered grip for affordance. */}
       {!collapsed && (
         <div

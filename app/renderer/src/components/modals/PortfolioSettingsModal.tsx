@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ChevronDown, ChevronRight, Cloud, Copy, Download, Image as ImageIcon, Palette, RefreshCcw, Save, SlidersHorizontal, Trash2, UploadCloud, X } from "lucide-react";
+import { ChevronDown, ChevronRight, Copy, Download, Image as ImageIcon, Loader2, Palette, RefreshCcw, SlidersHorizontal, Trash2, UploadCloud, X } from "lucide-react";
 
 import type { PortfolioMeta } from "../../providers/ProjectsProvider";
 import { useProjects } from "../../providers/ProjectsProvider";
@@ -8,10 +8,12 @@ import { useAssets } from "../../providers/AssetsProvider";
 import { useNotifications } from "../../providers/NotificationsProvider";
 import { THEME_PRESETS } from "../../themes/presets";
 import type { Theme } from "../../themes/types";
+import { getPreviewState } from "../../lib/previewInterop";
+import { useScrollLock } from "../../hooks/useScrollLock";
 
 const INVALID_FILENAME = /[\\/:*?"<>|]/g;
 
-type SectionKey = "portfolio" | "cloud" | "theme";
+type SectionKey = "portfolio" | "cloud" | "theme" | "build" | "preview" | "saving";
 
 type Draft = {
     siteTitle: string;
@@ -90,17 +92,25 @@ const validateDraft = (draft: Draft) => {
     return errors;
 };
 
+const formatBytes = (value: number) => {
+    if (!value || value <= 0) return "0 B";
+    const units = ["B", "KB", "MB", "GB", "TB"];
+    const exponent = Math.min(Math.floor(Math.log(value) / Math.log(1024)), units.length - 1);
+    const scaled = value / Math.pow(1024, exponent);
+    const decimals = scaled >= 100 ? 0 : scaled >= 10 ? 1 : 2;
+    return `${scaled.toFixed(decimals)} ${units[exponent]}`;
+};
+
 export default function PortfolioSettingsModal({ open, mode, projectId, cloudId, initialMetadata, defaultSection = "portfolio", onClose }: Props) {
+    useScrollLock(open);
+
     const { user } = useAuth();
     const {
         projects,
         createProjectWithSave,
         updateProjectMetadata,
         selectProject,
-        syncProject,
-        unsyncProject,
-        importProjectFromCloud,
-        importProjectFromCloudLocalOnly,
+        exportProject,
         getCloudObjectInfo,
         getCloudObjectInfoByCloudId,
         renameCloudProject,
@@ -110,6 +120,15 @@ export default function PortfolioSettingsModal({ open, mode, projectId, cloudId,
         deleteTheme,
         updateTheme,
         createThemeFromPreset,
+        autosaveEnabled,
+        setAutosaveEnabled,
+        saveProject,
+        syncProject,
+        deleteProject,
+        cloudMaxProjects,
+        cloudProjectsCount,
+        cloudMaxStorageMB,
+        cloudBytesUsed
     } = useProjects();
     const { addFiles, getUrl } = useAssets();
     const { add: notify } = useNotifications();
@@ -128,6 +147,7 @@ export default function PortfolioSettingsModal({ open, mode, projectId, cloudId,
     const [themeNameDraft, setThemeNameDraft] = useState<string>(activeTheme?.name || "");
     useEffect(() => { setThemeNameDraft(activeTheme?.name || ""); }, [activeTheme?.themeId]);
 
+    const isCreateMode = mode === "create";
     const [draft, setDraft] = useState<Draft>(() => buildDraft(initialMetadata as PortfolioMeta | undefined, initialMetadata?.siteTitle || project?.name || "New Portfolio"));
     useEffect(() => {
         setDraft(buildDraft(project?.portfolioMeta || initialMetadata || null, project?.name || initialMetadata?.siteTitle || "New Portfolio"));
@@ -232,11 +252,71 @@ export default function PortfolioSettingsModal({ open, mode, projectId, cloudId,
     const [errors, setErrors] = useState<Record<string, string>>({});
     const [formError, setFormError] = useState<string | null>(null);
     const [savingDraft, setSavingDraft] = useState(false);
+    // Build settings local state (moved to top-level to preserve hook order)
+    const [includeAssetsState, setIncludeAssetsState] = useState<boolean>(() => {
+        const current = (project?.portfolioMeta as any)?.buildSettings || {};
+        return !!current.includeAssets;
+    });
+    const [basePathState, setBasePathState] = useState<string>(() => {
+        const current = (project?.portfolioMeta as any)?.buildSettings || {};
+        return current.basePath || "";
+    });
+    // Preview settings local state
+    const [previewPortState, setPreviewPortState] = useState<number>(() => {
+        const current = (project?.portfolioMeta as any)?.buildSettings || {};
+        const p = (current.preview && current.preview.port) || (current.previewPort) || 0;
+        return Number(p) || 0;
+    });
+    const [previewHostState, setPreviewHostState] = useState<string>(() => {
+        const current = (project?.portfolioMeta as any)?.buildSettings || {};
+        return (current.preview && current.preview.host) || (current.previewHost) || 'localhost';
+    });
+    const [previewOpenOnStartState, setPreviewOpenOnStartState] = useState<boolean>(() => {
+        const current = (project?.portfolioMeta as any)?.buildSettings || {};
+        return !!(current.preview && current.preview.openOnStart);
+    });
+    const [syncingBuild, setSyncingBuild] = useState(false);
+    const [cloudSyncing, setCloudSyncing] = useState(false);
+    const [cloudToggleTouched, setCloudToggleTouched] = useState(false);
+    const [createCloudEnabled, setCreateCloudEnabled] = useState<boolean>(() => Boolean(user && isCreateMode));
+    const [deletingProject, setDeletingProject] = useState(false);
+    React.useEffect(() => {
+        const current = (project?.portfolioMeta as any)?.buildSettings || {};
+        setIncludeAssetsState(!!current.includeAssets);
+        setBasePathState(current.basePath || "");
+        // hydrate preview settings when project changes
+        setPreviewPortState(Number((current.preview && current.preview.port) || (current.previewPort) || 0) || 0);
+        setPreviewHostState((current.preview && current.preview.host) || (current.previewHost) || 'localhost');
+        setPreviewOpenOnStartState(!!(current.preview && current.preview.openOnStart));
+    }, [project?.id, project?.portfolioMeta]);
+    useEffect(() => {
+        if (!isCreateMode) {
+            setCloudToggleTouched(false);
+            setCreateCloudEnabled(false);
+            return;
+        }
+        if (!user) {
+            setCloudToggleTouched(false);
+            setCreateCloudEnabled(false);
+            return;
+        }
+        if (!cloudToggleTouched) {
+            setCreateCloudEnabled(true);
+        }
+    }, [isCreateMode, user, cloudToggleTouched]);
+
+    const handleCreateCloudToggle = (next: boolean) => {
+        setCloudToggleTouched(true);
+        setCreateCloudEnabled(next);
+    };
 
     const initialExpanded = useMemo<Record<SectionKey, boolean>>(() => ({
         portfolio: defaultSection === "portfolio",
         cloud: defaultSection === "cloud",
         theme: defaultSection === "theme",
+        build: defaultSection === "build",
+        preview: defaultSection === "preview",
+        saving: defaultSection === "saving",
     }), [defaultSection]);
     const [expanded, setExpanded] = useState<Record<SectionKey, boolean>>(initialExpanded);
     useEffect(() => setExpanded(initialExpanded), [initialExpanded]);
@@ -247,7 +327,28 @@ export default function PortfolioSettingsModal({ open, mode, projectId, cloudId,
     const [cloudLoading, setCloudLoading] = useState(false);
     const [cloudBusy, setCloudBusy] = useState(false);
     const targetCloudId = project?._cloudId || cloudId || null;
-    const showCloudSection = !!user && mode !== "create";
+    const previewProjectId = project?._cloudId || project?.id || null;
+    const showCreateCloudToggle = isCreateMode && !!user;
+    const showCloudSection = isCreateMode || (!!user && !isCreateMode);
+    const storageLimitBytes = Math.max(cloudMaxStorageMB || 0, 0) * 1024 * 1024;
+    const normalizedProjectCap = cloudMaxProjects && cloudMaxProjects > 0 ? cloudMaxProjects : 0;
+    const reachedProjectLimit = normalizedProjectCap > 0 ? cloudProjectsCount >= normalizedProjectCap : false;
+    const reachedStorageLimit = storageLimitBytes > 0 ? cloudBytesUsed >= storageLimitBytes : false;
+    const activeIsCloudProject = Boolean(project && (project.storage ?? "local") === "cloud");
+    const showBuildSyncCta = Boolean(!isCreateMode && project && !activeIsCloudProject);
+    const syncDisabledReason = !user
+        ? "Sign in to sync this portfolio."
+        : reachedProjectLimit
+            ? "Cloud project limit reached. Delete older cloud portfolios or upgrade."
+            : reachedStorageLimit
+                ? "Cloud storage is full. Clear space before syncing."
+                : null;
+    const storageUsageLabel = storageLimitBytes > 0
+        ? `${formatBytes(cloudBytesUsed)} / ${cloudMaxStorageMB} MB`
+        : `${formatBytes(cloudBytesUsed)} used`;
+    const storageUsagePercent = storageLimitBytes > 0 && cloudBytesUsed > 0
+        ? Math.min(100, Math.round((cloudBytesUsed / storageLimitBytes) * 100))
+        : 0;
 
     const loadCloudInfo = useCallback(async () => {
         if (!targetCloudId) { setCloudInfo(null); return; }
@@ -274,7 +375,7 @@ export default function PortfolioSettingsModal({ open, mode, projectId, cloudId,
 
     if (!open) return null;
 
-    const submitLabel = mode === "create" ? "Create & Save" : "Save";
+    const submitLabel = mode === "create" ? "Create & Save" : "Save changes";
 
     const handleSave = async () => {
         setFormError(null);
@@ -284,16 +385,45 @@ export default function PortfolioSettingsModal({ open, mode, projectId, cloudId,
         setSavingDraft(true);
         try {
             const metadata = toMetadataPayload(draft);
+            // Merge preview/build settings into the metadata so they save together when user clicks Save
+            const existingMeta = project?.portfolioMeta || {};
+            const existingBuild = (existingMeta as any).buildSettings || {};
+            const mergedBuild = {
+                ...(existingBuild || {}),
+                includeAssets: includeAssetsState,
+                basePath: basePathState || undefined,
+                preview: {
+                    ...(existingBuild.preview || {}),
+                    port: previewPortState || undefined,
+                    host: previewHostState || undefined,
+                    openOnStart: previewOpenOnStartState || undefined,
+                }
+            };
+
+            const mergedMetadata = {
+                ...metadata,
+                buildSettings: mergedBuild
+            } as Partial<PortfolioMeta>;
+
             if (mode === "create") {
-                const created = await createProjectWithSave({ name: metadata.siteTitle || draft.siteTitle, metadata });
+                const created = await createProjectWithSave({
+                    name: mergedMetadata.siteTitle || draft.siteTitle,
+                    metadata: mergedMetadata,
+                    createCloud: Boolean(user && createCloudEnabled),
+                });
                 if (created?.id) selectProject(created.id);
-                notify({ type: "success", title: "Portfolio created", message: `Saved ${metadata.siteTitle || draft.siteTitle}.`, persistent: false });
+                notify({ type: "success", title: "Portfolio created", message: `Saved ${mergedMetadata.siteTitle || draft.siteTitle}.`, persistent: false });
                 onClose();
                 return;
             }
             if (project) {
-                await updateProjectMetadata(project.id, { name: metadata.siteTitle, metadata });
+                await updateProjectMetadata(project.id, { name: mergedMetadata.siteTitle, metadata: mergedMetadata });
                 notify({ type: "success", title: "Portfolio updated", message: "Portfolio settings saved.", persistent: false });
+                // If a local preview is currently running, request a reload so the new preview settings are applied immediately
+                try {
+                    const running = !!getPreviewState(previewProjectId)?.running;
+                    if (running) window.dispatchEvent(new CustomEvent('py:preview-reload-request', { detail: { projectId: previewProjectId } }));
+                } catch { /* ignore */ }
                 onClose();
             }
         } catch {
@@ -320,7 +450,11 @@ export default function PortfolioSettingsModal({ open, mode, projectId, cloudId,
         </div>
     );
 
-    const cloudStatus = !user ? "Sign in" : !project && mode === "cloud" ? "Cloud only" : project?._cloudId ? "Linked" : "Not linked";
+    const cloudStatus = !user
+        ? "Sign in"
+        : isCreateMode
+            ? (createCloudEnabled ? "Cloud" : "Local file")
+            : (!project && mode === "cloud" ? "Cloud only" : (project?._cloudId ? "Linked" : "Not linked"));
 
     const handleCloudAction = async (action: () => Promise<unknown>) => {
         setCloudBusy(true);
@@ -416,30 +550,200 @@ export default function PortfolioSettingsModal({ open, mode, projectId, cloudId,
         </div>
     );
 
-    const renderCloudBody = () => {
-        if (!user) {
-            return <p className="text-sm text-[color:var(--fg-muted)]">Sign in to link this portfolio to the cloud.</p>;
+    const toggleIncludeAssets = async () => {
+        const next = !includeAssetsState;
+        setIncludeAssetsState(next);
+        if (!project) return;
+        try {
+            await updateProjectMetadata(project.id, { metadata: ({ ...(project.portfolioMeta || {}), buildSettings: { ...(project.portfolioMeta as any)?.buildSettings, includeAssets: next, basePath: basePathState || undefined } } as any) });
+        } catch { /* ignore */ }
+    };
+
+    const setBase = async (v: string) => {
+        setBasePathState(v);
+        if (!project) return;
+        try {
+            await updateProjectMetadata(project.id, { metadata: ({ ...(project.portfolioMeta || {}), buildSettings: { ...(project.portfolioMeta as any)?.buildSettings, includeAssets: includeAssetsState, basePath: v || undefined } } as any) });
+        } catch { /* ignore */ }
+    };
+
+    const handleSyncFromBuildSection = async () => {
+        if (!project) return;
+        setSyncingBuild(true);
+        try {
+            await syncProject(project.id);
+        } finally {
+            setSyncingBuild(false);
         }
-        if (mode === "cloud" && !project && targetCloudId) {
+    };
+
+    const handleCloudSync = useCallback(async () => {
+        if (!project) return;
+        setCloudSyncing(true);
+        try {
+            await syncProject(project.id);
+        } finally {
+            setCloudSyncing(false);
+        }
+    }, [project, syncProject]);
+
+    const handleDeletePortfolio = useCallback(async () => {
+        if (!project) return;
+        const confirmed = window.confirm(`Delete "${project.name || "this portfolio"}"? This removes it from the app and closes the settings panel.`);
+        if (!confirmed) return;
+        setDeletingProject(true);
+        try {
+            await deleteProject(project.id);
+            onClose();
+        } finally {
+            setDeletingProject(false);
+        }
+    }, [project, deleteProject, onClose]);
+
+    const renderBuildBody = () => (
+        <div className="space-y-4">
+            <div className="space-y-3">
+                <label className="flex items-center space-x-2">
+                    <input type="checkbox" checked={includeAssetsState} onChange={() => void toggleIncludeAssets()} />
+                    <span className="text-[color:var(--fg-muted)]">Include uploaded assets in builds</span>
+                </label>
+                <label className="block text-xs uppercase tracking-wide">
+                    Base path (optional)
+                    <input className="input mt-1 w-full" value={basePathState} onChange={e => void setBase(e.target.value)} placeholder="/base/path" />
+                    <div className="text-xs text-[color:var(--fg-muted)] mt-1">Optional base path for the generated site.</div>
+                </label>
+            </div>
+            {showBuildSyncCta && (
+                <div className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)]/60 p-4 space-y-3">
+                    <div className="flex flex-wrap items-start gap-3">
+                        <div className="flex-1 min-w-[220px]">
+                            <p className="text-sm font-semibold">Sync builds to Projects</p>
+                            <p className="text-xs text-[color:var(--fg-muted)]">Upload this local portfolio so the Deploy tab and other devices can build it.</p>
+                        </div>
+                        <button
+                            className="btn btn-primary btn-sm"
+                            disabled={Boolean(syncDisabledReason) || syncingBuild}
+                            onClick={handleSyncFromBuildSection}
+                        >
+                            {syncingBuild ? <Loader2 size={14} className="animate-spin" /> : <UploadCloud size={14} />}
+                            <span className="ml-2">{syncingBuild ? "Syncing…" : "Sync to Projects"}</span>
+                        </button>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs text-[color:var(--fg-muted)]">
+                        <div className="rounded-xl border border-[color:var(--border)] bg-[color:var(--surface)]/70 p-3">
+                            <p className="uppercase tracking-wide text-[10px]">Cloud projects</p>
+                            <p className="text-sm font-semibold text-white">
+                                {normalizedProjectCap ? `${Math.min(cloudProjectsCount, normalizedProjectCap)} / ${normalizedProjectCap}` : cloudProjectsCount}
+                            </p>
+                        </div>
+                        <div className="rounded-xl border border-[color:var(--border)] bg-[color:var(--surface)]/70 p-3">
+                            <p className="uppercase tracking-wide text-[10px]">Storage usage</p>
+                            <p className="text-sm font-semibold text-white">{storageUsageLabel}</p>
+                            {storageLimitBytes > 0 && (
+                                <div className="mt-2 h-2 rounded-full bg-[color:var(--border)]/60 overflow-hidden">
+                                    <div
+                                        className="h-full rounded-full bg-[color:var(--accent)]"
+                                        style={{ width: `${storageUsagePercent}%` }}
+                                    ></div>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                    {syncDisabledReason && (
+                        <p className="text-xs text-red-300">{syncDisabledReason}</p>
+                    )}
+                </div>
+            )}
+            {!showBuildSyncCta && !isCreateMode && activeIsCloudProject && (
+                <div className="rounded-xl border border-[color:var(--border)] bg-[color:var(--surface)]/60 p-3 text-xs text-[color:var(--fg-muted)]">
+                    This portfolio already syncs to your Projects workspace. Builds deploy from the cloud automatically.
+                </div>
+            )}
+        </div>
+    );
+
+    const renderSavingBody = () => (
+        <div className="space-y-3">
+            <label className="flex items-center space-x-2">
+                <input type="checkbox" checked={!!autosaveEnabled} onChange={() => setAutosaveEnabled(!autosaveEnabled)} />
+                <span className="text-[color:var(--fg-muted)]">Enable autosave</span>
+            </label>
+            <div>
+                <p className="text-xs uppercase tracking-wide text-[color:var(--fg-muted)]">Project file</p>
+                <div className="mt-1 rounded border border-dashed border-[color:var(--border)] p-2 flex items-center gap-2">
+                    <div className="flex-1 min-w-0">
+                        <p className="text-sm font-mono break-all">{project?._filePath || '(not saved to disk)'}</p>
+                        <p className="text-xs text-[color:var(--fg-muted)]">Location of the saved .portfoliyou file</p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <button className="btn btn-ghost btn-sm" disabled={!project?._filePath} onClick={async () => { if (project?._filePath && (window as any).api?.showItemInFolder) await (window as any).api.showItemInFolder({ filePath: project._filePath }); }}>Open</button>
+                        <button className="btn btn-ghost btn-sm" onClick={async () => { if (project?.id) await saveProject(project.id, { saveAs: true }); }}>Save As…</button>
+                        {/* Duplicate action removed; use "Save As…" to save a copy */}
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+
+    // Note: preview settings are saved when the user clicks the main Save button below.
+
+    const renderPreviewBody = () => (
+        <div className="space-y-3">
+            <label className="block text-xs uppercase tracking-wide">
+                Localhost host
+                <input className="input mt-1 w-full" value={previewHostState} onChange={e => { setPreviewHostState(e.target.value); }} placeholder="localhost" />
+                <div className="text-xs text-[color:var(--fg-muted)] mt-1">Hostname for the preview server (usually localhost).</div>
+            </label>
+            <label className="block text-xs uppercase tracking-wide">
+                Port
+                <input type="number" className="input mt-1 w-full" value={previewPortState || ''} onChange={e => { const v = Number((e.target as HTMLInputElement).value); setPreviewPortState(Number.isFinite(v) ? v : 0); }} placeholder="3000" />
+                <div className="text-xs text-[color:var(--fg-muted)] mt-1">Port to run the local preview server on. Leave blank or 0 to auto-select.</div>
+            </label>
+            <label className="flex items-center space-x-2">
+                <input type="checkbox" checked={previewOpenOnStartState} onChange={() => setPreviewOpenOnStartState(prev => !prev)} />
+                <span className="text-[color:var(--fg-muted)]">Open browser when preview starts</span>
+            </label>
+            <div className="flex items-center gap-2">
+                {/* Save button removed — preview settings are saved via main Save action. Reset moved to header as an icon. */}
+            </div>
+        </div>
+    );
+
+    const renderCloudBody = () => {
+        if (isCreateMode) {
+            if (!user) {
+                return (
+                    <p className="text-sm text-[color:var(--fg-muted)]">Sign in to create cloud portfolios. We will save this one as a local file for now.</p>
+                );
+            }
             return (
                 <div className="space-y-3">
-                    <p className="text-sm text-[color:var(--fg-muted)]">This cloud portfolio is not linked locally yet.</p>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                        <button className="btn btn-primary btn-sm" disabled={cloudBusy} onClick={() => handleCloudAction(async () => {
-                            const imported = await importProjectFromCloud(targetCloudId);
-                            if (imported?.id) {
-                                selectProject(imported.id);
-                                onClose();
-                            }
-                        })}><Download size={14} className="mr-1" /> Import & link</button>
-                        <button className="btn btn-outline btn-sm" disabled={cloudBusy} onClick={() => handleCloudAction(async () => {
-                            const imported = await importProjectFromCloudLocalOnly(targetCloudId);
-                            if (imported?.id) {
-                                selectProject(imported.id);
-                                onClose();
-                            }
-                        })}><Download size={14} className="mr-1" /> Import local copy</button>
+                    <div className="rounded-md border border-[color:var(--border)] bg-[color:var(--surface)]/60 p-3 flex items-start justify-between gap-3">
+                        <div>
+                            <p className="font-semibold text-sm">Create as cloud portfolio</p>
+                            <p className="text-xs text-[color:var(--fg-muted)]">Cloud portfolios sync to your account. Turn this off to download a .portfoliyou file instead.</p>
+                        </div>
+                        <button
+                            type="button"
+                            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors duration-200 ${createCloudEnabled ? 'bg-[color:var(--accent)]' : 'bg-[color:var(--border)]/80'}`}
+                            onClick={() => handleCreateCloudToggle(!createCloudEnabled)}
+                            aria-pressed={createCloudEnabled}
+                            aria-label="Toggle cloud creation"
+                        >
+                            <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition ${createCloudEnabled ? 'translate-x-5' : 'translate-x-1'}`} />
+                        </button>
                     </div>
+                    <p className="text-[11px] text-[color:var(--fg-muted)]">Cloud creation uses your team quota and requires an internet connection.</p>
+                </div>
+            );
+        }
+        if (!user) {
+            return <p className="text-sm text-[color:var(--fg-muted)]">Sign in to manage cloud settings.</p>;
+        }
+        if (!project && targetCloudId) {
+            return (
+                <div className="space-y-3">
+                    <p className="text-sm text-[color:var(--fg-muted)]">This cloud portfolio isn't open locally, but you can still rename or delete it.</p>
                     <div className="flex gap-2">
                         <button className="btn btn-ghost btn-sm" disabled={cloudBusy} onClick={async () => {
                             const next = prompt("Rename cloud portfolio", "New cloud name");
@@ -447,7 +751,7 @@ export default function PortfolioSettingsModal({ open, mode, projectId, cloudId,
                             await handleCloudAction(async () => { await renameCloudProject(targetCloudId, next.trim()); });
                         }}><SlidersHorizontal size={14} className="mr-1" /> Rename cloud</button>
                         <button className="btn btn-ghost btn-sm text-red-500 border border-red-500/40" disabled={cloudBusy} onClick={async () => {
-                            if (!confirm("Delete this cloud copy? This cannot be undone.")) return;
+                            if (!confirm("Delete this cloud portfolio? This cannot be undone.")) return;
                             await handleCloudAction(async () => { await deleteCloudProjectByCloudId(targetCloudId); });
                         }}><Trash2 size={14} className="mr-1" /> Delete cloud</button>
                     </div>
@@ -458,38 +762,50 @@ export default function PortfolioSettingsModal({ open, mode, projectId, cloudId,
         if (!project) {
             return <p className="text-sm text-[color:var(--fg-muted)]">Select a portfolio to manage its cloud settings.</p>;
         }
-        if (!project._cloudId) {
+        const isCloudProject = (project.storage ?? 'local') === 'cloud';
+        if (!isCloudProject) {
             return (
                 <div className="space-y-3">
-                    <p className="text-sm text-[color:var(--fg-muted)]">Save this portfolio to the cloud to sync between devices.</p>
-                    <button className="btn btn-primary" disabled={cloudBusy} onClick={() => handleCloudAction(async () => {
-                        await syncProject(project.id);
-                    })}><UploadCloud size={16} className="mr-1" /> Save to cloud</button>
+                    <p className="text-sm text-[color:var(--fg-muted)]">This portfolio currently lives on your device.</p>
+                    <div className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)]/60 p-4 space-y-3">
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                            <div>
+                                <p className="text-sm font-semibold">Sync to cloud</p>
+                                <p className="text-xs text-[color:var(--fg-muted)]">Upload this local copy to your Projects workspace so you can deploy and edit from other devices.</p>
+                            </div>
+                            <button
+                                className="btn btn-accent btn-sm flex items-center gap-2"
+                                disabled={cloudSyncing}
+                                onClick={handleCloudSync}
+                            >
+                                {cloudSyncing ? <Loader2 size={14} className="animate-spin" /> : <UploadCloud size={14} />}
+                                <span>{cloudSyncing ? "Syncing…" : "Sync to cloud"}</span>
+                            </button>
+                        </div>
+                        <p className="text-xs text-[color:var(--fg-muted)]">After syncing, you can optionally delete the original local file. Keeping it will leave both the new cloud copy and this local project in your list.</p>
+                    </div>
+                    <p className="text-xs text-[color:var(--fg-muted)]">Need to copy assets or rename before syncing? Save changes, then run the sync again.</p>
                 </div>
             );
         }
+        const cloudId = project._cloudId || project.id;
         return (
             <div className="space-y-3">
-                <p className="text-sm text-[color:var(--fg-muted)]">Linked to cloud. Sync to push your latest edits.</p>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    <button className="btn btn-primary btn-sm" disabled={cloudBusy} onClick={() => handleCloudAction(async () => { await syncProject(project.id); })}><Save size={14} className="mr-1" /> Sync now</button>
-                    <button className="btn btn-outline btn-sm" disabled={cloudBusy} onClick={() => handleCloudAction(async () => { await unsyncProject(project.id); })}><Cloud size={14} className="mr-1" /> Unlink</button>
-                    <button className="btn btn-ghost btn-sm" disabled={cloudBusy} onClick={() => handleCloudAction(async () => {
-                        if (!project._cloudId) return;
-                        await importProjectFromCloudLocalOnly(project._cloudId);
-                    })}><Download size={14} className="mr-1" /> Import local copy</button>
+                <p className="text-sm text-[color:var(--fg-muted)]">Cloud portfolios save automatically. Export a .portfoliyou file if you need an offline backup.</p>
+                <div className="flex flex-wrap gap-2">
+                    <button className="btn btn-primary btn-sm" disabled={cloudBusy} onClick={() => handleCloudAction(async () => { await exportProject(project.id); })}><Download size={14} className="mr-1" /> Save as local file</button>
                     <button className="btn btn-ghost btn-sm" disabled={cloudBusy} onClick={async () => {
-                        if (!project._cloudId) return;
                         const next = prompt("Rename cloud portfolio", project.name);
-                        if (!next?.trim()) return;
-                        await handleCloudAction(async () => { await renameCloudProject(project._cloudId!, next.trim()); });
+                        if (!next?.trim() || !cloudId) return;
+                        await handleCloudAction(async () => { await renameCloudProject(cloudId, next.trim()); });
                     }}><SlidersHorizontal size={14} className="mr-1" /> Rename cloud</button>
+                    <button className="btn btn-ghost btn-sm text-red-500 border border-red-500/40" disabled={cloudBusy} onClick={async () => {
+                        if (!cloudId) return;
+                        if (!confirm("Delete this cloud portfolio? This cannot be undone.")) return;
+                        await handleCloudAction(async () => { await deleteCloudProjectByCloudId(cloudId); });
+                    }}><Trash2 size={14} className="mr-1" /> Delete cloud</button>
                 </div>
-                <button className="btn btn-ghost btn-sm text-red-500 border border-red-500/40" disabled={cloudBusy} onClick={async () => {
-                    if (!project._cloudId) return;
-                    if (!confirm("Delete cloud copy? This keeps your local project.")) return;
-                    await handleCloudAction(async () => { await deleteCloudProjectByCloudId(project._cloudId!); });
-                }}><Trash2 size={14} className="mr-1" /> Delete cloud copy</button>
+                <p className="text-xs text-[color:var(--fg-muted)]">Exports include all pages, widgets, and uploaded assets for safekeeping.</p>
                 <CloudDetails info={cloudInfo} loading={cloudLoading} onRefresh={loadCloudInfo} />
             </div>
         );
@@ -657,10 +973,27 @@ export default function PortfolioSettingsModal({ open, mode, projectId, cloudId,
                 <div className="p-4 space-y-4 max-h-[70vh] overflow-y-auto">
                     {renderSection("portfolio", "Portfolio", mode === "create" ? "Draft" : "Details", renderPortfolioFields())}
                     {showCloudSection && renderSection("cloud", "Cloud", cloudStatus, renderCloudBody())}
-                    {renderSection("theme", "Theme", activeTheme ? activeTheme.name : "Unavailable", renderThemeBody())}
+                    {!isCreateMode && renderSection("theme", "Theme", activeTheme ? activeTheme.name : "Unavailable", renderThemeBody())}
+                    {!isCreateMode && renderSection("preview", "Preview", undefined, renderPreviewBody())}
+                    {renderSection("build", "Build", undefined, renderBuildBody())}
+                    {!isCreateMode && renderSection("saving", "Saving", undefined, renderSavingBody())}
                     {formError && <div className="text-sm text-red-500">{formError}</div>}
                 </div>
-                <div className="flex items-center justify-end gap-2 px-4 py-3 border-t border-[color:var(--border)]">
+                <div className="flex items-center justify-between gap-3 px-4 py-3 border-t border-[color:var(--border)]">
+                    <div>
+                        {!isCreateMode && project ? (
+                            <button
+                                className="btn btn-ghost btn-xxs text-red-400 border border-red-500/40 hover:bg-red-500/10"
+                                onClick={handleDeletePortfolio}
+                                disabled={deletingProject}
+                            >
+                                {deletingProject ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+                                <span>{deletingProject ? 'Deleting…' : 'Delete portfolio'}</span>
+                            </button>
+                        ) : (
+                            <div aria-hidden="true"></div>
+                        )}
+                    </div>
                     <button
                         className="btn btn-outline btn-xs"
                         onClick={handleSave}

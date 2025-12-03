@@ -15,6 +15,13 @@ contextBridge.exposeInMainWorld("api", {
 	openFileDialog: async (options: { filters?: { name: string; extensions: string[] }[] }) => {
 		return ipcRenderer.invoke("py:openFileDialog", options);
 	},
+	// Open a folder picker and return selected directory
+	openFolderDialog: async () => {
+		return ipcRenderer.invoke("py:openFolderDialog");
+	},
+	openPath: async (options: { path: string }) => {
+		return ipcRenderer.invoke('py:openPath', options);
+	},
 	// Open a file dialog and read the file as base64 bytes
 	openFileDialogBytes: async (options: { filters?: { name: string; extensions: string[] }[] }) => {
 		return ipcRenderer.invoke("py:openFileDialogBytes", options);
@@ -42,6 +49,22 @@ contextBridge.exposeInMainWorld("api", {
 	// Request taskbar/dock attention (flash) for notifications
 	flashFrame: async (options?: { durationMs?: number; urgent?: boolean }) => {
 		return ipcRenderer.invoke("py:flashFrame", options || {});
+	},
+	// Build static site from project JSON + assets (assets base64 map)
+	buildStaticSite: async (options: { project: unknown; assets: Record<string, string>; outputDir?: string; useTempOutput?: boolean; globalCss?: { tailwind?: string }; themeCss?: string }) => {
+		return ipcRenderer.invoke('py:buildStaticSite', options || {});
+	},
+	// Zip a directory and return base64 ZIP
+	zipDir: async (options: { dir: string }) => {
+		return ipcRenderer.invoke('py:zipDir', options || {});
+	},
+	// Embed a built folder (dist-site) into a PortfoliYOU project archive
+	embedDistIntoProject: async (options: { projectFilePath?: string; distDir?: string; defaultName?: string }) => {
+		return ipcRenderer.invoke('py:embedDistIntoProject', options || {});
+	},
+	// Resolve a .portfoliyou file for a given path (file or directory)
+	findProjectFile: async (options: { path?: string }) => {
+		return ipcRenderer.invoke('py:findProjectFile', options || {});
 	},
 	stopFlashFrame: async () => {
 		return ipcRenderer.invoke("py:stopFlashFrame");
@@ -72,12 +95,12 @@ contextBridge.exposeInMainWorld("api", {
 		return ipcRenderer.invoke('py:window:toggleDevTools');
 	},
 	// Subscribe to window events emitted by main (returns an unsubscribe function)
-	onWindowEvent: (eventName: string, cb: (data: any) => void) => {
+	onWindowEvent: (eventName: string, cb: (data: unknown) => void) => {
 		const allowed = ['window-maximize', 'window-unmaximize', 'window-move-top', 'window-maximize-state'];
 		if (!allowed.includes(eventName)) return () => { };
-		const handler = (_: any, data: any) => cb(data);
-		ipcRenderer.on(eventName, handler);
-		return () => { ipcRenderer.removeListener(eventName, handler); };
+		const handler = (_: Electron.IpcRendererEvent, data: unknown) => cb(data);
+		ipcRenderer.on(eventName, handler as unknown as (...args: unknown[]) => void);
+		return () => { ipcRenderer.removeListener(eventName, handler as unknown as (...args: unknown[]) => void); };
 	},
 	// Clipboard
 	clipboardWrite: async (options: { text: string }) => {
@@ -85,6 +108,21 @@ contextBridge.exposeInMainWorld("api", {
 	},
 	clipboardRead: async () => {
 		return ipcRenderer.invoke('py:clipboardRead');
+	},
+	// Preview server controls
+	previewStartServer: async (options: { distDir: string; host?: string; port?: number }) => {
+		return ipcRenderer.invoke('py:preview:startServer', options || {});
+	},
+	previewStopServer: async () => {
+		return ipcRenderer.invoke('py:preview:stopServer');
+	},
+	// Open a URL in the system browser
+	openExternal: async (options: { url: string }) => {
+		return ipcRenderer.invoke('py:openExternal', options || {});
+	},
+	// Append a line to the main-process preview log file
+	appendLog: async (opts: { line?: string }) => {
+		return ipcRenderer.invoke('py:appendLog', opts || {});
 	},
 }); // exposes a safe API to the renderer process
 

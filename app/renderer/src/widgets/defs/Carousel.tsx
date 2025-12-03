@@ -186,6 +186,14 @@ const def: WidgetDefinition<Props> = {
         nextLabel: 'Next slide',
         statusLabel: 'Slide {current} of {total}',
     },
+    getStaticCss: (props) => {
+        const frameRadius = props?.shape === 'circle' ? '999px' : props?.shape === 'rounded' ? `${Math.max(0, props.radius ?? 12)}px` : '0px';
+        const frameBg = props?.backgroundColor || 'var(--surface)';
+        const borderWidth = props?.borderWidth ? `${props.borderWidth}px` : '0px';
+        const borderColor = props?.borderColor || 'var(--border)';
+        const borderStyle = props?.borderStyle || 'solid';
+        return `border-radius: ${frameRadius}; background: ${frameBg}; border: ${borderWidth} ${borderStyle} ${borderColor}; box-sizing: border-box; overflow: hidden;`;
+    },
     grid: { w: 6, h: 4 },
     render: (props) => {
         const slides = useMemo(() => normalizeItems(props.items), [props.items]);

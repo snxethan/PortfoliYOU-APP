@@ -7,11 +7,17 @@
     "strict": true,
     "esModuleInterop": true,
     "moduleResolution": "node",
-    "types": ["node", "electron"]
+    "types": [
+      "node",
+      "electron"
+    ]
   },
-  "include": ["app/main/**/*.ts", "app/preload/**/*.ts"]
+  "include": [
+    "app/main/**/*.ts",
+    "app/preload/**/*.ts",
+    "app/shared/**/*.ts"
+  ]
 }
-
 // tsconfig for Electron main and preload processes
 // compiles TypeScript files in app/main and app/preload directories
 // outputs compiled JavaScript files to the out directory

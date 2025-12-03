@@ -15,14 +15,20 @@ service cloud.firestore {
       // Only the owner can read
       allow read: if request.auth != null && resource.data.ownerUid == request.auth.uid;
 
-      // No client-side creates; must go through Cloud Function (admin)
-      allow create: if false;
+      // Allow signed-in owners to create their own cloud projects
+      allow create: if request.auth != null &&
+        request.resource.data.ownerUid == request.auth.uid &&
+        request.resource.data.serverCreated == true;
 
-      // Owner can update/delete only if serverCreated is true and immutable fields aren't changed
-      allow update, delete: if request.auth != null && resource.data.ownerUid == request.auth.uid &&
+      // Owner can update only if serverCreated is true and immutable fields aren't changed
+      allow update: if request.auth != null && resource.data.ownerUid == request.auth.uid &&
         resource.data.serverCreated == true &&
+        request.resource != null &&
         !('ownerUid' in request.resource.data.diff(resource.data).changedKeys()) &&
         !('serverCreated' in request.resource.data.diff(resource.data).changedKeys());
+
+        // Owner can always delete their cloud document, even if older docs are missing serverCreated
+        allow delete: if request.auth != null && resource.data.ownerUid == request.auth.uid;
     }
   }
 }

@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { ALLOWED_HTTP_SCHEME_LABEL, normalizeExternalLinkUrl } from '../../../widgets/utils/linkUrl';
+import { ALLOWED_HTTP_SCHEME_LABEL, normalizeExternalLinkUrl } from '../../../../../shared/widgets/linkUrl';
 
 type LinkPreviewPanelProps = {
     rawUrl: string;

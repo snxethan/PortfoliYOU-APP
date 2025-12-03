@@ -6,7 +6,7 @@ import { AssetMeta, computeHash, getImageSize, idbAllMeta, idbDelete, idbGet, id
 import { auth, storage } from '../lib/firebase';
 
 import { useNotifications } from './NotificationsProvider';
-import { useProjects } from './ProjectsProvider';
+import { useProjects, buildProjectAssetPath } from './ProjectsProvider';
 
 export type AssetsCtx = {
     list: AssetMeta[];
@@ -82,7 +82,7 @@ export function AssetsProvider({ children }: { children: React.ReactNode }) {
                 const nextMeta = { ...meta, projectId: pid };
                 await idbPut(stores.STORE_META, hash, nextMeta);
                 results.push(nextMeta);
-            } catch (err) {
+            } catch {
                 // Fallback: write original meta and continue
                 await idbPut(stores.STORE_META, hash, meta);
                 results.push(meta);
@@ -110,9 +110,19 @@ export function AssetsProvider({ children }: { children: React.ReactNode }) {
 
     const syncToCloud = useCallback(async (hash: string): Promise<AssetMeta | null> => {
         const user = auth.currentUser; if (!user) return null;
-        const meta = await idbGet<AssetMeta>(stores.STORE_META, hash); if (!meta) return null;
+        let meta = await idbGet<AssetMeta>(stores.STORE_META, hash); if (!meta) return null;
         const blob = await idbGet<Blob>(stores.STORE_BLOBS, hash); if (!blob) return null;
-        const path = `users/${user.uid}/assets/${hash}`;
+        let projectId = meta.projectId;
+        if (!projectId && selectedProject?.id) {
+            projectId = selectedProject.id;
+            const patched: AssetMeta = { ...meta, projectId };
+            try { await idbPut(stores.STORE_META, hash, patched); meta = patched; } catch { /* ignore */ }
+        }
+        if (!projectId) {
+            try { notify({ type: 'error', title: selectedProject?.name, message: 'Select a portfolio before syncing assets to the cloud.', persistent: false }); } catch { /* noop */ }
+            return meta;
+        }
+        const path = buildProjectAssetPath(user.uid, projectId, hash);
         try {
             // Try to get an existing URL (dedupe)
             let url: string | null = null;
@@ -128,7 +138,7 @@ export function AssetsProvider({ children }: { children: React.ReactNode }) {
         } catch {
             return meta;
         }
-    }, [refresh]);
+    }, [notify, refresh, selectedProject?.id, selectedProject?.name]);
 
     const syncAllToCloud = useCallback(async () => {
         const user = auth.currentUser; if (!user) return [];

@@ -31,6 +31,15 @@
 		/* orange */
 		--accent-600: #f97316;
 		--accent-700: #ea580c;
+		/* App-level accent stays constant even if page themes override --accent */
+		--app-accent: #fb923c;
+		--app-accent-600: #f97316;
+		--app-accent-700: #ea580c;
+
+
+		/* Semantic success / danger colors (used by preview stop and status badges) */
+		--success: #10b981;
+		--danger: #ef4444;
 
 
 		--focus: 0 0 0 3px rgba(6, 182, 212, 0.35);
@@ -60,6 +69,9 @@
 		--accent: #06b6d4;
 		--accent-600: #0891b2;
 		--accent-700: #0e7490;
+		--app-accent: #06b6d4;
+		--app-accent-600: #0891b2;
+		--app-accent-700: #0e7490;
 
 		--focus: 0 0 0 3px rgba(6, 182, 212, 0.4);
 		--color-scheme: light;
@@ -151,9 +163,11 @@
 		@apply inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-[color:var(--accent)] text-black;
 	}
 
+
 	.section-title {
-		@apply text-lg font-semibold;
-		color: var(--fg-strong, var(--fg));
+		@apply text-xs uppercase font-semibold tracking-normal text-[color:var(--fg-muted)] mb-1;
+		letter-spacing: 0.02em;
+		color: var(--fg-muted);
 	}
 
 	.section-subtitle {
@@ -281,9 +295,9 @@
 	--accent: #000000 !important;
 }
 
-/* Palette full-height helper: uses measured --canvas-h set on wrapper */
+/* Palette full-height helper: ensure layout fills available track */
 .palette-full-height {
-	height: var(--canvas-h, auto);
+	height: 100%;
 	box-sizing: border-box;
 }
 
@@ -451,25 +465,31 @@
 }
 
 /* Ensure close buttons inside sticky header remain visible */
+:root {
+	--frame-bar-h: 36px;
+}
+
 .modal-header-sticky .btn {
 	z-index: 40;
 }
 
 /* Window frame draggable region + controls */
+
 .window-frame {
 	-webkit-app-region: drag;
 	display: flex;
 	align-items: center;
-	height: 36px;
-	gap: 8px;
-	padding: 0 8px;
-	border-bottom: 1px solid color-mix(in oklab, var(--border) 90%, transparent);
-	background: color-mix(in oklab, var(--surface) 94%, transparent);
 	position: fixed;
 	top: 0;
 	left: 0;
 	right: 0;
-	z-index: 100000;
+	height: var(--frame-bar-h);
+	gap: 8px;
+	padding: 0 12px;
+	border-bottom: 1px solid color-mix(in oklab, var(--border) 90%, transparent);
+	background: color-mix(in oklab, var(--surface) 94%, transparent);
+	z-index: 200000;
+	box-sizing: border-box;
 }
 
 .window-frame__left {
@@ -479,37 +499,76 @@
 	gap: 8px;
 }
 
+
 .window-frame__center {
 	flex: 1;
 	pointer-events: none;
-	/* let dragging work across center */
+	padding-right: 132px;
 }
 
 .window-frame__controls {
 	-webkit-app-region: no-drag;
 	display: flex;
-	gap: 6px;
-	align-items: center;
-	/* pin to the viewport corner so the controls reach the absolute top-right */
-	position: fixed;
-	right: -6px;
-	top: -6px;
-	padding: 0;
-	margin: 0;
-	z-index: 100001;
+	position: absolute;
+	top: 0;
+	right: 0;
+	bottom: 0;
+	gap: 0;
+	align-items: stretch;
+	overflow: hidden;
 }
 
 .window-control {
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
-	/* slightly larger hit area so corner clicks hit the control */
-	width: 40px;
-	height: 40px;
-	border-radius: 6px;
+	line-height: 0;
+	/* closely match Windows chrome hit area while staying inside renderer bounds */
+	width: 44px;
+	height: 100%;
+	border-radius: 0;
 	border: 1px solid transparent;
 	background: transparent;
 	color: var(--fg);
+	box-sizing: border-box;
+	margin: 0;
+}
+
+.window-control--ghost {
+	-webkit-app-region: no-drag;
+	padding: 0 6px;
+}
+
+.window-control svg {
+	display: block;
+	width: 12px;
+	height: 12px;
+	max-width: 100%;
+	max-height: 100%;
+	margin: 0;
+	/* vertical-align not needed for block-level SVG */
+}
+
+/* Slight visual nudge for the close icon to sit visually centered
+   relative to the other icons. This compensates for differing glyph shapes. */
+.window-control--close svg {
+	/* keep the icon centered now that the hit area is flush with the edge */
+	transform: none;
+}
+
+/* Keyboard focus should show the same highlight as hover */
+.window-control:focus,
+.window-control:focus-visible {
+	outline: none;
+	background: color-mix(in oklab, var(--muted) 75%, var(--accent) 10%);
+	border-color: color-mix(in oklab, var(--border) 85%, transparent);
+}
+
+.window-control--close:focus,
+.window-control--close:focus-visible {
+	outline: none;
+	background: #c2410c;
+	color: #fff;
 }
 
 .window-control:hover {
@@ -519,6 +578,8 @@
 
 .window-control--close {
 	color: var(--fg);
+	border-top-right-radius: 0;
+	border-bottom-right-radius: 0;
 }
 
 .window-control--close:hover {
@@ -532,62 +593,67 @@
 	background: color-mix(in oklab, var(--surface) calc(var(--island-opacity, 1) * 100%), transparent) !important;
 }
 
-/* Accent-styled range slider for PortfolioIsland opacity control */
-.island-opacity-slider {
+/* Basic accent range slider (used for Portfolio Island opacity control) */
+.accent-range {
+	--slider-progress: 50%;
+	--slider-track-bg: color-mix(in oklab, var(--surface) 85%, transparent);
 	-webkit-appearance: none;
 	appearance: none;
-	/* the element background will be set dynamically to render the filled portion */
-	background: transparent;
+	width: 100%;
 	height: 6px;
-}
-
-.island-opacity-slider:focus {
+	border-radius: 999px;
+	background: linear-gradient(90deg,
+			var(--accent) 0%,
+			var(--accent) var(--slider-progress),
+			var(--slider-track-bg) var(--slider-progress),
+			var(--slider-track-bg) 100%);
+	background-repeat: no-repeat;
+	background-size: 100% 6px;
+	background-position: center;
 	outline: none;
+	padding: 0;
+	cursor: pointer;
 }
 
-.island-opacity-slider::-webkit-slider-runnable-track {
+.accent-range:focus-visible {
+	box-shadow: 0 0 0 2px color-mix(in oklab, var(--accent) 45%, transparent);
+}
+
+.accent-range::-webkit-slider-runnable-track {
 	height: 6px;
-	/* make the native track transparent so the element background gradient shows the filled portion */
+	border-radius: 999px;
 	background: transparent;
-	border-radius: 999px;
 }
 
-/* Firefox: use the progress pseudo-element to color the filled portion */
-.island-opacity-slider::-moz-range-progress {
-	height: 6px;
-	background: var(--accent);
-	border-radius: 999px;
-}
-
-.island-opacity-slider::-moz-range-track {
-	height: 6px;
-	background: color-mix(in oklab, var(--surface) 85%, transparent);
-	border-radius: 999px;
-}
-
-.island-opacity-slider::-webkit-slider-thumb {
+.accent-range::-webkit-slider-thumb {
 	-webkit-appearance: none;
 	appearance: none;
-	width: 14px;
-	height: 14px;
-	border-radius: 999px;
+	width: 16px;
+	height: 16px;
+	border-radius: 50%;
 	background: var(--accent);
-	/* use a solid surface color for the thumb border to avoid a visible seam */
 	border: 2px solid var(--surface);
-	margin-top: -4px;
-	/* center the thumb on the track */
+	box-shadow: 0 2px 4px rgba(0, 0, 0, 0.25);
+	margin-top: -5px;
 }
 
-.island-opacity-slider::-moz-range-track {
+.accent-range::-moz-range-track {
 	height: 6px;
-	background: color-mix(in oklab, var(--surface) 85%, transparent);
 	border-radius: 999px;
+	background: var(--slider-track-bg);
 }
 
-.island-opacity-slider::-moz-range-thumb {
-	width: 14px;
-	height: 14px;
+.accent-range::-moz-range-progress {
+	height: 6px;
 	border-radius: 999px;
 	background: var(--accent);
+}
+
+.accent-range::-moz-range-thumb {
+	width: 16px;
+	height: 16px;
+	border-radius: 50%;
+	background: var(--accent);
 	border: 2px solid var(--surface);
+	box-shadow: 0 2px 4px rgba(0, 0, 0, 0.25);
 }

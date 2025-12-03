@@ -3,7 +3,7 @@ import { z } from 'zod';
 
 import type { WidgetDefinition } from '../types';
 import { useAssets } from '../../providers/AssetsProvider';
-import type { VideoWidgetProps } from '../videoProps';
+import type { VideoWidgetProps } from '../../../../shared/widgets/videoProps';
 import {
     COLOR_OR_VAR,
     VIDEO_BASE_FALLBACK,
@@ -14,7 +14,7 @@ import {
     sanitizeText,
     sanitizeUrlish,
     sanitizeVideoProps,
-} from '../videoProps';
+} from '../../../../shared/widgets/videoProps';
 
 type Props = VideoWidgetProps;
 
@@ -353,6 +353,15 @@ const def: WidgetDefinition<Props> = {
         borderColor: z.string().regex(COLOR_OR_VAR).optional(),
         borderStyle: z.enum(['solid', 'dashed', 'dotted']).optional(),
     }),
+};
+
+// Provide static CSS helpers for compiled exports
+def.getStaticCss = (props: any) => {
+    const safe = sanitizeVideoProps(props || {} as any);
+    const radius = safe.shape === 'circle' ? '999px' : safe.shape === 'rounded' ? `${Math.max(0, safe.borderRadius ?? 12)}px` : `${Math.max(0, safe.borderRadius ?? 0)}px`;
+    const bg = safe.backgroundColor || 'var(--surface)';
+    const border = safe.borderWidth && safe.borderWidth > 0 ? `${safe.borderWidth}px ${safe.borderStyle || 'solid'} ${safe.borderColor || 'var(--border)'}` : '1px solid var(--border)';
+    return `border-radius: ${radius}; overflow:hidden; background: ${bg}; border: ${border}; box-sizing: border-box;`;
 };
 
 export default def;

@@ -26,9 +26,10 @@ export default function AssetsPanel({ hideHeader = false }: { hideHeader?: boole
     type Cat = 'Images' | 'Audio' | 'Video' | 'Other';
     const grouped = useMemo(() => {
         const map = new Map<Cat, typeof filtered>();
+        const isImageAsset = (a: typeof filtered[number]) => (a.type?.startsWith('image/')) || ((a.width ?? 0) > 0 && (a.height ?? 0) > 0);
         for (const a of filtered) {
             let key: Cat = 'Other';
-            if (a.type?.startsWith('image/')) key = 'Images';
+            if (isImageAsset(a)) key = 'Images';
             else if (a.type?.startsWith('audio/')) key = 'Audio';
             else if (a.type?.startsWith('video/')) key = 'Video';
             if (!map.has(key)) map.set(key, []);
@@ -170,14 +171,36 @@ const AssetItem: React.FC<AssetItemProps> = ({ hash, name, type, onRemove, onSyn
                     <div className="text-[10px] text-[color:var(--fg-muted)]">Loading…</div>
                 )}
             </div>
-            <div className="p-3 text-[11px] flex items-center justify-center gap-3 bg-[color:var(--surface)]/0">
-                <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2 px-2 py-2 border-t border-[color:var(--border)] bg-[color:var(--surface)]/60">
+                <div className="flex-1 min-w-0">
+                    <p className="text-[11px] font-medium truncate" title={name || hash}>{name || hash}</p>
+                    <p className="text-[10px] uppercase tracking-wide text-[color:var(--fg-muted)]">{cloudUrl ? 'Cloud copy' : 'Local only'}</p>
+                </div>
+                <div className="flex items-center gap-1">
                     {onSync && isCloudProject && (
-                        <button className="btn btn-ghost btn-xxs" title={cloudUrl ? 'Synced' : 'Sync to cloud'} aria-label={cloudUrl ? 'Synced' : 'Sync to cloud'} onClick={async () => { if (syncing) return; setSyncing(true); try { await onSync(); } finally { setSyncing(false); } }} disabled={syncing}>
-                            <CloudUpload size={12} />
+                        <button
+                            type="button"
+                            className={`inline-flex h-7 w-7 items-center justify-center rounded-md border ${cloudUrl ? 'border-[color:var(--accent)]/50 text-[color:var(--accent)] bg-[color:var(--accent)]/10' : 'border-[color:var(--border)] text-[color:var(--fg-muted)] hover:border-[color:var(--accent)] hover:text-[color:var(--accent)]'} transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-[color:var(--accent)]`}
+                            title={cloudUrl ? 'Asset synced to cloud' : 'Sync asset to cloud'}
+                            aria-label={cloudUrl ? 'Asset synced to cloud' : 'Sync asset to cloud'}
+                            onClick={async () => {
+                                if (syncing) return;
+                                setSyncing(true);
+                                try { await onSync(); }
+                                finally { setSyncing(false); }
+                            }}
+                            disabled={syncing}
+                        >
+                            {syncing ? <span className="w-3 h-3 border-2 border-[color:var(--border)] border-t-transparent rounded-full animate-spin" aria-hidden="true"></span> : <CloudUpload size={12} />}
                         </button>
                     )}
-                    <button className="btn btn-ghost btn-xxs text-red-500 border border-red-500/40 hover:bg-red-500/10" title="Delete asset" aria-label="Delete asset" onClick={onRemove}>
+                    <button
+                        type="button"
+                        className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-red-500/40 text-red-500 hover:bg-red-500/10 transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-red-500"
+                        title="Delete asset"
+                        aria-label="Delete asset"
+                        onClick={onRemove}
+                    >
                         <Trash2 size={12} />
                     </button>
                 </div>

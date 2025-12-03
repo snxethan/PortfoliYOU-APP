@@ -108,5 +108,6 @@ export function useWidget() {
 }
 
 export function useWidgetTheme() {
-    return useContext(WidgetContext).theme;
+    const ctx = useContext(WidgetContext);
+    return ctx.theme ?? FALLBACK_WIDGET_THEME;
 }

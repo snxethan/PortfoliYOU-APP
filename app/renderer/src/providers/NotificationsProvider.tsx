@@ -1,4 +1,5 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { useLocation } from "react-router-dom";
 
 export type NotificationType =
   | "info"
@@ -34,6 +35,7 @@ export type NotifyEventDetail = {
 const STORAGE_KEY = "py.notifications";
 
 type StoredNotification = Omit<NotificationItem, "bootstrap">;
+const REMOTE_FEED_URL = ((import.meta as ImportMeta & { env?: Record<string, string | undefined> })?.env?.VITE_NOTIFICATIONS_FEED_URL) as string | undefined;
 
 function loadStored(): NotificationItem[] {
   try {
@@ -43,7 +45,8 @@ function loadStored(): NotificationItem[] {
   } catch { return []; }
 }
 function saveStored(list: NotificationItem[]) {
-  const serialized: StoredNotification[] = list.map(item => {
+  const filtered = list.filter((item) => item.persistent || item.bootstrap);
+  const serialized: StoredNotification[] = filtered.map(item => {
     const { bootstrap, ...rest } = item;
     void bootstrap;
     return rest;
@@ -56,6 +59,11 @@ export type NotificationsCtx = {
   add: (n: Omit<NotificationItem, "id" | "createdAt"> & { id?: string }) => string;
   dismiss: (id: string) => void;
   clearAll: () => void;
+  panelOpen: boolean;
+  panelPulse: boolean;
+  openPanel: (opts?: { highlight?: boolean }) => void;
+  closePanel: () => void;
+  togglePanel: (opts?: { highlight?: boolean }) => void;
 };
 
 const Ctx = createContext<NotificationsCtx | null>(null);
@@ -64,6 +72,44 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
   const [items, setItems] = useState<NotificationItem[]>(() => loadStored());
   const saveRef = useRef(items);
   useEffect(() => { saveRef.current = items; saveStored(items); }, [items]);
+  const location = useLocation();
+
+  const [panelOpen, setPanelOpen] = useState(false);
+  const [panelPulse, setPanelPulse] = useState(false);
+  const pulseTimerRef = useRef<number | null>(null);
+
+  const clearPulseTimer = useCallback(() => {
+    if (pulseTimerRef.current !== null) {
+      window.clearTimeout(pulseTimerRef.current);
+      pulseTimerRef.current = null;
+    }
+  }, []);
+
+  const triggerPanelPulse = useCallback(() => {
+    setPanelPulse(true);
+    clearPulseTimer();
+    pulseTimerRef.current = window.setTimeout(() => {
+      setPanelPulse(false);
+      pulseTimerRef.current = null;
+    }, 1400);
+  }, [clearPulseTimer]);
+
+  const openPanel = useCallback((opts?: { highlight?: boolean }) => {
+    setPanelOpen(true);
+    if (opts?.highlight !== false) triggerPanelPulse();
+  }, [triggerPanelPulse]);
+
+  const closePanel = useCallback(() => {
+    setPanelOpen(false);
+  }, []);
+
+  const togglePanel = useCallback((opts?: { highlight?: boolean }) => {
+    setPanelOpen(prev => {
+      const next = !prev;
+      if (next && opts?.highlight !== false) triggerPanelPulse();
+      return next;
+    });
+  }, [triggerPanelPulse]);
 
   const add = useCallback((n: Omit<NotificationItem, "id" | "createdAt"> & { id?: string }) => {
     const id = n.id || crypto.randomUUID();
@@ -126,7 +172,111 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
     return () => window.removeEventListener("py:notify", onNotify as EventListener);
   }, [add]);
 
-  const api = useMemo<NotificationsCtx>(() => ({ notifications: items, add, dismiss, clearAll }), [items, add, dismiss, clearAll]);
+  // Allow the shell (or backend bridge) to push notifications via IPC.
+  useEffect(() => {
+    const off = window.api?.onWindowEvent?.("notifications:push", (payload) => {
+      if (!payload || typeof payload !== 'object') return;
+      const data = payload as Partial<NotifyEventDetail> & { message?: string };
+      if (!data.message) return;
+      add({
+        type: data.type || "info",
+        message: data.message,
+        title: data.title,
+        href: data.href,
+        ctaLabel: data.ctaLabel,
+        persistent: data.persistent ?? true,
+      });
+    });
+    return () => { if (typeof off === 'function') off(); };
+  }, [add]);
+
+  // Optional SSE feed so backend services can stream notifications without IPC.
+  useEffect(() => {
+    if (!REMOTE_FEED_URL) return;
+    if (typeof window === 'undefined' || typeof EventSource === 'undefined') return;
+    let source: EventSource | null = null;
+    let retryTimer: number | null = null;
+    let stopped = false;
+
+    const scheduleReconnect = () => {
+      if (retryTimer !== null || stopped) return;
+      retryTimer = window.setTimeout(() => {
+        retryTimer = null;
+        connect();
+      }, 5000);
+    };
+
+    const connect = () => {
+      if (stopped) return;
+      try { source?.close(); } catch { /* ignore */ }
+      try {
+        source = new EventSource(REMOTE_FEED_URL);
+      } catch {
+        scheduleReconnect();
+        return;
+      }
+      if (!source) { scheduleReconnect(); return; }
+      source.onmessage = (evt) => {
+        try {
+          const data = JSON.parse(evt.data ?? '{}');
+          if (!data || typeof data.message !== 'string' || !data.message.trim()) return;
+          add({
+            type: data.type || 'info',
+            message: data.message,
+            title: data.title,
+            href: data.href,
+            ctaLabel: data.ctaLabel,
+            persistent: data.persistent ?? true,
+          });
+        } catch { /* ignore malformed payloads */ }
+      };
+      source.onerror = () => {
+        try { source?.close(); } catch { /* ignore */ }
+        scheduleReconnect();
+      };
+    };
+
+    connect();
+    return () => {
+      stopped = true;
+      try { source?.close(); } catch { /* ignore */ }
+      if (retryTimer !== null) {
+        window.clearTimeout(retryTimer);
+        retryTimer = null;
+      }
+    };
+  }, [add]);
+
+  useEffect(() => () => clearPulseTimer(), [clearPulseTimer]);
+
+  useEffect(() => {
+    function handleToggle() {
+      if (location.pathname === '/') return;
+      togglePanel();
+    }
+    function handleHighlight() {
+      if (location.pathname === '/') return;
+      openPanel({ highlight: true });
+    }
+    window.addEventListener('py:toggle-notifications', handleToggle as EventListener);
+    window.addEventListener('py:highlight-notifications', handleHighlight as EventListener);
+    return () => {
+      window.removeEventListener('py:toggle-notifications', handleToggle as EventListener);
+      window.removeEventListener('py:highlight-notifications', handleHighlight as EventListener);
+    };
+  }, [location.pathname, openPanel, togglePanel]);
+
+  const api = useMemo<NotificationsCtx>(() => ({
+    notifications: items,
+    add,
+    dismiss,
+    clearAll,
+    panelOpen,
+    panelPulse,
+    openPanel,
+    closePanel,
+    togglePanel,
+  }), [items, add, dismiss, clearAll, panelOpen, panelPulse, openPanel, closePanel, togglePanel]);
   return <Ctx.Provider value={api}>{children}</Ctx.Provider>;
 }
 

@@ -7,63 +7,66 @@ import Dashboard from "../components/home/Dashboard";
 import NotificationsCenter from "../components/notifications/NotificationsCenter";
 import QuickstartPanel from "../components/home/QuickstartPanel";
 import ProjectsList from "../components/home/ProjectsList";
-import CloudProjectsList from "../components/home/CloudProjectsList";
 import AccountDashboard from "../components/home/AccountDashboard";
 import type { LocalProject } from "../components/home/ProjectsList";
 import { useAuth } from "../providers/AuthProvider";
 import { useProjects } from "../providers/ProjectsProvider";
 // CTA is now shown via a popup from the sidebar Account section when not signed in
 import { useNotifications } from "../providers/NotificationsProvider";
-import type { NotificationType } from "../providers/NotificationsProvider";
 import { usePortfolioSettings } from "../providers/PortfolioSettingsProvider";
 
 
 export default function HomePage() {
 	const { user } = useAuth();
-	const { projects, hasAny, importProject, selectProject, deleteProject, saveProject, selectedProjectId, cloudMaxProjects, cloudMaxStorageMB, cloudBytesUsed, cloudProjectsCount, listCloudProjects, getCloudObjectInfoByCloudId, reconcileCloudLinks } = useProjects();
+	const { projects, hasAny, importProject, selectProject, deleteProject, deleteCloudProjectByCloudId, saveProject, selectedProjectId, cloudMaxProjects, cloudMaxStorageMB, cloudBytesUsed, cloudProjectsCount } = useProjects();
 	const { notifications, dismiss, clearAll } = useNotifications();
 	const { openSettings, openCreate } = usePortfolioSettings();
 	const navigate = useNavigate();
-	const [cloudProjects, setCloudProjects] = useState<Array<{ id: string; name: string; updatedAt: string; storagePath: string }>>([]);
-	const [cloudInfo, setCloudInfo] = useState<Record<string, { storagePath: string; sizeBytes: number; updatedAt: string }>>({});
-	const [hoverLinkedId, setHoverLinkedId] = useState<string | null>(null);
+	const cloudPortfolioList = useMemo(() => projects.filter(p => (p as unknown as { storage?: string; _cloudId?: string }).storage === 'cloud' || Boolean((p as unknown as { _cloudId?: string })._cloudId)), [projects]);
 	const [accountOpen, setAccountOpen] = useState(false);
 
 	// No popup state needed; CTA is an inline centered section shown only when logged out
 
 	// Important: avoid conditional hook calls; compute recent without hooks
 	const recent = projects.slice(0, 6);
-	const [cloudRemoteCount, setCloudRemoteCount] = useState(0);
+	const cloudRemoteCount = useMemo(() => cloudPortfolioList.length, [cloudPortfolioList]);
 	const cloudQuota = cloudMaxProjects;
-
-	useEffect(() => {
-		let alive = true;
-		const fetchCloud = async () => {
-			if (!user) { if (alive) { setCloudRemoteCount(0); setCloudProjects([]); setCloudInfo({}); } return; }
-			try {
-				const list = await listCloudProjects();
-				if (!alive) return;
-				setCloudRemoteCount(list.length);
-				setCloudProjects(list);
-				// Reconcile local link flags with actual cloud state
-				reconcileCloudLinks(list.map(x => x.id));
-				const infoMap: Record<string, { storagePath: string; sizeBytes: number; updatedAt: string }> = {};
-				for (const item of list) {
-					try {
-						const inf = await getCloudObjectInfoByCloudId(item.id);
-						if (inf) infoMap[item.id] = inf;
-					} catch { /* ignore */ }
-				}
-				if (alive) setCloudInfo(infoMap);
-			} catch { /* ignore */ }
-		};
-		fetchCloud();
-		// periodic refresh every 60s when signed in
-		const interval = setInterval(() => { if (user) fetchCloud(); }, 60000);
-		return () => { alive = false; clearInterval(interval); };
-	}, [user, projects.map(p => p._cloudId ? p._cloudId : '').join(',')]);
+	const usageMb = useMemo(() => ((cloudBytesUsed || 0) / (1024 * 1024)).toFixed(2), [cloudBytesUsed]);
+	const projectCountStat = useMemo(() => cloudProjectsCount || cloudRemoteCount, [cloudProjectsCount, cloudRemoteCount]);
 	const [notificationsOpen, setNotificationsOpen] = useState(false);
 	const unseenCount = useMemo(() => notifications.length, [notifications.length]);
+	const [notificationsPulse, setNotificationsPulse] = useState(false);
+
+	useEffect(() => {
+		let t: number | null = null;
+		if (notificationsOpen) {
+			setNotificationsPulse(true);
+			t = window.setTimeout(() => setNotificationsPulse(false), 1600);
+		}
+		return () => { if (t) { clearTimeout(t); } };
+	}, [notificationsOpen]);
+
+	useEffect(() => {
+		const handler = (e: any) => {
+			try { setNotificationsOpen(v => !v); } catch { /* ignore */ }
+		};
+		window.addEventListener('py:toggle-notifications', handler as EventListener);
+		return () => window.removeEventListener('py:toggle-notifications', handler as EventListener);
+	}, []);
+
+	// Also respond to highlight requests specifically for notifications (from other UI)
+	useEffect(() => {
+		const onHighlight = (e: any) => {
+			try {
+				// ensure the center is open, then pulse
+				setNotificationsOpen(true);
+				setNotificationsPulse(true);
+				window.setTimeout(() => setNotificationsPulse(false), 1600);
+			} catch { /* ignore */ }
+		};
+		window.addEventListener('py:highlight-notifications', onHighlight as EventListener);
+		return () => window.removeEventListener('py:highlight-notifications', onHighlight as EventListener);
+	}, []);
 
 	// Highlight + scroll interop
 	const [pulseList, setPulseList] = useState(false);
@@ -100,9 +103,9 @@ export default function HomePage() {
 			}
 		};
 		const onAccount = (ev: Event) => {
-			const detail = (ev as CustomEvent | undefined)?.detail as any;
+			const detail = (ev as CustomEvent | undefined)?.detail as unknown;
 			// If event originated from Home itself, ignore to avoid double-highlighting
-			if (detail && detail.origin === 'home') return;
+			if (detail && typeof (detail as Record<string, unknown>).origin === 'string' && (detail as Record<string, unknown>).origin === 'home') return;
 			accountRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
 			triggerPulse(setPulseAccount, 'acc');
 		};
@@ -117,7 +120,6 @@ export default function HomePage() {
 		};
 	}, [hasAny, recent.length]);
 
-	// Legacy notification logic removed; unified notifications come from NotificationsProvider
 
 	// Unified layout below handles both empty and non-empty states.
 
@@ -130,9 +132,9 @@ export default function HomePage() {
 			{/* Centered CTA under title is now shown inside Dashboard; no extra CTA block here */}
 			{/* Notification center area on Home for managing/dismissing persistent notifications */}
 			{notificationsOpen && (
-				<div className="surface border border-[color:var(--border)] rounded-2xl p-4">
+				<div className={`relative surface border border-[color:var(--border)] rounded-2xl p-4 shadow-lg bg-[color:var(--surface)]/85 ${notificationsPulse ? 'highlight-pulse' : ''}`}>
 					<NotificationsCenter
-						notifications={notifications as Array<{ id: string; type: NotificationType; title?: string; message: string; createdAt: number | string }>}
+						notifications={notifications}
 						onDismiss={dismiss}
 						onClearAll={clearAll}
 					/>
@@ -144,8 +146,8 @@ export default function HomePage() {
 			<section>
 				<div id="py-list" ref={listRef} className={`surface border border-[color:var(--border)] rounded-2xl p-6 space-y-4 shadow-lg shadow-black/20 ${pulseList ? 'highlight-pulse' : ''}`}>
 					<div className="flex flex-col gap-1">
-						<p className="text-xs uppercase tracking-wide text-[color:var(--fg-muted)]">Portfolio workspace</p>
-						<p className="text-sm text-[color:var(--fg-muted)]">Create new work, manage local files, and keep cloud projects in sync.</p>
+						<p className="section-title">Portfolio workspace</p>
+						<p className="text-sm text-[color:var(--fg-muted)]">Create, manage, and load your portfolios in a single workspace.</p>
 					</div>
 					<div id="py-quickstart" ref={quickstartRef} className={`${pulseQuickstart ? 'highlight-pulse' : ''}`}>
 						<QuickstartPanel
@@ -157,42 +159,16 @@ export default function HomePage() {
 					<ProjectsList
 						projects={recent as unknown as LocalProject[]}
 						selectedProjectId={selectedProjectId}
-						hoverLinkedId={hoverLinkedId}
 						userSignedIn={!!user}
 						onSelect={(id) => selectProject(id)}
 						onDelete={(id, opts) => deleteProject(id, opts)}
+						onDeleteCloud={async (cloudId) => { await deleteCloudProjectByCloudId(cloudId); }}
 						onSaveAs={(id) => saveProject(id, { saveAs: true })}
 						onOpenFileLocation={async (filePath) => { if (window.api?.showItemInFolder) await window.api.showItemInFolder({ filePath }); }}
 						onOpenEditor={(id) => { selectProject(id); navigate('/editor'); }}
 						onOpenDeploy={(id) => { selectProject(id); navigate('/deploy'); }}
 						onOpenSettings={(id, section) => openSettings({ projectId: id, section })}
 					/>
-					{user && (
-						<CloudProjectsList
-							userSignedIn={!!user}
-							cloudProjects={cloudProjects}
-							cloudInfo={cloudInfo}
-							localProjects={projects.map(p => ({ id: p.id, _cloudId: (p as unknown as { _cloudId?: string })._cloudId }))}
-							selectedProjectId={selectedProjectId}
-							hoverLinkedId={hoverLinkedId}
-							setHoverLinkedId={setHoverLinkedId}
-							onRefresh={async () => {
-								try {
-									const list = await listCloudProjects();
-									setCloudRemoteCount(list.length);
-									setCloudProjects(list);
-									reconcileCloudLinks(list.map(x => x.id));
-									const infoMap: Record<string, { storagePath: string; sizeBytes: number; updatedAt: string }> = {};
-									for (const item of list) {
-										try { const inf = await getCloudObjectInfoByCloudId(item.id); if (inf) infoMap[item.id] = inf; } catch { /* ignore */ }
-									}
-									setCloudInfo(infoMap);
-								} catch { /* ignore */ }
-							}}
-							onSelectLocal={(id) => selectProject(id)}
-							onOpenSettings={(target) => openSettings({ projectId: target.projectId, cloudId: target.cloudId, section: 'cloud' })}
-						/>
-					)}
 				</div>
 			</section>
 
@@ -202,9 +178,9 @@ export default function HomePage() {
 					<div id="py-account" ref={accountRef}>
 						<AccountDashboard
 							userDisplay={(user?.email ?? user?.uid) as string}
-							usageMB={(((cloudBytesUsed && cloudBytesUsed > 0 ? cloudBytesUsed : Object.values(cloudInfo).reduce((a, b) => a + (b.sizeBytes || 0), 0)) / (1024 * 1024)).toFixed(2))}
+							usageMB={usageMb}
 							maxStorageMB={String(cloudMaxStorageMB || 1024)}
-							projectCount={(cloudProjectsCount && cloudProjectsCount > 0 ? cloudProjectsCount : cloudRemoteCount)}
+							projectCount={projectCountStat}
 							projectQuota={cloudQuota}
 							onOpenSettings={() => setAccountOpen(true)}
 							highlight={pulseAccount}

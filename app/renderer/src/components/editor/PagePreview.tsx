@@ -1,9 +1,9 @@
 import React, { memo, useMemo } from 'react';
 
 import WidgetRenderer from '../../widgets/Renderer';
+import type { WidgetThemeSnapshot } from '../../widgets/theme';
 
 import type { GridItem } from './canvas/GridCanvas';
-import type { WidgetThemeSnapshot } from '../../widgets/theme';
 
 function PagePreviewInner({ width, cols, gap, rowH, items, currentPageId, onNavigatePage, background, themeSnapshot }: {
     width: number;

@@ -1,5 +1,8 @@
 ﻿import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
-import { Suspense, lazy, useEffect, useState, useCallback } from "react";
+import { Suspense, lazy, useEffect, useState, useCallback, useRef } from "react";
+import { startPreviewServer } from "./lib/previewServer";
+import { captureGlobalStyleSnapshot } from "./lib/styleSnapshot";
+import { appendPreviewLog, setPreviewState } from "./lib/previewInterop";
 
 import Sidebar from "./components/Sidebar";
 import PortfolioIsland from "./components/portfolio-island/PortfolioIsland";
@@ -9,12 +12,13 @@ const EditorPage = lazy(() => import("./pages/Editor"));
 const DeployPage = lazy(() => import("./pages/Deploy"));
 import ProtectedRoute from "./components/auth/ProtectedRoute";
 import { ProjectsProvider, useProjects } from "./providers/ProjectsProvider";
-import { AssetsProvider } from "./providers/AssetsProvider";
+import { AssetsProvider, useAssets } from "./providers/AssetsProvider";
 import { NotificationsProvider } from "./providers/NotificationsProvider";
 import { PortfolioSettingsProvider } from "./providers/PortfolioSettingsProvider";
 import NotificationsUI from "./components/notifications/Notifications";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { useAuth } from "./providers/AuthProvider";
+import { getWidgetThemeSnapshot, themeSnapshotToCss } from "./widgets/theme";
 // Ensure widgets are registered globally so previews render on any route
 import "./widgets/loader";
 
@@ -38,7 +42,7 @@ export default function App() {
       <div className="flex items-center justify-center min-h-screen bg-[color:var(--bg)]">
         <div className="flex flex-col items-center gap-4">
           <div className="w-12 h-12 border-4 border-[color:var(--border)] border-t-[color:var(--primary)] rounded-full animate-spin"></div>
-          <p className="text-sm text-[color:var(--fg-muted)]">Initializing...</p>
+          <p className="text-sm text-[color:var(--fg-muted)]">A Portfolio for you, by you.</p>
         </div>
       </div>
     );
@@ -52,44 +56,46 @@ export default function App() {
             <AssetsProvider>
               <PortfolioSettingsProvider>
                 <SaveHotkeys />
+                <GlobalPreviewStarter />
                 <GlobalZoomControls />
                 <NotificationsUI />
-                <div className="min-h-screen" style={{ paddingTop: 36 }}>
+                <div className="min-h-screen bg-[color:var(--bg)]" style={{ paddingTop: 'var(--frame-bar-h, 36px)' }}>
                   <FrameBar />
                   <Sidebar />
-                  <div style={{ marginLeft: 'var(--sidebar-w,15rem)' }} className="min-h-0">
-                    <div className="min-h-screen flex flex-col">
-                      <PortfolioIsland />
-                      <main className="flex-1">
-                        <Suspense fallback={
-                          <div className="flex items-center justify-center py-16">
-                            <div className="w-10 h-10 border-4 border-[color:var(--border)] border-t-[color:var(--primary)] rounded-full animate-spin" />
-                          </div>
-                        }>
-                          <Routes>
-                            <Route path="/" element={<HomePage />} />
-                            {/* Backward-compat: redirect old Modify route to Editor */}
-                            <Route path="/modify" element={<LegacyModifyRedirect />} />
-                            <Route
-                              path="/editor"
-                              element={
-                                <ProtectedRoute>
-                                  <EditorPage />
-                                </ProtectedRoute>
-                              }
-                            />
-                            <Route
-                              path="/deploy"
-                              element={
-                                <ProtectedRoute>
-                                  <DeployPage />
-                                </ProtectedRoute>
-                              }
-                            />
-                          </Routes>
-                        </Suspense>
-                      </main>
-                    </div>
+                  <div
+                    style={{ marginLeft: 'var(--sidebar-w, 15rem)' }}
+                    className="min-h-screen flex flex-col px-8 pb-12 pt-6 transition-[margin-left] duration-200 min-w-0"
+                  >
+                    <PortfolioIsland />
+                    <main className="flex-1 min-w-0">
+                      <Suspense fallback={
+                        <div className="flex items-center justify-center py-16">
+                          <div className="w-10 h-10 border-4 border-[color:var(--border)] border-t-[color:var(--primary)] rounded-full animate-spin" />
+                        </div>
+                      }>
+                        <Routes>
+                          <Route path="/" element={<HomePage />} />
+                          {/* Backward-compat: redirect old Modify route to Editor */}
+                          <Route path="/modify" element={<LegacyModifyRedirect />} />
+                          <Route
+                            path="/editor"
+                            element={
+                              <ProtectedRoute>
+                                <EditorPage />
+                              </ProtectedRoute>
+                            }
+                          />
+                          <Route
+                            path="/deploy"
+                            element={
+                              <ProtectedRoute>
+                                <DeployPage />
+                              </ProtectedRoute>
+                            }
+                          />
+                        </Routes>
+                      </Suspense>
+                    </main>
                   </div>
                 </div>
               </PortfolioSettingsProvider>
@@ -102,7 +108,7 @@ export default function App() {
 }
 
 function SaveHotkeys() {
-  const { selectedProjectId, saveProject } = useProjects();
+  const { selectedProjectId, selectedProject, saveProject, saveCloudProjectNow } = useProjects();
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
       const s = e.key.toLowerCase() === 's';
@@ -110,14 +116,18 @@ function SaveHotkeys() {
       if (mod && s) {
         e.preventDefault();
         if (selectedProjectId) {
-          // Ctrl+Shift+S => Save As
-          saveProject(selectedProjectId, { saveAs: e.shiftKey });
+          const isCloudProject = selectedProject && (selectedProject.storage ?? 'local') === 'cloud';
+          if (isCloudProject && !e.shiftKey) {
+            void saveCloudProjectNow(selectedProjectId);
+          } else {
+            saveProject(selectedProjectId, { saveAs: e.shiftKey });
+          }
         }
       }
     }
     window.addEventListener('keydown', onKeyDown, { capture: true });
     return () => window.removeEventListener('keydown', onKeyDown, { capture: true } as EventListenerOptions);
-  }, [selectedProjectId, saveProject]);
+  }, [selectedProjectId, selectedProject, saveProject, saveCloudProjectNow]);
   return null;
 }
 
@@ -197,6 +207,185 @@ function GlobalZoomControls() {
     window.addEventListener('wheel', handler, opts);
     return () => window.removeEventListener('wheel', handler, opts);
   }, [adjustZoom, isEditorRoute]);
+
+  return null;
+}
+
+function GlobalPreviewStarter() {
+  const { selectedProject, selectedProjectId } = useProjects();
+  const { list: assetList } = useAssets();
+  const [starting, setStarting] = useState(false);
+  const selectedProjectCloudId = selectedProject?._cloudId ?? selectedProjectId ?? selectedProject?.id ?? null;
+  const location = useLocation();
+  const isDeployRoute = location.pathname.startsWith('/deploy');
+  const stopInFlight = useRef(false);
+  const reloadInFlight = useRef(false);
+
+  const startPreview = useCallback(async (reason: 'start' | 'reload' = 'start') => {
+    if (!selectedProject || !selectedProjectCloudId) return;
+    if (starting) return;
+    setStarting(true);
+    try {
+      const toastMessage = reason === 'reload' ? 'Reloading preview build…' : 'Building preview...';
+      window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'info', message: toastMessage, persistent: false } }));
+      const assetsBase64: Record<string, string> = {};
+      if (assetList && assetList.length) {
+        try {
+          const mod = await import('./lib/assetsStore');
+          const idbGet = (mod as any).idbGet as (store: string, key: string) => Promise<Blob | undefined>;
+          for (const asset of assetList) {
+            if (!asset.hash) continue;
+            try {
+              const blob = await idbGet('blobs', asset.hash);
+              if (!blob) continue;
+              const ab = await (blob as Blob).arrayBuffer();
+              const bytes = new Uint8Array(ab);
+              let binary = '';
+              const chunk = 0x8000;
+              for (let i = 0; i < bytes.length; i += chunk) binary += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + chunk)));
+              assetsBase64[asset.hash] = btoa(binary);
+            } catch { /* ignore asset error */ }
+          }
+        } catch { /* ignore assets read */ }
+      }
+
+      const activeTheme = selectedProject?.themes?.[selectedProject.activeThemeId] ?? null;
+      const [styleSnapshot, themeSnapshot] = await Promise.all([
+        captureGlobalStyleSnapshot(),
+        Promise.resolve(getWidgetThemeSnapshot(activeTheme))
+      ]);
+      const buildRes = await (window as any).api?.buildStaticSite?.({
+        project: selectedProject,
+        assets: assetsBase64,
+        useTempOutput: true,
+        globalCss: { tailwind: styleSnapshot.tailwindCss },
+        themeCss: themeSnapshotToCss(themeSnapshot)
+      });
+      if (!buildRes || !buildRes.ok) {
+        const err = 'Preview build failed: ' + (buildRes?.error || 'unknown');
+        appendPreviewLog(selectedProjectCloudId, err);
+        try { window.dispatchEvent(new CustomEvent('py:preview:log', { detail: { line: err, projectId: selectedProjectCloudId } })); } catch { }
+        window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'error', message: err, persistent: false } }));
+        setStarting(false);
+        return;
+      }
+      try {
+        const msg = `Preview build output: ${buildRes.path}`;
+        appendPreviewLog(selectedProjectCloudId, msg);
+        window.dispatchEvent(new CustomEvent('py:preview:log', { detail: { line: msg, projectId: selectedProjectCloudId } }));
+      } catch { }
+
+      const meta = (selectedProject as any)?.portfolioMeta?.buildSettings || {};
+      const previewMeta = (meta && meta.preview) || {};
+      const hostOpt = previewMeta.host || meta.previewHost || undefined;
+      const portVal = Number(previewMeta.port || meta.previewPort || 0) || 0;
+      const startRes = await startPreviewServer(buildRes.path, hostOpt, portVal || undefined);
+      if (!startRes || !startRes.ok) {
+        const err = 'Failed to start preview server: ' + (startRes?.error || 'unknown');
+        appendPreviewLog(selectedProjectCloudId, err);
+        try { window.dispatchEvent(new CustomEvent('py:preview:log', { detail: { line: err, projectId: selectedProjectCloudId } })); } catch { }
+        window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'error', message: err, persistent: false } }));
+        setStarting(false);
+        return;
+      }
+
+      try {
+        const msg = `Preview running: ${startRes.localUrl} (LAN: ${startRes.lanUrl})`;
+        appendPreviewLog(selectedProjectCloudId, msg);
+        window.dispatchEvent(new CustomEvent('py:preview:log', { detail: { line: msg, projectId: selectedProjectCloudId } }));
+      } catch { }
+      window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'success', message: 'Local preview started', href: startRes.localUrl, ctaLabel: 'Open', persistent: false } }));
+      setPreviewState(selectedProjectCloudId, { running: true, localUrl: startRes.localUrl, lanUrl: startRes.lanUrl });
+      window.dispatchEvent(new CustomEvent('py:preview:state', { detail: { projectId: selectedProjectCloudId, running: true, localUrl: startRes.localUrl, lanUrl: startRes.lanUrl } }));
+    } catch (err) {
+      window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'error', message: 'Preview start failed', persistent: false } }));
+    } finally {
+      setStarting(false);
+    }
+  }, [assetList, selectedProject, selectedProjectCloudId, starting]);
+
+  const stopPreview = useCallback(async () => {
+    if (!selectedProjectCloudId) return false;
+    const stoppingLine = 'Stopping local preview...';
+    appendPreviewLog(selectedProjectCloudId, stoppingLine);
+    try { window.dispatchEvent(new CustomEvent('py:preview:log', { detail: { line: stoppingLine, projectId: selectedProjectCloudId } })); } catch { }
+    try {
+      const res = await (window as any).api?.previewStopServer?.();
+      if (!res || !res.ok) {
+        const err = '❌ Failed to stop preview: ' + (res?.error || 'unknown');
+        appendPreviewLog(selectedProjectCloudId, err);
+        try { window.dispatchEvent(new CustomEvent('py:preview:log', { detail: { line: err, projectId: selectedProjectCloudId } })); } catch { }
+        window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'error', message: 'Failed to stop preview: ' + (res?.error || 'unknown'), persistent: false } }));
+        return false;
+      }
+      const stoppedLine = '✅ Preview stopped';
+      appendPreviewLog(selectedProjectCloudId, stoppedLine);
+      try { window.dispatchEvent(new CustomEvent('py:preview:log', { detail: { line: stoppedLine, projectId: selectedProjectCloudId } })); } catch { }
+      window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'info', message: 'Local preview stopped', persistent: false } }));
+      setPreviewState(selectedProjectCloudId, { running: false });
+      window.dispatchEvent(new CustomEvent('py:preview:state', { detail: { projectId: selectedProjectCloudId, running: false } }));
+      return true;
+    } catch (err) {
+      const errMsg = '❌ Failed to stop preview: ' + (err instanceof Error ? err.message : String(err));
+      appendPreviewLog(selectedProjectCloudId, errMsg);
+      try { window.dispatchEvent(new CustomEvent('py:preview:log', { detail: { line: errMsg, projectId: selectedProjectCloudId } })); } catch { }
+      window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'error', message: errMsg, persistent: false } }));
+      return false;
+    }
+  }, [selectedProjectCloudId]);
+
+  useEffect(() => {
+    if (isDeployRoute) return;
+    let mounted = true;
+    const handler = (e: any) => {
+      if (!mounted) return;
+      const requestedProjectId = e?.detail?.projectId;
+      if (requestedProjectId && selectedProjectCloudId && requestedProjectId !== selectedProjectCloudId) return;
+      void startPreview('start');
+    };
+    window.addEventListener('py:preview-start-request', handler as EventListener);
+    return () => { mounted = false; window.removeEventListener('py:preview-start-request', handler as EventListener); };
+  }, [isDeployRoute, selectedProjectCloudId, startPreview]);
+
+  useEffect(() => {
+    if (isDeployRoute) return;
+    const handler = (e: any) => {
+      if (!selectedProjectCloudId) return;
+      const requestedProjectId = e?.detail?.projectId;
+      if (requestedProjectId && requestedProjectId !== selectedProjectCloudId) return;
+      if (stopInFlight.current) return;
+      stopInFlight.current = true;
+      void (async () => {
+        await stopPreview();
+      })().finally(() => { stopInFlight.current = false; });
+    };
+    window.addEventListener('py:preview-stop-request', handler as EventListener);
+    return () => window.removeEventListener('py:preview-stop-request', handler as EventListener);
+  }, [isDeployRoute, selectedProjectCloudId, stopPreview]);
+
+  useEffect(() => {
+    if (isDeployRoute) return;
+    const handler = (e: any) => {
+      if (!selectedProjectCloudId) return;
+      const requestedProjectId = e?.detail?.projectId;
+      if (requestedProjectId && requestedProjectId !== selectedProjectCloudId) return;
+      if (reloadInFlight.current) return;
+      reloadInFlight.current = true;
+      void (async () => {
+        const reloadLine = 'Reloading local preview...';
+        appendPreviewLog(selectedProjectCloudId, reloadLine);
+        try { window.dispatchEvent(new CustomEvent('py:preview:log', { detail: { line: reloadLine, projectId: selectedProjectCloudId } })); } catch { }
+        window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'info', message: 'Reloading preview…', persistent: false } }));
+        const stopped = await stopPreview();
+        if (stopped) {
+          await new Promise((res) => setTimeout(res, 250));
+          await startPreview('reload');
+        }
+      })().finally(() => { reloadInFlight.current = false; });
+    };
+    window.addEventListener('py:preview-reload-request', handler as EventListener);
+    return () => window.removeEventListener('py:preview-reload-request', handler as EventListener);
+  }, [isDeployRoute, selectedProjectCloudId, startPreview, stopPreview]);
 
   return null;
 }

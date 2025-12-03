@@ -27,6 +27,10 @@ export const ImageWidgetDef: WidgetDefinition<{ src: string; alt?: string; fit?:
             </div>
         );
     },
+    getStaticCss: (props) => {
+        const fit = props?.fit || 'contain';
+        return `max-width:100%; display:block;` + ` img { object-fit: ${fit}; }`;
+    },
 };
 
 export function ImageWidgetConfigPanel({ initial }: { initial?: Partial<{ src: string; alt?: string; fit?: React.CSSProperties['objectFit'] }> }) {

@@ -26,6 +26,7 @@ type ContactProps = {
     errorText?: string;
     font?: FontChoice;
     fontSize?: number;
+    cardBackgroundColor?: string;
 };
 
 const def: WidgetDefinition<ContactProps> = {
@@ -108,9 +109,10 @@ const def: WidgetDefinition<ContactProps> = {
             const ff = p.font === 'serif' ? 'ui-serif, Georgia, Cambria, "Times New Roman", Times, serif'
                 : p.font === 'mono' ? 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace'
                     : 'ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Helvetica Neue, Arial, "Apple Color Emoji", "Segoe UI Emoji"';
-            return (
+            const cardBackground = typeof p.cardBackgroundColor === 'string' && p.cardBackgroundColor.trim().length > 0 ? p.cardBackgroundColor.trim() : undefined;
+            const formNode = (
                 <form
-                    className="space-y-2 text-xs"
+                    className="flex flex-1 min-h-0 flex-col gap-2 overflow-auto text-xs"
                     onSubmit={doSubmit}
                     aria-describedby={p.ariaDescription ? 'contact-desc' : undefined}
                     aria-disabled={lockedUI || undefined}
@@ -179,6 +181,13 @@ const def: WidgetDefinition<ContactProps> = {
                     )}
                 </form>
             );
+            return (
+                <div className="h-full w-full min-h-0">
+                    <div className="contact-card flex h-full min-h-0 w-full flex-col gap-3 overflow-hidden rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)] p-4 shadow-sm" style={{ background: cardBackground }}>
+                        {formNode}
+                    </div>
+                </div>
+            );
         }
 
         return <ContactForm {...props} />;
@@ -201,6 +210,7 @@ const def: WidgetDefinition<ContactProps> = {
         errorText: z.string().optional(),
         font: z.enum(['system', 'serif', 'mono']).optional(),
         fontSize: z.number().min(8).max(128).optional(),
+        cardBackgroundColor: z.string().max(120).optional(),
     }),
 };
 

@@ -31,7 +31,7 @@ export default function Dashboard({
                 </div>
                 <div className="flex flex-wrap gap-2 justify-start lg:justify-end text-sm">
                     <a className="btn btn-ghost btn-sm" href="https://portfoliyou.snxethan.dev" target="_blank" rel="noreferrer">Website</a>
-                    <a className="btn btn-ghost btn-sm" href="https://portfoliyou.snxethan.dev/faq" target="_blank" rel="noreferrer">FAQs</a>
+                    <a className="btn btn-ghost btn-sm" href="https://portfoliyou.snxethan.dev/about" target="_blank" rel="noreferrer">FAQs</a>
                     <a className="btn btn-ghost btn-sm" href="https://portfoliyou.snxethan.dev/changelog" target="_blank" rel="noreferrer">Changelog</a>
                 </div>
             </div>

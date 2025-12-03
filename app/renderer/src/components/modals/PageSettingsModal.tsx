@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { createPortal } from 'react-dom';
-import { Layers, X, RotateCcw } from 'lucide-react';
+import { X, RotateCcw, ChevronDown, ChevronRight, Trash2 } from 'lucide-react';
+import { useScrollLock } from "../../hooks/useScrollLock";
 
 export default function PageSettingsModal({
     title = "Page settings",
@@ -21,6 +22,8 @@ export default function PageSettingsModal({
     onSave: (opts: { name: string; starter: boolean; backgroundColor: string | null }) => void;
     onDelete: () => void;
 }) {
+    useScrollLock(true);
+
     const [name, setName] = useState(initialName || "");
     const [starter, setStarter] = useState<boolean>(Boolean(initialStarter));
     const [background, setBackground] = useState<string>((initialBackgroundColor || '').trim());
@@ -42,6 +45,75 @@ export default function PageSettingsModal({
         if (HEX_COLOR_RE.test(raw)) return raw;
         return fallbackTheme;
     }, [background, fallbackTheme]);
+
+    function PageSettingsSections({ name, setName, starter, setStarter, background, setBackground, backgroundSwatch, themeBackground }: {
+        name: string;
+        setName: (s: string) => void;
+        starter: boolean;
+        setStarter: (v: boolean) => void;
+        background: string;
+        setBackground: (s: string) => void;
+        backgroundSwatch: string;
+        themeBackground?: string | null;
+    }) {
+        const [expanded, setExpanded] = useState<{ page: boolean; appearance: boolean }>({ page: true, appearance: true });
+        const toggle = (k: 'page' | 'appearance') => setExpanded(prev => ({ ...prev, [k]: !prev[k] }));
+
+        const renderSection = (key: 'page' | 'appearance', title: string, children?: React.ReactNode) => (
+            <div className="border border-[color:var(--border)] rounded-md mb-3">
+                <button type="button" className="w-full flex items-center justify-between px-3 py-2 text-left" onClick={() => toggle(key)}>
+                    <div className="flex items-center gap-2">
+                        {expanded[key] ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                        <span className="font-semibold text-sm uppercase tracking-wide">{title}</span>
+                    </div>
+                </button>
+                {expanded[key] && (
+                    <div className="border-t border-[color:var(--border)] bg-[color:var(--muted)]/20 p-4 space-y-3">
+                        {children}
+                    </div>
+                )}
+            </div>
+        );
+
+        return (
+            <div>
+                {renderSection('page', 'Page', (
+                    <>
+                        <div className="grid grid-cols-3 gap-4 items-center mb-2">
+                            <div className="text-xs uppercase tracking-wide text-[color:var(--fg-muted)]">Name</div>
+                            <div className="col-span-2">
+                                <input className="input w-full" placeholder="Page name" autoFocus value={name} onChange={(e) => setName(e.target.value)} />
+                            </div>
+                        </div>
+
+                        <div className="grid grid-cols-3 gap-4 items-center">
+                            <div className="text-xs uppercase tracking-wide text-[color:var(--fg-muted)]">Default</div>
+                            <div className="col-span-2 flex items-center gap-3">
+                                <input id="starter-toggle" type="checkbox" checked={starter} onChange={(e) => setStarter(e.target.checked)} />
+                                <label htmlFor="starter-toggle" className="text-sm">Default page</label>
+                            </div>
+                        </div>
+                    </>
+                ))}
+
+                {renderSection('appearance', 'Appearance', (
+                    <>
+                        <div className="grid grid-cols-3 gap-4 items-center mb-3">
+                            <div className="text-xs uppercase tracking-wide text-[color:var(--fg-muted)]">Background</div>
+                            <div className="col-span-2 flex items-center gap-2">
+                                <input type="color" className="w-12 h-12 rounded border border-[color:var(--border)] bg-[color:var(--surface)]" value={backgroundSwatch} onChange={(e) => setBackground(e.target.value)} aria-label="Page background color" />
+                                <input className="input flex-1" placeholder={themeBackground || '#ffffff'} value={background} onChange={(e) => setBackground(e.target.value)} />
+                                <button type="button" className="btn btn-ghost btn-xs flex items-center gap-2" title="Reset to theme" aria-label="Reset page background to theme" onClick={() => setBackground('')}>
+                                    <RotateCcw size={14} />
+                                    <span className="text-xs">Reset</span>
+                                </button>
+                            </div>
+                        </div>
+                    </>
+                ))}
+            </div>
+        );
+    }
 
     const modal = (
         <div
@@ -66,66 +138,31 @@ export default function PageSettingsModal({
 
                 <div className="p-4">
                     <form onSubmit={(e) => { e.preventDefault(); const v = name.trim(); if (v) onSave({ name: v, starter, backgroundColor: background.trim() ? background.trim() : null }); }}>
-                        <section className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)]/90 p-4 mb-4">
-                            <div className="flex items-center justify-between mb-2">
-                                <div className="text-xs uppercase tracking-wide text-[color:var(--fg-muted)]">Page</div>
-                                <div className="text-xs text-[color:var(--fg-muted)]">Details</div>
-                            </div>
-                            <label className="text-sm text-[color:var(--fg-muted)]">Name</label>
-                            <input
-                                className="input w-full mb-3"
-                                placeholder="Page name"
-                                autoFocus
-                                value={name}
-                                onChange={(e) => setName(e.target.value)}
-                            />
+                        {/* Use accordion-style subsections like PortfolioSettingsModal to mirror editor settings */}
+                        <PageSettingsSections
+                            name={name}
+                            setName={setName}
+                            starter={starter}
+                            setStarter={setStarter}
+                            background={background}
+                            setBackground={setBackground}
+                            backgroundSwatch={backgroundSwatch}
+                            themeBackground={themeBackground}
+                        />
 
-                            <label className="text-sm text-[color:var(--fg-muted)]">Background</label>
-                            <div className="flex items-center gap-2 mb-2">
-                                <input
-                                    type="color"
-                                    className="w-12 h-12 rounded border border-[color:var(--border)] bg-[color:var(--surface)]"
-                                    value={backgroundSwatch}
-                                    onChange={(e) => setBackground(e.target.value)}
-                                    aria-label="Page background color"
-                                />
-                                <input
-                                    className="input flex-1"
-                                    placeholder={themeBackground || '#ffffff'}
-                                    value={background}
-                                    onChange={(e) => setBackground(e.target.value)}
-                                />
-                                <button
-                                    type="button"
-                                    className="btn btn-ghost btn-xs"
-                                    title="Reset to theme"
-                                    aria-label="Reset page background to theme"
-                                    onClick={() => setBackground('')}
-                                >
-                                    <RotateCcw size={14} />
-                                </button>
-                            </div>
-                            <p className="text-[12px] text-[color:var(--fg-muted)] mb-3">Leave blank to inherit the active theme background.</p>
-
-                            <div className="flex items-center gap-3 mb-3">
-                                <input id="starter-toggle" type="checkbox" checked={starter} onChange={(e) => setStarter(e.target.checked)} />
-                                <label htmlFor="starter-toggle" className="text-sm">Default page</label>
-                            </div>
-
-                        </section>
-
-                        <div className="flex justify-end items-center gap-2">
+                        <div className="flex justify-between items-center gap-2 mt-4">
                             <button
                                 type="button"
-                                className="btn btn-error btn-xs"
+                                className="btn btn-ghost btn-xxs text-red-400 border border-red-500/40 hover:bg-red-500/10"
                                 title="Delete page"
-                                aria-label="Delete page"
                                 onClick={() => { if (confirm('Delete this page? This cannot be undone.')) onDelete(); }}
                             >
-                                {/* Trash icon-only button */}
-                                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><path d="M10 11v6"></path><path d="M14 11v6"></path><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"></path></svg>
+                                <Trash2 size={14} />
+                                <span>Delete page</span>
                             </button>
-                            <button type="submit" className="btn btn-accent btn-xs" disabled={!name.trim()}>Save</button>
+                            <button type="submit" className="btn btn-outline btn-xs" disabled={!name.trim()}>
+                                Save changes
+                            </button>
                         </div>
                     </form>
                 </div>

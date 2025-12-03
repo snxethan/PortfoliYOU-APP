@@ -1,15 +1,15 @@
 import '../types/electron.d.ts';
-import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
+import React, { createContext, useContext, useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { onAuthStateChanged } from "firebase/auth";
-import { collection, doc, getDoc, getDocs, setDoc, serverTimestamp, query, where, orderBy } from "firebase/firestore";
-import { getFunctions, httpsCallable } from "firebase/functions";
-import { ref as storageRef, uploadBytes, getDownloadURL, getMetadata, getBytes } from "firebase/storage";
+import { collection, doc, getDoc, getDocs, setDoc, serverTimestamp, query, where, orderBy, onSnapshot, writeBatch, deleteDoc } from "firebase/firestore";
+import type { FirestoreError, Unsubscribe } from "firebase/firestore";
+import { ref as storageRef, uploadBytes, getDownloadURL, getMetadata, getBytes, deleteObject } from "firebase/storage";
 import JSZip from "jszip";
 
 import { idbGet, idbPut, computeHash, stores, AssetMeta } from "../lib/assetsStore";
 import { auth, db, storage } from "../lib/firebase";
-import { sanitizeVideoProps } from "../widgets/videoProps";
-import type { VideoWidgetProps } from "../widgets/videoProps";
+import { sanitizeVideoProps } from "../../../shared/widgets/videoProps";
+import type { VideoWidgetProps } from "../../../shared/widgets/videoProps";
 import type { Theme, ThemePatch } from "../themes/types";
 import { THEME_PRESETS, DEFAULT_THEME_PRESET_ID, getPresetById } from "../themes/presets";
 import { createThemeFromPreset as createThemeFromPresetUtil, mergeTheme } from "../themes/utils";
@@ -82,7 +82,20 @@ export type LocalProject = Project & {
 	_filePath?: string; // not exported; only for local persistence
 	_synced?: boolean;  // placeholder for cloud sync indicator
 	_cloudId?: string; // firestore document id for cloud copy
+	storage?: 'local' | 'cloud';
 };
+
+type AssetManifest = Record<string, { path: string; downloadUrl?: string }>;
+
+type ArchiveAsset = { hash: string; buffer: ArrayBuffer; meta?: AssetMeta };
+type ArchiveAssetResolver = (hash: string) => Promise<ArchiveAsset | null | undefined>;
+type BuildArchiveOptions = { assetResolver?: ArchiveAssetResolver };
+
+export function buildProjectAssetPath(ownerUid: string, projectId: string, hash: string): string {
+	if (!ownerUid) throw new Error('Missing owner uid for asset path');
+	if (!projectId) throw new Error('Missing project id for asset path');
+	return `users/${ownerUid}/project/${projectId}/assets/${hash}`;
+}
 
 function sanitizeVideoWidgetProps(widget: Widget): Widget {
 	const rawProps = (widget?.props || {}) as Partial<VideoWidgetProps>;
@@ -103,6 +116,27 @@ function sanitizeProjectVideoWidgets(project: LocalProject): LocalProject {
 	}
 	if (!sanitized) return project;
 	return { ...project, widgets: sanitized };
+}
+
+function stripUndefinedDeep<T>(value: T): T {
+	if (value === undefined) return value;
+	if (Array.isArray(value)) {
+		const next = value
+			.map(item => stripUndefinedDeep(item))
+			.filter(item => item !== undefined) as unknown as T;
+		return next;
+	}
+	if (value && typeof value === 'object') {
+		if (value instanceof Date) return value;
+		const result: Record<string, unknown> = {};
+		for (const [key, raw] of Object.entries(value as Record<string, unknown>)) {
+			if (raw === undefined) continue;
+			const cleaned = stripUndefinedDeep(raw);
+			if (cleaned !== undefined) result[key] = cleaned;
+		}
+		return result as unknown as T;
+	}
+	return value;
 }
 
 const themePresetFallback = getPresetById(DEFAULT_THEME_PRESET_ID) || THEME_PRESETS[0];
@@ -152,7 +186,72 @@ function ensurePortfolioMeta(project: LocalProject): LocalProject {
 }
 
 function sanitizeProjectsList(projects: LocalProject[]): LocalProject[] {
-	return projects.map((proj) => ensurePortfolioMeta(ensureProjectThemes(sanitizeProjectVideoWidgets(proj))));
+	return projects.map((proj) => {
+		const hydrated = ensurePortfolioMeta(ensureProjectThemes(sanitizeProjectVideoWidgets(proj)));
+		return { ...hydrated, storage: hydrated.storage === 'cloud' ? 'cloud' : 'local' } as LocalProject;
+	});
+}
+
+function toIso(value: unknown, fallback: string): string {
+	if (typeof value === 'string' && value) return value;
+	if (value && typeof (value as { toDate?: () => Date }).toDate === 'function') {
+		try { return ((value as { toDate: () => Date }).toDate()).toISOString(); } catch { /* ignore */ }
+	}
+	return fallback;
+}
+
+function hydrateCloudProjectDoc(docId: string, data: Record<string, unknown>): LocalProject {
+	const nowStr = new Date().toISOString();
+	const project: LocalProject = {
+		id: docId,
+		ownerUid: typeof data['ownerUid'] === 'string' ? data['ownerUid'] as string : undefined,
+		name: normalizeProjectName(data['name'] as string | undefined),
+		description: typeof data['description'] === 'string' ? data['description'] as string : '',
+		portfolioMeta: (data['portfolioMeta'] as PortfolioMeta | undefined) || undefined,
+		activeThemeId: typeof data['activeThemeId'] === 'string' ? data['activeThemeId'] as string : DEFAULT_THEME_PRESET_ID,
+		pageOrder: Array.isArray(data['pageOrder']) ? [...(data['pageOrder'] as string[])] : [],
+		limits: (data['limits'] as { maxPages: number; maxAssetsMB: number }) || { maxPages: 10, maxAssetsMB: 500 },
+		status: (data['status'] as { deployed: boolean; lastDeployAt: string | null; deployType: string | null }) || { deployed: false, lastDeployAt: null, deployType: null },
+		schemaVersion: typeof data['schemaVersion'] === 'number' ? data['schemaVersion'] as number : 1,
+		createdAt: toIso(data['createdAt'], nowStr),
+		updatedAt: toIso(data['updatedAt'], nowStr),
+		themes: (data['themes'] as Record<string, Theme>) || {},
+		pages: (data['pages'] as Record<string, Page>) || {},
+		widgets: (data['widgets'] as Record<string, Widget>) || {},
+		storage: 'cloud',
+		_cloudId: docId,
+		_synced: true,
+	};
+	return ensurePortfolioMeta(ensureProjectThemes(sanitizeProjectVideoWidgets(project)));
+}
+
+function serializeProjectForCloud(proj: LocalProject, ownerUid?: string, opts?: { includeCreatedAt?: boolean }) {
+	const clean = sanitizeProjectVideoWidgets(ensurePortfolioMeta(ensureProjectThemes(proj)));
+	const cleanPortfolioMeta = stripUndefinedDeep(clean.portfolioMeta || null) || null;
+	const cleanThemes = stripUndefinedDeep(clean.themes);
+	const cleanPages = stripUndefinedDeep(clean.pages);
+	const cleanWidgets = stripUndefinedDeep(clean.widgets);
+	const cleanLimits = stripUndefinedDeep(clean.limits);
+	const cleanStatus = stripUndefinedDeep(clean.status);
+	const payload: Record<string, unknown> = {
+		ownerUid: ownerUid || clean.ownerUid || null,
+		name: clean.name,
+		description: clean.description || '',
+		portfolioMeta: cleanPortfolioMeta,
+		activeThemeId: clean.activeThemeId,
+		pageOrder: clean.pageOrder,
+		limits: cleanLimits,
+		status: cleanStatus,
+		schemaVersion: clean.schemaVersion,
+		themes: cleanThemes,
+		pages: cleanPages,
+		widgets: cleanWidgets,
+		serverCreated: true,
+		updatedAt: serverTimestamp(),
+		storagePreset: 'cloud-first',
+	};
+	if (opts?.includeCreatedAt) payload.createdAt = serverTimestamp();
+	return payload;
 }
 
 type ProjectsCtx = {
@@ -164,7 +263,7 @@ type ProjectsCtx = {
 	cloudProjectsCount: number;
 	addProject: (name?: string) => Project;
 	importProject: (file?: File) => Promise<Project>;
-	createProjectWithSave: (input: string | { name: string; metadata?: Partial<PortfolioMeta> }) => Promise<LocalProject | null>;
+	createProjectWithSave: (input: string | { name: string; metadata?: Partial<PortfolioMeta>; createCloud?: boolean }) => Promise<LocalProject | null>;
 	updateProjectMetadata: (projectId: string, payload: { name?: string; metadata?: Partial<PortfolioMeta> }) => Promise<void>;
 	selectProject: (projectId: string) => void;
 	selectedProjectId: string | null;
@@ -176,6 +275,7 @@ type ProjectsCtx = {
 	syncProject: (projectId: string) => Promise<void>;
 	unsyncProject: (projectId: string) => Promise<void>;
 	saveProject: (projectId: string, opts?: { saveAs?: boolean }) => Promise<void>;
+	saveCloudProjectNow: (projectId: string) => Promise<void>;
 	deleteCloudProject: (projectId: string) => Promise<void>;
 	listCloudProjects: () => Promise<Array<{ id: string; name: string; updatedAt: string; storagePath: string }>>;
 	importProjectFromCloud: (cloudId: string) => Promise<LocalProject | null>;
@@ -220,7 +320,7 @@ function readStore(): LocalProject[] {
 	try {
 		const raw = JSON.parse(localStorage.getItem("py.projects") || "[]");
 		if (!Array.isArray(raw)) return [];
-		return sanitizeProjectsList(raw as LocalProject[]);
+		return sanitizeProjectsList(raw as LocalProject[]).map(p => ({ ...p, storage: 'local' })) as LocalProject[];
 	} catch { return []; }
 }
 type IdleHandle = number;
@@ -237,7 +337,8 @@ function flushQueuedStore() {
 	}
 }
 function writeStore(list: LocalProject[]) {
-	queuedStorePayload = list;
+	const locals = list.filter(p => (p.storage ?? 'local') === 'local');
+	queuedStorePayload = locals;
 	if (pendingStoreWrite !== null) return;
 	const schedule = () => {
 		pendingStoreWrite = null;
@@ -276,6 +377,8 @@ function pushRevisionSnapshot(proj: LocalProject) {
 export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 	const [projects, setProjects] = useState<LocalProject[]>([]);
 	const { add: notify } = useNotifications();
+	const notifyRef = useRef(notify);
+	useEffect(() => { notifyRef.current = notify; }, [notify]);
 	const [autosaveEnabled, setAutosaveEnabled] = useState<boolean>(() => {
 		try { return localStorage.getItem('py_autosave_enabled') !== '0'; } catch { return true; }
 	});
@@ -287,6 +390,117 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 	const [cloudBytesUsed, setCloudBytesUsed] = useState<number>(0);
 	const [cloudProjectsCount, setCloudProjectsCount] = useState<number>(0);
 	const [cloudMaxStorageMB, setCloudMaxStorageMB] = useState<number>(1024);
+	const cloudListenerRef = useRef<Unsubscribe | null>(null);
+	const cloudServerVersionRef = useRef<Record<string, string>>({});
+	const cloudLocalVersionRef = useRef<Record<string, string>>({});
+	const cloudPersistStateRef = useRef<{ pending: Record<string, LocalProject>; timer: ReturnType<typeof setTimeout> | null; slowModeUntil: number; lastFlushAt: number; lastSlowNotify: number; saving: boolean }>({ pending: {}, timer: null, slowModeUntil: 0, lastFlushAt: 0, lastSlowNotify: 0, saving: false });
+	const cloudEditBurstRef = useRef<{ windowStart: number; count: number }>({ windowStart: Date.now(), count: 0 });
+	const missingIndexWarnedRef = useRef(false);
+
+	const signalCloudSlowdown = useCallback(() => {
+		const state = cloudPersistStateRef.current;
+		const nowTs = Date.now();
+		state.slowModeUntil = nowTs + CLOUD_SAVE_SLOW_DURATION_MS;
+		if (nowTs - state.lastSlowNotify > CLOUD_SAVE_SLOW_NOTIFY_COOLDOWN_MS) {
+			try { notify({ type: 'warning', message: 'Cloud save slowed due to rate limits.', persistent: false }); } catch { /* noop */ }
+			state.lastSlowNotify = nowTs;
+		}
+	}, [notify]);
+
+	const flushCloudPersist = useCallback(async () => {
+		const state = cloudPersistStateRef.current;
+		if (state.saving) {
+			if (!state.timer) {
+				state.timer = setTimeout(flushCloudPersist, CLOUD_SAVE_BASE_DELAY_MS);
+			}
+			return;
+		}
+		const pendingEntries = Object.entries(state.pending);
+		if (!pendingEntries.length) {
+			if (state.timer) {
+				clearTimeout(state.timer);
+				state.timer = null;
+			}
+			return;
+		}
+		state.pending = {};
+		if (state.timer) {
+			clearTimeout(state.timer);
+			state.timer = null;
+		}
+		const user = auth.currentUser;
+		if (!user) {
+			state.pending = Object.fromEntries(pendingEntries) as Record<string, LocalProject>;
+			state.timer = setTimeout(flushCloudPersist, CLOUD_SAVE_BASE_DELAY_MS);
+			return;
+		}
+		state.saving = true;
+		try {
+			const batch = writeBatch(db);
+			let writes = 0;
+			/* eslint-disable no-await-in-loop */
+			for (const [projectId, proj] of pendingEntries) {
+				if (!proj || (proj.storage ?? 'local') !== 'cloud') continue;
+				const ownerUid = proj.ownerUid || user.uid;
+				if (!ownerUid) continue;
+				const sanitizedForCloud = sanitizeProjectVideoWidgets(ensurePortfolioMeta(ensureProjectThemes(proj)));
+				let assetManifest: AssetManifest | null = null;
+				try {
+					assetManifest = await uploadReferencedAssetsToStorage(sanitizedForCloud, ownerUid);
+				} catch (assetErr) {
+					console.warn('Failed to upload referenced assets during cloud save', projectId, assetErr);
+				}
+				const payload = serializeProjectForCloud(sanitizedForCloud, ownerUid);
+				if (assetManifest) payload.assetManifest = assetManifest;
+				batch.set(doc(db, 'projects', projectId), payload, { merge: true });
+				cloudLocalVersionRef.current[projectId] = sanitizedForCloud.updatedAt || '';
+				writes++;
+			}
+			/* eslint-enable no-await-in-loop */
+			if (!writes) {
+				state.saving = false;
+				return;
+			}
+			try { notify({ type: 'info', message: 'Saving to cloud…', persistent: false }); } catch { /* noop */ }
+			await batch.commit();
+			state.lastFlushAt = Date.now();
+			state.slowModeUntil = 0;
+			state.saving = false;
+			try { notify({ type: 'success', message: 'Cloud save complete.', persistent: false }); } catch { /* noop */ }
+		} catch (err) {
+			console.error('Failed to persist cloud projects', err);
+			const retryPayload = Object.fromEntries(pendingEntries) as Record<string, LocalProject>;
+			state.pending = { ...retryPayload, ...state.pending };
+			state.saving = false;
+			signalCloudSlowdown();
+			if (!state.timer) {
+				state.timer = setTimeout(flushCloudPersist, CLOUD_SAVE_SLOW_DELAY_MS);
+			}
+		}
+	}, [notify, signalCloudSlowdown]);
+
+	const queueCloudPersist = useCallback((proj: LocalProject) => {
+		if (!proj || (proj.storage ?? 'local') !== 'cloud') return;
+		const state = cloudPersistStateRef.current;
+		state.pending[proj.id] = proj;
+		const nowTs = Date.now();
+		const burst = cloudEditBurstRef.current;
+		if (nowTs - burst.windowStart > CLOUD_SAVE_BURST_WINDOW_MS) {
+			burst.windowStart = nowTs;
+			burst.count = 0;
+		}
+		burst.count++;
+		if (burst.count > CLOUD_SAVE_BURST_THRESHOLD) {
+			signalCloudSlowdown();
+			burst.windowStart = nowTs;
+			burst.count = 0;
+		}
+		const delay = nowTs < state.slowModeUntil ? CLOUD_SAVE_SLOW_DELAY_MS : CLOUD_SAVE_BASE_DELAY_MS;
+		if (state.timer) {
+			clearTimeout(state.timer);
+		}
+		state.timer = setTimeout(flushCloudPersist, delay);
+	}, [flushCloudPersist, signalCloudSlowdown]);
 
 	// One-time bump: increase existing projects' page limit to 10 if lower
 	const bumpedRef = useRef(false);
@@ -307,25 +521,50 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 		bumpedRef.current = true;
 	}, [projects]);
 
-	// Load cloud limit when user is available (best-effort)
+	const detachCloudListener = () => {
+		if (cloudListenerRef.current) {
+			cloudListenerRef.current();
+			cloudListenerRef.current = null;
+		}
+	};
+
+	useEffect(() => {
+		return () => {
+			const cps = cloudPersistStateRef.current;
+			if (cps.timer) {
+				clearTimeout(cps.timer);
+				cps.timer = null;
+			}
+			cps.pending = {};
+			cps.saving = false;
+		};
+	}, []);
+
+	// Load cloud data when user is available (best-effort)
 	useEffect(() => {
 		const unsub = onAuthStateChanged(auth, async (user) => {
+			detachCloudListener();
 			if (!user) {
-				// On sign-out, reset cloud limits/counters and strip cloud linkage from local projects
 				setCloudMaxProjects(1);
 				setCloudMaxStorageMB(1024);
 				setCloudBytesUsed(0);
 				setCloudProjectsCount(0);
+				cloudServerVersionRef.current = {};
+				cloudLocalVersionRef.current = {};
+				const cps = cloudPersistStateRef.current;
+				if (cps.timer) { clearTimeout(cps.timer); }
+				cps.timer = null;
+				cps.pending = {};
+				cps.saving = false;
+				cps.slowModeUntil = 0;
+				cloudEditBurstRef.current = { windowStart: Date.now(), count: 0 };
 				setProjects(prev => {
-					const next = prev.map(p => {
-						const q = { ...p } as LocalProject;
-						if (q._cloudId) delete q._cloudId;
-						if (q._synced) q._synced = false;
-						return q;
-					});
-					writeStore(next);
-					return next;
+					const locals = prev.filter(p => (p.storage ?? 'local') === 'local').map(p => ({ ...p, _cloudId: undefined, _synced: false }));
+					writeStore(locals);
+					return locals;
 				});
+				setSelectedProjectId(null);
+				writeSelected(null);
 				return;
 			}
 			try {
@@ -341,7 +580,6 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 				const n = typeof limitVal === 'number' && limitVal > 0 ? limitVal : 1;
 				setCloudMaxProjects(n);
 
-				// Read max storage (in MB) from user settings/plan; default to 1024MB if missing
 				const storageMBVal = (typeof plan?.['maxStorageMB'] === 'number' ? (plan!['maxStorageMB'] as number) : undefined)
 					?? (typeof settings?.['maxStorageMB'] === 'number' ? (settings!['maxStorageMB'] as number) : undefined)
 					?? 1024;
@@ -351,16 +589,94 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 				const cnt = typeof counters?.['cloudProjects'] === 'number' ? (counters!['cloudProjects'] as number) : 0;
 				setCloudBytesUsed(used);
 				setCloudProjectsCount(cnt);
-			} catch { setCloudMaxProjects(1); setCloudMaxStorageMB(1024); }
+			} catch {
+				setCloudMaxProjects(1);
+				setCloudMaxStorageMB(1024);
+			}
+
+			try {
+				const projectsCollection = collection(db, 'projects');
+				const attachSnapshot = (mode: 'ordered' | 'fallback'): Unsubscribe => {
+					const baseQuery = mode === 'ordered'
+						? query(projectsCollection, where('ownerUid', '==', user.uid), orderBy('updatedAt', 'desc'))
+						: query(projectsCollection, where('ownerUid', '==', user.uid));
+					return onSnapshot(baseQuery, (snapshot) => {
+						const serverVersions = cloudServerVersionRef.current;
+						const cloudList = snapshot.docs.map(docSnap => {
+							const hydrated = hydrateCloudProjectDoc(docSnap.id, docSnap.data() as Record<string, unknown>);
+							if (hydrated.updatedAt) serverVersions[hydrated.id] = hydrated.updatedAt;
+							return hydrated;
+						});
+						if (mode === 'fallback') {
+							cloudList.sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''));
+						}
+						setCloudProjectsCount(snapshot.size);
+						setProjects(prev => {
+							const locals = prev.filter(p => (p.storage ?? 'local') === 'local');
+							const merged = [...cloudList, ...locals];
+							writeStore(merged);
+							return merged;
+						});
+					}, (error) => {
+						console.error('Failed to subscribe to cloud projects', error);
+						const errObj = error as FirestoreError;
+						if (mode === 'ordered' && errObj?.code === 'failed-precondition') {
+							if (!missingIndexWarnedRef.current) {
+								missingIndexWarnedRef.current = true;
+								try {
+									notifyRef.current?.({
+										type: 'warning',
+										message: 'Cloud projects list needs the Firestore index (ownerUid asc, updatedAt desc). Run "firebase deploy --only firestore:indexes" and restart.',
+										persistent: false,
+									});
+								} catch { /* noop */ }
+							}
+							cloudListenerRef.current = attachSnapshot('fallback');
+						}
+					});
+				};
+				cloudListenerRef.current = attachSnapshot('ordered');
+			} catch (err) {
+				console.error('Cloud subscription error', err);
+			}
 		});
-		return () => unsub();
+		return () => {
+			detachCloudListener();
+			unsub();
+		};
 	}, []);
+
+	// Detect cloud project mutations and persist them to Firestore
+	useEffect(() => {
+		if (!autosaveEnabled) return;
+		const serverVersions = cloudServerVersionRef.current;
+		const localVersions = cloudLocalVersionRef.current;
+		const activeCloudIds = new Set<string>();
+		for (const proj of projects) {
+			if ((proj.storage ?? 'local') !== 'cloud') continue;
+			activeCloudIds.add(proj.id);
+			const version = proj.updatedAt || '';
+			if (!version) continue;
+			if (serverVersions[proj.id] === version) {
+				localVersions[proj.id] = version;
+				continue;
+			}
+			if (localVersions[proj.id] === version) continue;
+			queueCloudPersist(proj);
+		}
+		for (const key of Object.keys(serverVersions)) {
+			if (!activeCloudIds.has(key)) delete serverVersions[key];
+		}
+		for (const key of Object.keys(localVersions)) {
+			if (!activeCloudIds.has(key)) delete localVersions[key];
+		}
+	}, [projects, queueCloudPersist, autosaveEnabled]);
 
 	// Helper to get current timestamp
 	const now = () => new Date().toISOString();
 
 	// Helper: serialize project + referenced assets into a zip (base64)
-	const buildArchiveBase64 = async (proj: LocalProject) => {
+	const buildArchiveBase64 = async (proj: LocalProject, opts?: BuildArchiveOptions) => {
 		const sanitizedProject = sanitizeProjectVideoWidgets(proj);
 		const zip = new JSZip();
 		const payload: { _format: string; _version: number; exportedAt: string; project: LocalProject } = {
@@ -372,23 +688,28 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 		delete (payload.project as LocalProject)._filePath;
 		delete (payload.project as LocalProject)._synced;
 
-		// Collect referenced asset hashes from widgets (props.src can be asset://hash or assets/...)
-		const hashes = new Set<string>();
-		const collectAssetHash = (value?: string | null) => {
-			if (!value || typeof value !== 'string') return;
-			if (!value.startsWith('asset://')) return;
-			const h = value.slice('asset://'.length);
-			if (h) hashes.add(h);
-		};
-		for (const w of Object.values(sanitizedProject.widgets || {})) {
+		const hashes = collectReferencedAssetHashes(sanitizedProject);
+
+		const loadAssetForArchive = async (hash: string): Promise<ArchiveAsset | null> => {
+			if (opts?.assetResolver) {
+				try {
+					const resolved = await opts.assetResolver(hash);
+					if (resolved) return resolved;
+				} catch (err) {
+					console.warn('Asset resolver failed, falling back to local cache', hash, err);
+				}
+			}
 			try {
-				const p = (w.props || {}) as Record<string, unknown>;
-				const src = typeof p['src'] === 'string' ? (p['src'] as string) : '';
-				if (src.startsWith('asset://')) hashes.add(src.slice('asset://'.length));
-			} catch { /* ignore */ }
-		}
-		collectAssetHash(sanitizedProject.portfolioMeta?.iconImageUrl || null);
-		collectAssetHash(sanitizedProject.portfolioMeta?.socialImageUrl || null);
+				const blob = await idbGet<Blob>(stores.STORE_BLOBS, hash);
+				if (!blob) return null;
+				const buffer = await blob.arrayBuffer();
+				const meta = await idbGet<AssetMeta>(stores.STORE_META, hash);
+				return { hash, buffer, meta } as ArchiveAsset;
+			} catch (err) {
+				console.warn('Failed to load asset from local cache for export', hash, err);
+				return null;
+			}
+		};
 
 		// Emit separate JSON files for better performance and modularity
 		const projectForArchive: LocalProject = JSON.parse(JSON.stringify(payload.project));
@@ -418,16 +739,13 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 		const { pages, widgets, themes, ...projectMeta } = projectForArchive;
 
 		// Prepare assets as transferable ArrayBuffers
-		const assetList: Array<{ hash: string; buffer: ArrayBuffer; meta?: AssetMeta }> = [];
+		const assetList: ArchiveAsset[] = [];
 		for (const h of hashes) {
-			try {
-				const blob = await idbGet<Blob>(stores.STORE_BLOBS, h);
-				if (!blob) continue;
-				const ab = await blob.arrayBuffer();
-				const meta = await idbGet<AssetMeta>(stores.STORE_META, h);
-				assetList.push({ hash: h, buffer: ab, meta });
-			} catch { /* ignore */ }
+			const asset = await loadAssetForArchive(h);
+			if (asset) assetList.push(asset);
 		}
+		const assetCache = new Map<string, ArchiveAsset>();
+		for (const asset of assetList) assetCache.set(asset.hash, asset);
 
 		// Use a dedicated worker for heavy JSON + ZIP work when available
 		if (typeof Worker !== 'undefined') {
@@ -454,15 +772,15 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 					};
 					// Post message; transfer buffers to avoid copy
 					try {
-						const transfer = assetList.map(a => a.buffer);
-						(worker as any).postMessage(msg, transfer);
+						const transfer = assetList.map(a => a.buffer) as Transferable[];
+						(worker as Worker).postMessage(msg, transfer);
 					} catch (err) {
 						worker.terminate();
 						reject(err);
 					}
 				});
 				return base64;
-			} catch (err) {
+			} catch {
 				// fallback to in-thread path below
 			}
 		}
@@ -487,15 +805,21 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 				const chunk = hashArray.slice(i, i + chunkSize);
 				await Promise.all(chunk.map(async (h) => {
 					try {
-						const blob = await idbGet<Blob>(stores.STORE_BLOBS, h);
-						if (!blob) return;
 						// Yield control briefly to prevent blocking
 						await new Promise(resolve => setTimeout(resolve, 0));
-						const ab = await blob.arrayBuffer();
-						folder?.file(h, ab);
-						// Optionally include sidecar meta json
-						const meta = await idbGet<AssetMeta>(stores.STORE_META, h);
-						if (meta) folder?.file(`${h}.meta.json`, JSON.stringify(meta));
+						let asset = assetCache.get(h);
+						if (!asset || asset.buffer.byteLength === 0) {
+							const loaded = await loadAssetForArchive(h);
+							if (loaded) {
+								asset = loaded;
+								assetCache.set(h, loaded);
+							} else {
+								asset = undefined;
+							}
+						}
+						if (!asset) return;
+						folder?.file(h, asset.buffer);
+						if (asset.meta) folder?.file(`${h}.meta.json`, JSON.stringify(asset.meta));
 					} catch { /* ignore */ }
 				}));
 				// Yield control between chunks
@@ -506,6 +830,84 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 		await new Promise(resolve => setTimeout(resolve, 0));
 		const base64 = await zip.generateAsync({ type: 'base64' });
 		return base64;
+	};
+
+	const createCloudAssetResolver = ({ project, manifest }: { project: LocalProject; manifest?: AssetManifest }): ArchiveAssetResolver => {
+		const map = manifest || {};
+		const ownerUid = project.ownerUid || auth.currentUser?.uid || undefined;
+		return async (hash: string) => {
+			const entry = map[hash];
+			const fallbackPath = ownerUid && project.id ? buildProjectAssetPath(ownerUid, project.id, hash) : undefined;
+			const path = entry?.path || fallbackPath;
+			if (!path) return null;
+			const ref = storageRef(storage, path);
+			let buffer: ArrayBuffer | null = null;
+			let type = 'application/octet-stream';
+			try {
+				const bytes = await getBytes(ref);
+				buffer = bytes.slice(0);
+			} catch (err) {
+				try {
+					const url = entry?.downloadUrl || await getDownloadURL(ref);
+					const resp = await fetch(url, { cache: 'no-store' });
+					if (!resp.ok) throw new Error(`asset-fetch-${resp.status}`);
+					const arr = await resp.arrayBuffer();
+					buffer = arr;
+					const headerType = resp.headers.get('content-type');
+					if (headerType) type = headerType;
+				} catch (networkErr) {
+					console.warn('Failed to resolve cloud asset', hash, networkErr);
+					return null;
+				}
+			}
+			if (!buffer) return null;
+			const meta: AssetMeta = {
+				hash,
+				name: entry?.path ? (entry.path.split('/').pop() || hash) : hash,
+				type,
+				size: buffer.byteLength,
+				cloudPath: path,
+				cloudUrl: entry?.downloadUrl,
+				createdAt: new Date().toISOString(),
+				syncedAt: new Date().toISOString(),
+				projectId: project.id,
+			};
+			return { hash, buffer, meta };
+		};
+	};
+
+	const uploadReferencedAssetsToStorage = async (proj: LocalProject, ownerUid: string): Promise<AssetManifest> => {
+		const manifest: AssetManifest = {};
+		const hashes = collectReferencedAssetHashes(proj);
+		if (!hashes.size) return manifest;
+		for (const hash of hashes) {
+			try {
+				const meta = await idbGet<AssetMeta>(stores.STORE_META, hash);
+				const path = buildProjectAssetPath(ownerUid, proj.id, hash);
+				if (meta?.cloudPath === path && typeof meta.cloudUrl === 'string' && meta.cloudUrl) {
+					manifest[hash] = { path, downloadUrl: meta.cloudUrl };
+					continue;
+				}
+				const blob = await idbGet<Blob>(stores.STORE_BLOBS, hash);
+				if (!blob) continue;
+				await uploadBytes(storageRef(storage, path), blob, { contentType: meta?.type || 'application/octet-stream' });
+				let downloadUrl: string | undefined;
+				try { downloadUrl = await getDownloadURL(storageRef(storage, path)); } catch { downloadUrl = undefined; }
+				if (meta) {
+					const nextMeta: AssetMeta = {
+						...meta,
+						cloudPath: path,
+						cloudUrl: downloadUrl || meta.cloudUrl,
+						syncedAt: new Date().toISOString(),
+					};
+					await idbPut(stores.STORE_META, hash, nextMeta);
+				}
+				manifest[hash] = { path, downloadUrl };
+			} catch (err) {
+				console.error('Failed to upload referenced asset to storage', hash, err);
+			}
+		}
+		return manifest;
 	};
 
 	// Helper: parse archive (ArrayBuffer) and load assets into local store; returns LocalProject
@@ -676,11 +1078,17 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 			const mergedSource: Partial<PortfolioMeta> = { ...(existing.portfolioMeta || { siteTitle: existing.name }), ...(payload.metadata || {}) };
 			mergedSource.siteTitle = mergedSource.siteTitle ?? normalizedName;
 			const hydrated = hydratePortfolioMeta(mergedSource, normalizedName);
+			// Preserve any additional metadata keys (e.g. buildSettings) that hydratePortfolioMeta
+			// doesn't explicitly include. We trim/normalize core fields via `hydrated`, then
+			// merge through any other keys from the merged source so we don't drop nested data.
+			const extraMeta = { ...(mergedSource as any) } as Record<string, any>;
+			delete extraMeta.siteTitle; delete extraMeta.tagline; delete extraMeta.description; delete extraMeta.author; delete extraMeta.websiteUrl; delete extraMeta.iconEmoji; delete extraMeta.iconImageUrl; delete extraMeta.socialImageUrl;
+			const finalMeta = { ...hydrated, ...extraMeta } as PortfolioMeta & Record<string, any>;
 			const updated: LocalProject = {
 				...existing,
 				name: hydrated.siteTitle,
 				description: hydrated.description || existing.description || "",
-				portfolioMeta: hydrated,
+				portfolioMeta: finalMeta,
 				updatedAt: now(),
 			} as LocalProject;
 			let nextList = [...projects];
@@ -713,6 +1121,39 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 			return updated;
 		};
 
+		const saveProjectToDisk = async (projectId: string, opts?: { saveAs?: boolean }) => {
+			const idx = projects.findIndex(p => p.id === projectId); if (idx < 0) return;
+			let proj = projects[idx];
+			if (!window.api) return; // only in Electron
+			const needsSaveAs = !!(opts?.saveAs || !proj._filePath);
+			if (needsSaveAs && window.api.saveFile) {
+				try {
+					const base64 = await buildArchiveBase64(proj);
+					const res = window.api.saveFileBytes ? await window.api.saveFileBytes({ defaultPath: `${proj.name || 'project'}.portfoliyou`, dataBase64: base64 }) : await window.api.saveFile({ defaultPath: `${proj.name || 'project'}.portfoliyou`, data: base64, encoding: 'base64' });
+					if (res.canceled || !res.filePath) return;
+					proj = { ...proj, _filePath: res.filePath };
+					const next = [...projects]; next[idx] = proj; setProjects(next); writeStore(next);
+					try { notify({ type: 'success', message: 'Saved to disk', title: proj.name, persistent: false }); } catch { /* ignore */ }
+				} catch {
+					// ignore and fall through; write step below is gated by _filePath
+				}
+			}
+			if (proj._filePath && window.api.writeFile) {
+				setSaving(true);
+				try {
+					pushRevisionSnapshot(proj);
+					const base64 = await buildArchiveBase64(proj);
+					if (window.api.writeFileBytes) await window.api.writeFileBytes({ filePath: proj._filePath, dataBase64: base64 });
+					else await window.api.writeFile({ filePath: proj._filePath, data: base64, encoding: 'base64' });
+					setLastSavedAt(now());
+					try { notify({ type: 'success', message: 'Saved to disk', title: proj.name, persistent: false }); } catch { /* ignore */ }
+				} catch {
+					try { notify({ type: 'error', message: 'Failed to save file', title: proj.name, persistent: false }); } catch { /* ignore */ }
+				} finally {
+					setSaving(false);
+				}
+			}
+		};
 
 		return {
 			projects,
@@ -862,20 +1303,21 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 					themes: { [defaultTheme.themeId]: defaultTheme },
 					pages: { [defaultPage.pageId]: { ...defaultPage, starter: true } },
 					widgets: {},
+					storage: 'local',
 				};
 				const next = [p, ...projects];
 				setProjects(next); writeStore(next);
 				localStorage.setItem("py.hasAnyProject", "1");
 				return p;
 			},
-			createProjectWithSave: async (input: string | { name: string; metadata?: Partial<PortfolioMeta> }) => {
+			createProjectWithSave: async (input: string | { name: string; metadata?: Partial<PortfolioMeta>; createCloud?: boolean }) => {
 				const rawName = typeof input === 'string' ? input : input?.name;
 				const base = normalizeProjectName(rawName, "Untitled Portfolio");
 				const metadata = hydratePortfolioMeta((typeof input === 'string' ? { siteTitle: base } : (input?.metadata || { siteTitle: base })) as Partial<PortfolioMeta>, base);
 				const safeStem = (metadata.siteTitle || base || "Portfolio").replace(/[\\/:*?"<>|]/g, "_") || "Portfolio";
-				// Construct project object
+				const preferCloud = typeof input === 'string' ? true : (input?.createCloud ?? true);
 				const id = crypto.randomUUID();
-				const p: LocalProject = {
+				const baseProject: LocalProject = {
 					id,
 					name: metadata.siteTitle,
 					description: metadata.description || "",
@@ -888,31 +1330,59 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 					createdAt: now(),
 					updatedAt: now(),
 					themes: { [defaultTheme.themeId]: defaultTheme },
-					pages: { [defaultPage.pageId]: defaultPage },
+					pages: { [defaultPage.pageId]: { ...defaultPage } },
 					widgets: {},
 				};
-				const base64 = await buildArchiveBase64(p);
+				const user = auth.currentUser;
+				if (user && preferCloud) {
+					const docRef = doc(collection(db, 'projects'));
+					const cloudProject: LocalProject = {
+						...baseProject,
+						id: docRef.id,
+						ownerUid: user.uid,
+						_cloudId: docRef.id,
+						_synced: true,
+						storage: 'cloud',
+					};
+					try {
+						await setDoc(docRef, serializeProjectForCloud(cloudProject, user.uid, { includeCreatedAt: true }));
+						setProjects(prev => {
+							const existingCloud = prev.filter(p => (p.storage ?? 'local') === 'cloud' && p.id !== cloudProject.id);
+							const locals = prev.filter(p => (p.storage ?? 'local') !== 'cloud');
+							const merged = [cloudProject, ...existingCloud, ...locals];
+							writeStore(merged);
+							return merged;
+						});
+						localStorage.setItem("py.hasAnyProject", "1");
+						setSelectedProjectId(cloudProject.id); writeSelected(cloudProject.id);
+						return cloudProject;
+					} catch (err) {
+						console.error('Failed to create cloud project', err);
+						window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'error', message: 'Unable to create cloud project. Please try again.' } }));
+						return null;
+					}
+				}
+				const localProject = { ...baseProject, storage: 'local' as const };
+				const base64 = await buildArchiveBase64(localProject);
 				if (window.api?.saveFile) {
-					// Prefer binary save for archive
 					const res = await (window.api.saveFileBytes ? window.api.saveFileBytes({ defaultPath: `${safeStem}.portfoliyou`, dataBase64: base64 }) : window.api.saveFile({ defaultPath: `${safeStem}.portfoliyou`, data: base64, encoding: 'base64' }));
 					if (res.canceled || !res.filePath) return null;
-					p._filePath = res.filePath;
-					const next = [p, ...projects];
+					const persisted = { ...localProject, _filePath: res.filePath };
+					const next = [persisted, ...projects];
 					setProjects(next); writeStore(next);
 					localStorage.setItem("py.hasAnyProject", "1");
-					setSelectedProjectId(p.id); writeSelected(p.id);
-					return p;
+					setSelectedProjectId(persisted.id); writeSelected(persisted.id);
+					return persisted;
 				} else {
-					// Browser fallback download of zip
 					const u8 = Uint8Array.from(atob(base64), c => c.charCodeAt(0));
 					const blob = new Blob([u8], { type: "application/zip" });
 					const url = URL.createObjectURL(blob);
 					const a = document.createElement("a"); a.href = url; a.download = `${safeStem}.portfoliyou`;
 					document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
-					const next = [p, ...projects];
+					const next = [localProject, ...projects];
 					setProjects(next); writeStore(next);
-					setSelectedProjectId(p.id); writeSelected(p.id);
-					return p;
+					setSelectedProjectId(localProject.id); writeSelected(localProject.id);
+					return localProject;
 				}
 			},
 			updateProjectMetadata: async (projectId: string, payload: { name?: string; metadata?: Partial<PortfolioMeta> }) => {
@@ -967,6 +1437,7 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 				// If we got a valid import, deduplicate by file path and by id
 				if (imported) {
 					imported = ensurePortfolioMeta(imported as LocalProject);
+					(imported as LocalProject).storage = 'local';
 					// Prefer dedupe by path when available
 					if (importedFilePath) {
 						const existingByPath = projects.find(p => p._filePath === importedFilePath);
@@ -1174,17 +1645,38 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 			exportProject: async (projectId: string) => {
 				const proj = projects.find(p => p.id === projectId);
 				if (!proj) return;
-				const base64 = await buildArchiveBase64(proj);
+				let projectForExport: LocalProject = proj;
+				let assetResolver: ArchiveAssetResolver | undefined;
+				const isCloudProject = (proj.storage ?? 'local') === 'cloud' && typeof proj._cloudId === 'string';
+				if (isCloudProject && proj._cloudId) {
+					try {
+						const docSnap = await getDoc(doc(db, 'projects', proj._cloudId));
+						if (docSnap.exists()) {
+							const data = docSnap.data() as Record<string, unknown>;
+							projectForExport = hydrateCloudProjectDoc(docSnap.id, data);
+							const manifestRaw = data['assetManifest'];
+							const manifest = manifestRaw && typeof manifestRaw === 'object' ? manifestRaw as AssetManifest : undefined;
+							assetResolver = createCloudAssetResolver({ project: projectForExport, manifest });
+						} else {
+							window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'warning', message: 'Cloud project missing in Firestore. Exporting cached copy instead.' } }));
+						}
+					} catch (err) {
+						console.warn('Failed to refresh cloud project before export, falling back to cached state.', err);
+						window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'warning', message: 'Unable to fetch latest cloud data. Using cached copy.' } }));
+					}
+				}
+				const exportName = projectForExport.name || proj.name || 'project';
+				const base64 = await buildArchiveBase64(projectForExport, assetResolver ? { assetResolver } : undefined);
 				if (window.api?.saveFile) {
-					if (window.api.saveFileBytes) await window.api.saveFileBytes({ defaultPath: `${proj.name || "project"}.portfoliyou`, dataBase64: base64 });
-					else await window.api.saveFile({ defaultPath: `${proj.name || "project"}.portfoliyou`, data: base64, encoding: 'base64' });
+					if (window.api.saveFileBytes) await window.api.saveFileBytes({ defaultPath: `${exportName}.portfoliyou`, dataBase64: base64 });
+					else await window.api.saveFile({ defaultPath: `${exportName}.portfoliyou`, data: base64, encoding: 'base64' });
 				} else {
 					// Browser fallback: trigger download of zip
 					const u8 = Uint8Array.from(atob(base64), c => c.charCodeAt(0));
 					const blob = new Blob([u8], { type: "application/zip" });
 					const url = URL.createObjectURL(blob);
 					const a = document.createElement("a");
-					a.href = url; a.download = `${proj.name || "project"}.portfoliyou`;
+					a.href = url; a.download = `${exportName}.portfoliyou`;
 					document.body.appendChild(a); a.click(); a.remove();
 					URL.revokeObjectURL(url);
 				}
@@ -1192,283 +1684,61 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 			syncProject: async (projectId: string) => {
 				const user = auth.currentUser; if (!user) { window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'error', message: 'Sign in to sync to cloud.' } })); return; }
 				const idx = projects.findIndex(p => p.id === projectId); if (idx < 0) return;
-				// Use backend-enforced limit via callable; do not create directly client-side
-				let proj = projects[idx];
-				// Prepare cloud payload handled inline below
-				// Build archive from prepared payload
-				const trimmed = ((): LocalProject => {
-					const over = (proj.pageOrder?.length || 0) > 10;
-					const keep = over ? proj.pageOrder.slice(0, 10) : (proj.pageOrder || []);
-					const nextPages: Record<string, Page> = {};
-					const referenced = new Set<string>();
-					for (let i = 0; i < keep.length; i++) {
-						const id = keep[i];
-						const pg = proj.pages[id];
-						if (pg) {
-							nextPages[id] = { ...pg, order: i };
-							for (const wid of (pg.widgets || [])) referenced.add(wid);
-						}
-					}
-					const nextWidgets: Record<string, Widget> = {};
-					for (const wid of referenced) { if (proj.widgets[wid]) nextWidgets[wid] = proj.widgets[wid]; }
-					return { ...proj, pageOrder: keep, pages: nextPages, widgets: nextWidgets, updatedAt: now() } as LocalProject;
-				})();
-				const base64 = await buildArchiveBase64(trimmed);
-				// Determine cloud doc in top-level 'projects'
-				let cloudId = proj._cloudId;
-
-				// If not linked (e.g., after sign-out), try to locate existing cloud doc by localProjectId
-				if (!cloudId) {
-					try {
-						const q1 = query(collection(db, 'projects'), where('ownerUid', '==', user.uid), where('localProjectId', '==', proj.id), orderBy('updatedAt', 'desc'));
-						const s1 = await getDocs(q1);
-						if (s1.docs.length > 0) {
-							cloudId = s1.docs[0].id;
-						}
-					} catch { /* ignore */ }
-				}
-				// If an old/invalid cloud link exists (not server-created or wrong owner), drop it and recreate
-				if (cloudId) {
-					try {
-						const dref = doc(db, 'projects', cloudId);
-						const ds = await getDoc(dref);
-						const v = ds.exists() ? (ds.data() as Record<string, unknown>) : null;
-						const invalid = !v || v.ownerUid !== user.uid || v.serverCreated !== true;
-						if (invalid) {
-							// Try to delete old cloud copy via callable (ignore errors if not owner)
-							try {
-								const del = httpsCallable<{ projectId: string }, { ok: boolean }>(getFunctions(undefined, 'us-central1'), 'deleteProject');
-								await del({ projectId: cloudId });
-							} catch { /* keep local unlink only */ }
-							cloudId = undefined;
-						}
-					} catch {
-						// If we cannot verify, fall back to creating a new one
-						cloudId = undefined;
-					}
-				}
-				if (!cloudId) {
-					try {
-						const fn = httpsCallable<{ name?: string }, { id: string }>(getFunctions(undefined, 'us-central1'), 'createProject');
-						const res = await fn({ name: proj.name });
-						cloudId = (res.data as { id?: string })?.id;
-						if (!cloudId) throw new Error('No project id returned from server.');
-					} catch (err: unknown) {
-						const e = err as { code?: string; message?: string } | undefined;
-						const code = e?.code || e?.message || 'unknown';
-						// If plan limit is reached, try to reuse an existing server-created doc owned by the user
-						if (code === 'failed-precondition') {
-							try {
-								const user = auth.currentUser!;
-								const q = query(collection(db, 'projects'), where('ownerUid', '==', user.uid), orderBy('updatedAt', 'desc'));
-								const snap = await getDocs(q);
-								const reuse = snap.docs.find(d => {
-									const v = d.data() as Record<string, unknown>;
-									return v['serverCreated'] === true;
-								}) || snap.docs[0];
-								if (reuse) {
-									cloudId = reuse.id;
-								} else {
-									window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'error', message: 'Cloud project limit reached. Delete or unlink a cloud project to continue.' } }));
-									return;
-								}
-							} catch {
-								window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'error', message: 'Cloud project limit reached. Manage your cloud projects or upgrade your plan.' } }));
-								return;
-							}
-						} else {
-							const msg = `Failed to create cloud project${e?.message ? `: ${e.message}` : ''}`;
-							window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'error', message: msg } }));
-							return;
-						}
-					}
-				}
-
-				// Wait briefly for the server-created doc to be visible, then verify before uploading
-				let verified = false; let attempts = 0;
-				while (!verified && attempts < 10) {
-					const ds = await getDoc(doc(db, 'projects', cloudId!));
-					if (ds.exists()) {
-						const v = ds.data() as { ownerUid?: string; serverCreated?: boolean };
-						if (v && v.ownerUid === user.uid && v.serverCreated === true) { verified = true; break; }
-					}
-					await new Promise(r => setTimeout(r, 300));
-					attempts++;
-					// If re-linking to an existing cloud doc, allow user to choose sync direction
-					{
-						const alreadyLinked = !!projects[idx]._cloudId;
-						if (!alreadyLinked) {
-							try {
-								const dref = doc(db, 'projects', cloudId!);
-								const ds = await getDoc(dref);
-								if (ds.exists()) {
-									// Ask direction: OK = overwrite cloud with local; Cancel = overwrite local with cloud
-									const overwriteCloud = window.confirm('Re-link cloud project found. Overwrite cloud with local copy? Click Cancel to load cloud into local instead.');
-									if (!overwriteCloud) {
-										// Download cloud payload and replace local (preserve _filePath)
-										try {
-											const meta = ds.data() as Record<string, unknown>;
-											const path: string = typeof meta.storagePath === 'string' ? (meta.storagePath as string) : `users/${user.uid}/projects/${cloudId}/project.portfoliyou`;
-											let imported: LocalProject;
-											try {
-												const bytes = await getBytes(storageRef(storage, path));
-												const text = new TextDecoder('utf-8').decode(bytes);
-												imported = migrateProjectSchema(JSON.parse(text));
-											} catch {
-												try {
-													const url = await getDownloadURL(storageRef(storage, path));
-													let text: string;
-													if (window.api?.fetchText) {
-														const res = await window.api.fetchText({ url });
-														if (!res || !res.ok) throw new Error('Download failed');
-														text = res.text as string;
-													} else {
-														const resp = await fetch(url);
-														text = await resp.text();
-													}
-													imported = migrateProjectSchema(JSON.parse(text));
-												} catch {
-													// If download also fails (likely CORS), fall through to upload path
-													throw new Error('download-failed');
-												}
-											}
-											const keepPath = projects[idx]._filePath;
-											const merged: LocalProject = { ...(imported as LocalProject), _filePath: keepPath, _cloudId: cloudId!, _synced: true } as LocalProject;
-											const next = [...projects]; next[idx] = merged; setProjects(next); writeStore(next);
-											window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'success', message: 'Loaded cloud copy into local project.' } }));
-											return;
-										} catch { /* fall through to upload */ }
-									}
-								}
-							} catch { /* ignore */ }
-						}
-					}
-
-					// Link the verified cloudId locally immediately so subsequent attempts reuse it
-				}
-
-				if (!verified) {
-					// Roll back newly-created cloud doc so it doesn't consume quota
-					// Note: do not automatically delete here; keeping the doc lets us reuse
-					// the same cloudId on the next attempt without hitting the quota ceiling.
-					window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'error', message: 'Cloud project not ready. Please try again.' } }));
+				const source = projects[idx];
+				if ((source.storage ?? 'local') === 'cloud') {
+					window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'info', message: 'This portfolio already lives in the cloud.' } }));
 					return;
 				}
-
-				// Link the verified cloudId locally immediately so subsequent attempts reuse it
-				// even if the upload fails (avoids running into the per-plan create limit).
-				{
-					const linked = { ...proj, _cloudId: cloudId } as LocalProject;
-					const next = [...projects]; next[idx] = linked; setProjects(next); writeStore(next);
-				}
-
-				// Determine storage path from server doc when available; fall back to convention
-				let path = `users/${user.uid}/projects/${cloudId}/project.portfoliyou`;
+				const nowStr = now();
+				const docRef = doc(collection(db, 'projects'));
+				const sanitized = sanitizeProjectVideoWidgets(ensurePortfolioMeta(ensureProjectThemes({ ...source } as LocalProject)));
+				const cloudProject: LocalProject = {
+					...sanitized,
+					id: docRef.id,
+					ownerUid: user.uid,
+					storage: 'cloud',
+					_cloudId: docRef.id,
+					_synced: true,
+					_filePath: undefined,
+					updatedAt: nowStr,
+				} as LocalProject;
+				const assetManifest = await uploadReferencedAssetsToStorage(sanitized, user.uid);
 				try {
-					const ds = await getDoc(doc(db, 'projects', cloudId));
-					if (ds.exists()) {
-						const v = ds.data() as Record<string, unknown>;
-						if (typeof v?.storagePath === 'string') path = v.storagePath as string;
-						// Last-write-wins conflict handling: if cloud is newer than local, load cloud into local and abort upload
-						let serverUpdatedAtStr = '';
-						const u = (v as Record<string, unknown>)['updatedAt'] as unknown;
-						if (u && typeof (u as { toDate?: () => Date }).toDate === 'function') serverUpdatedAtStr = (u as { toDate: () => Date }).toDate().toISOString();
-						else if (typeof u === 'string') serverUpdatedAtStr = u as string;
-						if (serverUpdatedAtStr && proj.updatedAt && serverUpdatedAtStr.localeCompare(proj.updatedAt) > 0) {
-							// Cloud wins — fetch cloud payload and replace local; preserve _filePath and linkage
-							try {
-								let imported: LocalProject;
-								try {
-									const bytes = await getBytes(storageRef(storage, path));
-									const text = new TextDecoder('utf-8').decode(bytes);
-									imported = migrateProjectSchema(JSON.parse(text));
-								} catch {
-									const url = await getDownloadURL(storageRef(storage, path));
-									let text: string;
-									if (window.api?.fetchText) {
-										const res = await window.api.fetchText({ url });
-										if (!res || !res.ok) throw new Error('Download failed');
-										text = res.text as string;
-									} else {
-										const resp = await fetch(url);
-										text = await resp.text();
-									}
-									imported = migrateProjectSchema(JSON.parse(text));
-								}
-								// Preserve file path and cloud link; push local revision before overwriting
-								pushRevisionSnapshot(proj);
-								const keepPath = projects[idx]._filePath;
-								const merged: LocalProject = { ...(imported as LocalProject), _filePath: keepPath, _cloudId: cloudId!, _synced: true } as LocalProject;
-								const next = [...projects]; next[idx] = merged; setProjects(next); writeStore(next);
-								window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'info', message: 'Loaded newer cloud version (last-write-wins).' } }));
-								return;
-							} catch {
-								// If conflict resolution fails to download, fall through to upload local copy as best-effort
-							}
-						}
-					}
-				} catch { /* ignore lookup failure; use fallback */ }
-				const sref = storageRef(storage, path);
-				try {
-					// Surface immediate feedback so it doesn't feel like "nothing happens"
-					window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'info', message: 'Uploading project to cloud…' } }));
-					// upload target details intentionally not logged in production builds
-					// Use Blob upload for reliability across environments (Electron/web)
-					const u8 = Uint8Array.from(atob(base64), c => c.charCodeAt(0));
-					const blob = new Blob([u8], { type: 'application/zip' });
-					let attempt = 0; let lastErr: unknown = null;
-					while (attempt < 2) {
-						try {
-							await uploadBytes(sref, blob, { contentType: 'application/zip', cacheControl: 'no-cache' });
-							lastErr = null; break;
-						} catch (e) {
-							lastErr = e; attempt++;
-							// Small backoff; handle transient propagation of serverCreated or auth
-							await new Promise(r => setTimeout(r, 250));
-						}
-					}
-					if (lastErr) throw lastErr;
-
-					// Update doc with storage path and metadata
-					await setDoc(doc(db, 'projects', cloudId), {
-						ownerUid: user.uid,
-						name: proj.name,
-						description: proj.description || '',
-						activeThemeId: proj.activeThemeId,
-						pageOrder: proj.pageOrder,
-						limits: proj.limits,
-						status: proj.status,
-						schemaVersion: proj.schemaVersion || 1,
-						localProjectId: proj.id,
-						updatedAt: serverTimestamp(),
-						storagePath: path,
-					}, { merge: true });
-				} catch (err: unknown) {
-					const e = err as { code?: string; message?: string } | undefined;
-					const code = e?.code || 'unknown';
-					const message = (code === 'storage/unauthorized' || code === 'permission-denied')
-						? `Cloud write blocked by rules (code=${code}). Check Storage rules and project doc prerequisites. Path: ${path}`
-						: (e?.message || 'Failed to sync to cloud.');
-					// Helpful console log for debugging without opening the notification center
-					// suppress detailed errors in production builds to avoid leaking internal paths
-					const persistent = code === 'failed-precondition' || code === 'permission-denied' || code === 'storage/unauthorized';
-					window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'error', message: persistent ? (message + ' Unlink another cloud project to continue.') : message, persistent } }));
-					// Do not delete the cloud doc here; keeping it allows retry without hitting plan limit
-					// Users can unlink from the Cloud settings if they prefer to remove it.
+					const payload = serializeProjectForCloud(cloudProject, user.uid, { includeCreatedAt: true });
+					payload.assetManifest = assetManifest;
+					payload.migratedFrom = { localProjectId: source.id, filePath: source._filePath || null };
+					payload.storageMode = 'cloud-first';
+					await setDoc(docRef, payload, { merge: true });
+					cloudLocalVersionRef.current[cloudProject.id] = cloudProject.updatedAt;
+					setProjects(prev => {
+						const withoutDup = prev.filter(p => p.id !== cloudProject.id);
+						const next = [cloudProject, ...withoutDup];
+						writeStore(next);
+						return next;
+					});
+					setSelectedProjectId(cloudProject.id); writeSelected(cloudProject.id);
+					window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'success', message: 'Portfolio synced to cloud. Continue editing online.' } }));
+				} catch (err) {
+					console.error('Failed to sync project to cloud', err);
+					window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'error', message: 'Failed to sync to cloud. Please try again.' } }));
 					return;
 				}
-				// Update local flags
-				// Update local flags and revision history
-				proj = { ...proj, _synced: true, _cloudId: cloudId, updatedAt: now() } as LocalProject;
-				pushRevisionSnapshot(proj);
-				const next = [...projects]; next[idx] = proj; setProjects(next); writeStore(next);
-
-				// Kick off a size refresh to update user counters on the backend (best-effort)
-				try {
-					const fn = httpsCallable<{ projectId: string }, { ok: boolean; sizeBytes: number }>(getFunctions(undefined, 'us-central1'), 'updateProjectSize');
-					await fn({ projectId: cloudId });
-				} catch (e) { void e; }
-				window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'success', message: 'Project synced to cloud.' } }));
+				const shouldDeleteLocal = window.confirm('Cloud copy created! Remove the original local file to avoid keeping duplicate versions? Choosing “No” keeps both the new cloud copy and your local project.');
+				if (shouldDeleteLocal) {
+					setProjects(prev => {
+						const next = prev.filter(p => p.id !== source.id);
+						writeStore(next);
+						return next;
+					});
+					if (selectedProjectId === source.id) {
+						setSelectedProjectId(cloudProject.id);
+						writeSelected(cloudProject.id);
+					}
+					if (source._filePath && window.api?.deleteFile) {
+						try { await window.api.deleteFile({ filePath: source._filePath }); } catch { /* ignore */ }
+					}
+					window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'info', message: 'Local file removed. Cloud copy is now primary.' } }));
+				}
 			},
 			unsyncProject: async (projectId: string) => {
 				const user = auth.currentUser; if (!user) { window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'error', message: 'Sign in to unlink from cloud.' } })); return; }
@@ -1485,8 +1755,17 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 				const proj = projects[idx];
 				const cloudId = proj._cloudId; if (!cloudId) return;
 				try {
-					const fn = httpsCallable<{ projectId: string }, { ok: boolean }>(getFunctions(undefined, 'us-central1'), 'deleteProject');
-					await fn({ projectId: cloudId });
+					const docRef = doc(db, 'projects', cloudId);
+					const snapshot = await getDoc(docRef);
+					let storagePath: string | null = null;
+					if (snapshot.exists()) {
+						const data = snapshot.data() as Record<string, unknown>;
+						if (typeof data.storagePath === 'string') storagePath = data.storagePath;
+					}
+					await deleteDoc(docRef);
+					if (storagePath) {
+						try { await deleteObject(storageRef(storage, storagePath)); } catch { /* ignore */ }
+					}
 				} catch (err: unknown) {
 					const ex = err as { code?: string } | undefined;
 					const msg = ex?.code === 'permission-denied' ? 'Not allowed to delete cloud project.' : 'Failed to delete cloud project.';
@@ -1494,7 +1773,7 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 					return;
 				}
 				// Update local flags
-				const updated = { ...proj, _synced: false, _cloudId: undefined, updatedAt: now() } as LocalProject;
+				const updated = { ...proj, _synced: false, _cloudId: undefined, updatedAt: now(), storage: 'local' } as LocalProject;
 				const next = [...projects]; next[idx] = updated; setProjects(next); writeStore(next);
 				window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'success', message: 'Deleted cloud copy.' } }));
 			},
@@ -1572,10 +1851,28 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 			deleteCloudProjectByCloudId: async (cloudId: string) => {
 				const user = auth.currentUser; if (!user) return false;
 				try {
-					const fn = httpsCallable<{ projectId: string }, { ok: boolean }>(getFunctions(undefined, 'us-central1'), 'deleteProject');
-					await fn({ projectId: cloudId });
+					const docRef = doc(db, 'projects', cloudId);
+					const snapshot = await getDoc(docRef);
+					let storagePath: string | null = null;
+					if (snapshot.exists()) {
+						const data = snapshot.data() as Record<string, unknown>;
+						if (typeof data.storagePath === 'string') storagePath = data.storagePath;
+					}
+					await deleteDoc(docRef);
+					if (storagePath) {
+						try { await deleteObject(storageRef(storage, storagePath)); } catch { /* ignore storage cleanup failures */ }
+					}
+					setProjects(prev => {
+						const next = prev.filter(p => (p.id !== cloudId && p._cloudId !== cloudId));
+						writeStore(next);
+						return next;
+					});
+					window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'success', message: 'Cloud portfolio deleted.', persistent: false } }));
 					return true;
-				} catch { return false; }
+				} catch {
+					window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'error', message: 'Failed to delete cloud portfolio.', persistent: false } }));
+					return false;
+				}
 			},
 			importProjectFromCloudLocalOnly: async (cloudId: string) => {
 				const user = auth.currentUser; if (!user) return null as unknown as LocalProject;
@@ -1676,41 +1973,21 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 				localStorage.setItem("py.hasAnyProject", "1");
 				return imported as LocalProject;
 			},
-			saveProject: async (projectId: string, opts?: { saveAs?: boolean }) => {
-				const idx = projects.findIndex(p => p.id === projectId); if (idx < 0) return;
-				let proj = projects[idx];
-				if (!window.api) return; // only in Electron
-				const needsSaveAs = !!(opts?.saveAs || !proj._filePath);
-				// Do not show saving spinner while the OS Save dialog is open; set it only during actual disk write
-				if (needsSaveAs && window.api.saveFile) {
-					try {
-						const base64 = await buildArchiveBase64(proj);
-						const res = window.api.saveFileBytes ? await window.api.saveFileBytes({ defaultPath: `${proj.name || 'project'}.portfoliyou`, dataBase64: base64 }) : await window.api.saveFile({ defaultPath: `${proj.name || 'project'}.portfoliyou`, data: base64, encoding: 'base64' });
-						if (res.canceled || !res.filePath) return; // user canceled: no spinner to reset
-						proj = { ...proj, _filePath: res.filePath };
-						const next = [...projects]; next[idx] = proj; setProjects(next); writeStore(next);
-						// Notify user that Save As completed (file chosen & written)
-						try { notify({ type: 'success', message: 'Saved to disk', title: proj.name, persistent: false }); } catch { /* ignore */ }
-					} catch {
-						// ignore and fall through; write step below is gated by _filePath
-					}
+			saveProject: saveProjectToDisk,
+			saveCloudProjectNow: async (projectId: string) => {
+				const proj = projects.find(p => p.id === projectId);
+				if (!proj) return;
+				if ((proj.storage ?? 'local') !== 'cloud') {
+					await saveProjectToDisk(projectId);
+					return;
 				}
-				if (proj._filePath && window.api.writeFile) {
-					setSaving(true);
-					try {
-						pushRevisionSnapshot(proj);
-						const base64 = await buildArchiveBase64(proj);
-						if (window.api.writeFileBytes) await window.api.writeFileBytes({ filePath: proj._filePath, dataBase64: base64 });
-						else await window.api.writeFile({ filePath: proj._filePath, data: base64, encoding: 'base64' });
-						setLastSavedAt(now());
-						try { notify({ type: 'success', message: 'Saved to disk', title: proj.name, persistent: false }); } catch { /* ignore */ }
-					} catch {
-						try { notify({ type: 'error', message: 'Failed to save file', title: proj.name, persistent: false }); } catch { /* ignore */ }
-						// swallow to avoid UI disruption; notification system can be added later
-					} finally {
-						setSaving(false);
-					}
+				const state = cloudPersistStateRef.current;
+				state.pending[proj.id] = proj;
+				if (state.timer) {
+					clearTimeout(state.timer);
+					state.timer = null;
 				}
+				await flushCloudPersist();
 			},
 			renameProject: async (projectId: string, newName: string) => {
 				const finalName = normalizeProjectName(newName, "Portfolio");
@@ -1729,7 +2006,7 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 				}
 			},
 		};
-	}, [projects, selectedProjectId, saving, lastSavedAt, cloudMaxProjects, cloudBytesUsed, cloudProjectsCount, autosaveEnabled, notify, selected, selectedTheme]);
+	}, [projects, selectedProjectId, saving, lastSavedAt, cloudMaxProjects, cloudBytesUsed, cloudProjectsCount, autosaveEnabled, notify, selected, selectedTheme, flushCloudPersist]);
 
 	// Auto-save to file for projects that have a _filePath
 	const prevTimesRef = useRef<Record<string, string>>({});
@@ -1889,3 +2166,31 @@ function hydratePortfolioMeta(raw: Partial<PortfolioMeta> | undefined, fallbackN
 		socialImageUrl: trimField(raw?.socialImageUrl, 400) || null,
 	};
 }
+
+function collectReferencedAssetHashes(project: LocalProject): Set<string> {
+	const hashes = new Set<string>();
+	const collect = (value?: string | null) => {
+		if (!value || typeof value !== 'string') return;
+		const trimmed = value.trim();
+		if (!trimmed.startsWith('asset://')) return;
+		const hash = trimmed.slice('asset://'.length);
+		if (hash) hashes.add(hash);
+	};
+	try {
+		for (const widget of Object.values(project.widgets || {})) {
+			const props = (widget?.props || {}) as Record<string, unknown>;
+			const src = typeof props['src'] === 'string' ? (props['src'] as string) : '';
+			collect(src);
+		}
+	} catch { /* ignore */ }
+	collect(project.portfolioMeta?.iconImageUrl || null);
+	collect(project.portfolioMeta?.socialImageUrl || null);
+	return hashes;
+}
+
+const CLOUD_SAVE_BASE_DELAY_MS = 2500;
+const CLOUD_SAVE_SLOW_DELAY_MS = 5000;
+const CLOUD_SAVE_SLOW_DURATION_MS = 15000;
+const CLOUD_SAVE_BURST_WINDOW_MS = 5000;
+const CLOUD_SAVE_BURST_THRESHOLD = 12;
+const CLOUD_SAVE_SLOW_NOTIFY_COOLDOWN_MS = 60000;

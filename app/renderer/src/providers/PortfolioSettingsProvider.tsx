@@ -1,10 +1,11 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 
 import PortfolioSettingsModal from "../components/modals/PortfolioSettingsModal";
+
 import { useProjects } from "./ProjectsProvider";
 import type { PortfolioMeta } from "./ProjectsProvider";
 
-type SectionKey = "portfolio" | "cloud" | "theme";
+type SectionKey = "portfolio" | "cloud" | "theme" | "build" | "preview" | "saving";
 
 type OpenOptions = {
     projectId?: string;

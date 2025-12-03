@@ -5,6 +5,7 @@ import { X, Copy, Palette, Trash2 } from "lucide-react";
 import { useProjects } from "../../providers/ProjectsProvider";
 import { THEME_PRESETS } from "../../themes/presets";
 import type { Theme } from "../../themes/types";
+import { useScrollLock } from "../../hooks/useScrollLock";
 
 type ThemeSettingsModalProps = {
   open: boolean;
@@ -57,6 +58,8 @@ export default function ThemeSettingsModal({ open, onClose }: ThemeSettingsModal
   useEffect(() => {
     setNameDraft(activeTheme?.name || '');
   }, [activeTheme?.themeId]);
+
+  useScrollLock(open);
 
   if (!open) return null;
 
@@ -135,11 +138,11 @@ export default function ThemeSettingsModal({ open, onClose }: ThemeSettingsModal
                     <Copy size={12} className="mr-1" /> Duplicate
                   </button>
                   <button
-                    className="btn btn-outline btn-xs"
+                    className="btn btn-ghost btn-xxs text-red-400 border border-red-500/40 hover:bg-red-500/10"
                     disabled={!canDelete}
                     onClick={() => canDelete && deleteTheme(selectedProject!.id, activeTheme!.themeId)}
                   >
-                    <Trash2 size={12} className="mr-1" /> Delete
+                    <Trash2 size={12} className="btn btn-ghost btn-xxs text-red-400 border border-red-500/40 hover:bg-red-500/10" /> Delete
                   </button>
                 </div>
               </div>

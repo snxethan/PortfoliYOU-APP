@@ -1,12 +1,10 @@
-﻿import { useEffect, useRef, useState } from "react";
+﻿import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { LogOut, Mail, Lock, AlertCircle, Loader2, Info } from "lucide-react";
+import { LogOut, Mail, Lock, AlertCircle, Loader2 } from "lucide-react";
 
 import { useAuth } from "../../providers/AuthProvider";
 import { useNotifications } from "../../providers/NotificationsProvider";
 import { signInGoogle, emailSignIn, emailSignUp, logout } from "../../lib/auth";
-
-import { AuthCta } from "./AuthCta";
 
 export default function SignInCard() {
   const { user } = useAuth();

@@ -2,7 +2,7 @@ import React from 'react';
 import { z } from 'zod';
 
 import type { WidgetDefinition } from '../types';
-import { normalizeExternalLinkUrl } from '../utils/linkUrl';
+import { normalizeExternalLinkUrl } from '../../../../shared/widgets/linkUrl';
 import { useWidgetTheme } from '../sdk';
 
 type LinkVariant = 'text' | 'button' | 'card';
@@ -232,6 +232,16 @@ const def: WidgetDefinition<LinkWidgetProps> = {
     defaultProps: defaultLinkProps,
     grid: { w: 3, h: 2 },
     render: (props) => <LinkView {...props} />,
+    getStaticCss: (props) => {
+        const safeFont = props?.font || 'system';
+        const fontFamily = safeFont === 'serif' ? 'ui-serif, Georgia, serif' : safeFont === 'mono' ? 'ui-monospace, SFMono-Regular, Menlo, Monaco, monospace' : 'ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Inter, sans-serif';
+        const fs = props?.fontSize ? `${props.fontSize}px` : '16px';
+        // variant-specific basic rules
+        if (props?.variant === 'text') return `a { font-family: ${fontFamily}; font-size: ${fs}; font-weight: ${props?.weight === 'bold' ? 700 : 400}; color: var(--accent); text-decoration: underline; }`;
+        if (props?.variant === 'card') return `a { display:block; padding:16px; border-radius:16px; font-family:${fontFamily}; font-size:${fs}; }`;
+        // button
+        return `a { display:inline-flex; padding:10px 16px; border-radius:999px; font-family:${fontFamily}; font-size:${fs}; font-weight: ${props?.weight === 'bold' ? 700 : 400}; }`;
+    },
     zodSchema: z.object({
         url: z.string().min(1, 'URL is required').transform((value) => sanitizeUrl(value)).refine((value) => Boolean(value), {
             message: 'Enter a valid http(s) link',
