@@ -47,17 +47,19 @@ export default function PageSettings({
         return fallbackTheme;
     }, [pageBackground, fallbackTheme]);
     const hasCustomBackground = Boolean((pageBackground || '').trim());
-    const groupClass = "flex items-center gap-2 md:gap-3 px-2.5 py-1.5 rounded-lg border border-[color:var(--border)] bg-[color:var(--surface)]/70 shadow-sm";
+    const rowClass = "flex flex-wrap items-center gap-3 w-full";
+    const appearanceClass = "flex items-center gap-2 flex-1 min-w-[200px] min-w-0 px-3 py-2 rounded-xl border border-[color:var(--border)] bg-[color:var(--surface)]/70 shadow-sm";
+    const navigationClass = "flex flex-wrap sm:flex-nowrap items-center gap-2 flex-none px-3 py-2 rounded-xl border border-[color:var(--border)] bg-[color:var(--surface)]/70 shadow-sm";
     const groupLabelClass = "text-[10px] uppercase tracking-wide text-[color:var(--fg-muted)]";
     const panelContentClass = "w-full text-[12px]";
     const panelLabelClass = "text-[10px] uppercase tracking-wide text-[color:var(--fg-muted)] w-28";
     const inputClass = "input px-2 py-1 text-sm w-auto md:w-auto min-w-0 md:min-w-[160px] max-w-[10rem]";
 
     return (
-        <div className="flex flex-wrap items-stretch gap-2 md:gap-3">
-            <div className={`${groupClass}`}>
+        <div className={rowClass}>
+            <div className={appearanceClass}>
                 <span className={groupLabelClass}>appearance</span>
-                <div className="flex items-start gap-2 ml-2 flex-nowrap">
+                <div className="flex items-start gap-2 flex-wrap">
                     <input
                         type="color"
                         className="w-9 h-9 rounded border border-[color:var(--border)]"
@@ -85,7 +87,7 @@ export default function PageSettings({
                         </button>
                     )}
                     {onOpenSettings && (
-                        <button className="btn btn-ghost btn-xs ml-2 inline-flex items-center gap-2" type="button" title="Page settings" aria-label="Open page settings" onClick={() => onOpenSettings?.()} disabled={!currentPageId}>
+                        <button className="btn btn-ghost btn-xs inline-flex items-center gap-2" type="button" title="Page settings" aria-label="Open page settings" onClick={() => onOpenSettings?.()} disabled={!currentPageId}>
                             <Settings size={14} />
                             <span className="text-sm">Page Settings</span>
                         </button>
@@ -93,10 +95,10 @@ export default function PageSettings({
                 </div>
             </div>
 
-            <div className={`${groupClass}`}>
+            <div className={navigationClass}>
                 <span className={groupLabelClass}>navigation</span>
                 {!editing ? (
-                    <div className="flex items-start gap-2 ml-2 flex-nowrap">
+                    <div className="flex items-start gap-2 flex-wrap sm:flex-nowrap">
                         <button className="btn btn-ghost btn-xs" title="Rename page" aria-label="Rename page" onClick={() => {
                             if (!currentPageId) return;
                             const title = pages[currentPageId]?.title || 'Untitled';
@@ -130,7 +132,7 @@ export default function PageSettings({
                         </button>
                     </div>
                 ) : (
-                    <div className="flex items-start gap-2 ml-2 flex-nowrap">
+                    <div className="flex items-start gap-2 flex-wrap sm:flex-nowrap">
                         <input
                             className={inputClass}
                             value={draft}

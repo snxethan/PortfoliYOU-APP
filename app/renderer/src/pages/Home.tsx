@@ -126,7 +126,7 @@ export default function HomePage() {
 	// recent computed above to keep hook order stable
 
 	return (
-		<div className="p-6 space-y-6">
+		<div className="home-content space-y-6">
 			<Dashboard onToggleNotifications={() => setNotificationsOpen(v => !v)} notifBadge={unseenCount} notificationsOpen={notificationsOpen} />
 
 			{/* Centered CTA under title is now shown inside Dashboard; no extra CTA block here */}
@@ -144,7 +144,7 @@ export default function HomePage() {
 			{/* 2nd section: portfolios (local + cloud) and account */}
 			{/* Portfolios section */}
 			<section>
-				<div id="py-list" ref={listRef} className={`surface border border-[color:var(--border)] rounded-2xl p-6 space-y-4 shadow-lg shadow-black/20 ${pulseList ? 'highlight-pulse' : ''}`}>
+				<div id="py-list" ref={listRef} className={`surface border border-[color:var(--border)] rounded-2xl p-6 shadow-lg shadow-black/20 portfolio-workspace ${pulseList ? 'highlight-pulse' : ''}`}>
 					<div className="flex flex-col gap-1">
 						<p className="section-title">Portfolio workspace</p>
 						<p className="text-sm text-[color:var(--fg-muted)]">Create, manage, and load your portfolios in a single workspace.</p>
@@ -198,6 +198,3 @@ export default function HomePage() {
 		</div>
 	);
 }
-
-// Removed older one-off toast component; now handled by global Notifications stack
-// CloudOnlySettingsModal merged into CloudSettingsModal

@@ -56,13 +56,14 @@ export default function EditorSettings(props: EditorSettingsProps) {
         onResetZoom,
     } = props;
 
-    const groupClass = "flex items-center gap-2 md:gap-3 px-2.5 py-1.5 rounded-lg border border-[color:var(--border)] bg-[color:var(--surface)]/70 shadow-sm";
+    const groupClass = "flex flex-none flex-wrap items-center gap-2 md:gap-3 px-3 py-2 rounded-xl border border-[color:var(--border)] bg-[color:var(--surface)]/70 shadow-sm";
+    const groupGrowClass = `${groupClass} flex-1 min-w-[200px]`;
     const groupLabelClass = "text-[10px] uppercase tracking-wide text-[color:var(--fg-muted)]";
     const previewDisabledClass = "";
 
     return (
-        <div className="flex flex-wrap items-stretch gap-2 md:gap-3 w-full">
-            <div className={`${groupClass}`}>
+        <div className="flex flex-wrap md:flex-nowrap items-stretch gap-3 w-full">
+            <div className={groupClass}>
                 <span className={groupLabelClass}>Mode</span>
                 <div className="flex items-center gap-1">
                     <button
@@ -77,13 +78,13 @@ export default function EditorSettings(props: EditorSettingsProps) {
                 </div>
             </div>
 
-            <div className={`${groupClass} flex-wrap ${previewDisabledClass}`}>
+            <div className={`${groupGrowClass} ${previewDisabledClass}`}>
                 <span className={groupLabelClass}>Layout</span>
                 <label className="flex items-center gap-1 text-xs text-[color:var(--fg-muted)]" title="Grid gap (px, decimals allowed)">
                     <span>Gap</span>
                     <input
                         type="number"
-                        className="input w-14 text-xs"
+                        className="input w-16 text-xs"
                         min={0}
                         max={48}
                         step={0.5}
@@ -102,7 +103,7 @@ export default function EditorSettings(props: EditorSettingsProps) {
                 </button>
             </div>
 
-            <div className={`${groupClass} ${previewDisabledClass}`}>
+            <div className={`${groupGrowClass} ${previewDisabledClass}`}>
                 <span className={groupLabelClass}>Canvas</span>
                 <div className="flex items-center gap-1" title="Canvas zoom">
                     <button className="btn btn-ghost btn-xs" onClick={onZoomOut} aria-label="Zoom out">
@@ -120,7 +121,7 @@ export default function EditorSettings(props: EditorSettingsProps) {
                 </div>
             </div>
 
-            <div className={`${groupClass} flex-wrap ${previewDisabledClass}`}>
+            <div className={`${groupGrowClass} ${previewDisabledClass}`}>
                 <span className={groupLabelClass}>Viewport</span>
                 <div className="flex items-center gap-1" title="Viewport size">
                     <button className={`btn btn-ghost btn-xs ${activeView === 'desktop' ? 'nav-active' : ''}`} onClick={setDesktopView} aria-label="Desktop view">
@@ -141,7 +142,7 @@ export default function EditorSettings(props: EditorSettingsProps) {
                 </div>
             </div>
 
-            <div className={`${groupClass} ${previewDisabledClass}`}>
+            <div className={groupClass}>
                 <span className={groupLabelClass}>History</span>
                 <button className="btn btn-ghost btn-xs flex items-center gap-1 disabled:opacity-60" title="Undo (Ctrl+Z)" onClick={undo} disabled={!canUndo} data-testid="undo-btn">
                     <Undo size={16} />

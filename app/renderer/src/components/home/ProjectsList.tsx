@@ -37,13 +37,13 @@ export default function ProjectsList({
     onOpenSettings: (id: string, section?: 'portfolio' | 'cloud') => void;
 }) {
     return (
-        <div className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)]/70 p-4 space-y-3">
-            <div className="flex items-center justify-between flex-wrap gap-2">
+        <div className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)]/70 p-4 portfolio-workspace-list">
+            <div className="portfolio-workspace-list__header">
                 <div>
                     <p className="text-xs uppercase tracking-wide text-[color:var(--fg-muted)]">Portfolios</p>
                     <p className="text-xs text-[color:var(--fg-muted)]">Manage local files and cloud projects from one place.</p>
                 </div>
-                <span className="text-xs text-[color:var(--fg-muted)]">{projects.length} active</span>
+                <span className="portfolio-workspace-list__count text-xs text-[color:var(--fg-muted)]">{projects.length} active</span>
             </div>
             {projects.length === 0 ? (
                 <div className="text-sm text-[color:var(--fg-muted)]">No recent items.</div>
@@ -59,8 +59,8 @@ export default function ProjectsList({
                                 onClick={() => onSelect(p.id)}
                                 title={p._filePath || ''}
                             >
-                                <div className="flex items-center justify-between gap-3 min-w-0">
-                                    <div className="min-w-0 pr-4">
+                                <div className="portfolio-workspace-list__item">
+                                    <div className="portfolio-workspace-list__item-info">
                                         <div className="text-sm font-semibold truncate flex items-center gap-2" title={p.name}>
                                             <span className="truncate">{p.name}</span>
                                             {isCloud && <Cloud size={12} className="text-[color:var(--accent)]" aria-label="Cloud project" />}
@@ -71,7 +71,7 @@ export default function ProjectsList({
                                         <div className="text-xs text-[color:var(--fg-muted)]">{isCloud ? 'Cloud' : 'Local'} · Updated {new Date(p.updatedAt).toLocaleString()}</div>
                                     </div>
 
-                                    <div className="flex items-center gap-1 flex-shrink-0">
+                                    <div className="portfolio-workspace-list__item-actions">
                                         {!isCloud && !p._filePath ? (
                                             <button className="btn btn-ghost btn-xxs" title="Save As…" onClick={async (e) => { e.stopPropagation(); await onSaveAs(p.id); }}><FolderUp size={14} /></button>
                                         ) : null}

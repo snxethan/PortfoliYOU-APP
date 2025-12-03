@@ -1,6 +1,6 @@
 import { useNavigate, useLocation } from "react-router-dom";
 import React, { useMemo, useState, useCallback } from "react";
-import { Cloud, UploadCloud, X, Save, FolderOpen, Pin, PinOff, Palette, Settings, Play, Square, ExternalLink, Eye, RefreshCw, SlidersHorizontal, Bell, BellDot } from "lucide-react";
+import { Cloud, UploadCloud, X, Save, FolderOpen, Pin, PinOff, Palette, Settings, Play, Square, ExternalLink, Eye, RefreshCw, SlidersHorizontal, Bell, BellDot, Minimize2, Expand } from "lucide-react";
 
 import { useAuth } from "../../providers/AuthProvider";
 import { useProjects } from "../../providers/ProjectsProvider";
@@ -29,6 +29,9 @@ export default function PortfolioIsland(): React.ReactElement | null {
       return Math.min(1, Math.max(0.25, v));
     } catch { return 0.95; }
   });
+  const [compactMode, setCompactMode] = useState<boolean>(() => {
+    try { return localStorage.getItem('py_island_compact') === '1'; } catch { return false; }
+  });
   const [syncingProjectId, setSyncingProjectId] = useState<string | null>(null);
   const syncingSelected = syncingProjectId === selectedProjectId;
   const savedText = useMemo(() => lastSavedAt ? new Date(lastSavedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : null, [lastSavedAt]);
@@ -41,13 +44,15 @@ export default function PortfolioIsland(): React.ReactElement | null {
   const containerStyle = useMemo(() => ({ zIndex: pinned ? 1200 : 900 }), [pinned]);
   // Match quick-settings/editor styles: header labels use 10px, content/actions use 12px
   const labelClass = "text-[10px] uppercase tracking-wide text-[color:var(--fg-muted)]";
-  const segmentClass = "portfolio-island__segment text-[12px] border border-[color:var(--border)] bg-[color:var(--surface)]/95";
+  const segmentClass = `${compactMode ? 'portfolio-island__segment portfolio-island__segment--compact' : 'portfolio-island__segment'} text-[12px] border border-[color:var(--border)] bg-[color:var(--surface)]/95 min-w-0`;
   const actionBtnClass = "portfolio-island__segment-action btn btn-ghost btn-xs flex items-center gap-1 text-[11px]";
   const primaryActionClass = "portfolio-island__segment-action btn btn-accent btn-xs flex items-center gap-2 text-[11px] font-semibold shadow-md shadow-[color:var(--accent)]/25";
   const dangerActionClass = "portfolio-island__segment-action btn btn-danger btn-xs flex items-center gap-2 text-[11px] font-semibold";
-  const iconButtonBase = "btn btn-ghost p-2 w-9 h-9 inline-flex items-center justify-center rounded-md text-[color:var(--fg-muted)]";
+  const iconButtonBase = "btn btn-ghost px-3 py-2 inline-flex items-center justify-center rounded-md text-[color:var(--fg-muted)] whitespace-nowrap";
+  const shouldShowLabels = !compactMode;
+  const renderLabel = (text: string) => shouldShowLabels ? <span>{text}</span> : <span className="sr-only">{text}</span>;
   const statusChip = (
-    <div className="portfolio-island__status-chip inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full border border-[color:var(--border)] bg-[color:var(--muted)]/30 text-[11px] font-semibold text-[color:var(--fg-muted)] w-full sm:w-auto justify-center text-center whitespace-normal break-words">
+    <div className="portfolio-island__status-chip inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full border border-[color:var(--border)] bg-[color:var(--muted)]/30 text-[11px] font-semibold text-[color:var(--fg-muted)] w-full sm:w-auto justify-center text-center whitespace-normal break-words min-w-0">
       {saving ? (
         <>
           <span className="w-3 h-3 border-2 border-[color:var(--border)] border-t-[color:var(--accent)] rounded-full animate-spin"></span>
@@ -129,17 +134,17 @@ export default function PortfolioIsland(): React.ReactElement | null {
       style={containerStyle}
     >
       <div
-        className={`portfolio-island__surface surface relative border border-[color:var(--border)] rounded-2xl px-4 pt-8 pb-9 sm:pt-9 sm:pb-12 lg:pb-10 sm:pr-10 shadow-lg bg-[color:var(--surface)]/85 transition w-full ${hasSelection ? 'ring-2 ring-[color:var(--accent)]/45 ring-offset-2 ring-offset-[color:var(--bg,transparent)]' : ''}`}
+        className={`portfolio-island__surface surface relative border border-[color:var(--border)] rounded-2xl ${compactMode ? 'px-3 pt-4 pb-4 sm:pt-5 sm:pb-6 lg:pb-5 sm:pr-5' : 'px-4 pt-5 pb-5 sm:pt-6 sm:pb-6 lg:pb-5 sm:pr-6'} shadow-lg bg-[color:var(--surface)]/85 transition w-full overflow-x-hidden ${hasSelection ? 'ring-2 ring-[color:var(--accent)]/45 ring-offset-2 ring-offset-[color:var(--bg,transparent)]' : 'ring-2 ring-[color:var(--accent)]/25 ring-offset-2 ring-offset-[color:var(--bg,transparent)]'} ${compactMode ? 'portfolio-island__surface--compact' : ''}`}
         style={islandStyle}
       >
-        <div className="portfolio-island__row mt-1 flex flex-wrap w-full gap-3 items-stretch sm:items-start">
+        <div className="portfolio-island__row mt-1 flex flex-wrap w-full gap-2 items-stretch sm:items-start">
           <div className="portfolio-island__project-card flex flex-1 flex-col gap-2 min-w-0">
             <div className="portfolio-island__project-row">
               <div
                 role="button"
                 tabIndex={0}
                 aria-label={selectedProject ? `View ${selectedProject.name} in portfolios list` : 'View portfolios list'}
-                className="portfolio-island__project-button flex items-center gap-3 justify-between rounded-xl border border-[color:var(--border)] bg-[color:var(--surface)]/70 px-4 py-2 shadow-sm hover:border-[color:var(--accent)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--accent)] transition"
+                className="portfolio-island__project-button rounded-xl border border-[color:var(--border)] bg-[color:var(--surface)]/70 px-4 py-2 shadow-sm hover:border-[color:var(--accent)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--accent)] transition"
                 onClick={handleGoToList}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' || e.key === ' ') {
@@ -152,9 +157,9 @@ export default function PortfolioIsland(): React.ReactElement | null {
                   <span className="text-base font-semibold leading-tight truncate">
                     {selectedProject ? selectedProject.name : 'No Portfolio Selected'}
                   </span>
-                  <span className="text-xs text-[color:var(--fg-muted)]">View all portfolios</span>
+                  <span className="text-xs text-[color:var(--fg-muted)]">{selectedProject?.description}</span>
                 </div>
-                <div className="portfolio-island__project-actions flex flex-nowrap items-center gap-1">
+                <div className="portfolio-island__project-actions flex flex-wrap items-center gap-1">
                   <button
                     type="button"
                     className={iconButtonBase}
@@ -192,35 +197,38 @@ export default function PortfolioIsland(): React.ReactElement | null {
                   >
                     <Cloud size={16} />
                   </button>
+                  <button
+                    type="button"
+                    className={`${iconButtonBase} relative`}
+                    title="Notifications"
+                    aria-label="Notifications"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      try {
+                        if (location.pathname !== '/') {
+                          pendingHighlightRef.current = true;
+                          navigate('/');
+                        } else {
+                          highlightNotifications();
+                        }
+                      } catch { /* ignore */ }
+                    }}
+                  >
+                    {notifications && notifications.length > 0 ? <BellDot size={16} /> : <Bell size={16} />}
+                    {notifications && notifications.length > 0 && (
+                      <span className="portfolio-island__badge inline-flex items-center justify-center" aria-label={`${notifications.length} unread notifications`}>
+                        {notifications.length}
+                      </span>
+                    )}
+                  </button>
                 </div>
               </div>
             </div>
           </div>
-          <div className="portfolio-island__toolbar flex flex-1 sm:flex-[0_0_auto] flex-wrap items-center gap-2 w-full sm:w-auto justify-end">
+          <div className="portfolio-island__toolbar flex flex-1 sm:flex-[0_0_auto] flex-wrap items-center gap-2 w-full sm:w-auto justify-end min-w-0">
             {statusChip}
-            <button
-              type="button"
-              title="Notifications"
-              aria-label="Notifications"
-              className={`${iconButtonBase} relative`}
-              onClick={() => {
-                try {
-                  if (location.pathname !== '/') {
-                    pendingHighlightRef.current = true;
-                    navigate('/');
-                  } else {
-                    highlightNotifications();
-                  }
-                } catch { /* ignore */ }
-              }}
-            >
-              {notifications && notifications.length > 0 ? <BellDot size={16} /> : <Bell size={16} />}
-              {notifications && notifications.length > 0 && (
-                <span className="portfolio-island__badge absolute inline-flex items-center justify-center min-w-4 h-4 px-1 text-[10px] rounded-full bg-[color:var(--accent)] text-black border border-[color:var(--accent-700)]">{notifications.length}</span>
-              )}
-            </button>
             {pinned && (
-              <div className="portfolio-island__controls-slider flex items-center gap-2 px-2">
+              <div className="portfolio-island__controls-slider flex flex-1 items-center gap-2 px-2 min-w-0">
                 <label className="text-[10px] text-[color:var(--fg-muted)] whitespace-nowrap">Opacity</label>
                 <input
                   aria-label="Portfolio island opacity"
@@ -230,7 +238,7 @@ export default function PortfolioIsland(): React.ReactElement | null {
                   max={100}
                   step={5}
                   value={pct}
-                  className="accent-range w-32"
+                  className="accent-range flex-1 min-w-0"
                   style={sliderStyle}
                   onChange={(e) => {
                     const raw = Number((e.target as HTMLInputElement).value);
@@ -258,6 +266,21 @@ export default function PortfolioIsland(): React.ReactElement | null {
             <button
               type="button"
               className={iconButtonBase}
+              title={compactMode ? 'Expand island layout' : 'Compact island layout'}
+              aria-pressed={compactMode}
+              onClick={() => {
+                setCompactMode(prev => {
+                  const next = !prev;
+                  try { localStorage.setItem('py_island_compact', next ? '1' : '0'); } catch { /* ignore */ }
+                  return next;
+                });
+              }}
+            >
+              {compactMode ? <Expand size={16} /> : <Minimize2 size={16} />}
+            </button>
+            <button
+              type="button"
+              className={iconButtonBase}
               disabled={!hasSelection}
               title="Close current portfolio"
               onClick={() => {
@@ -271,13 +294,13 @@ export default function PortfolioIsland(): React.ReactElement | null {
           </div>
         </div>
 
-        <div className="mt-3 portfolio-island__row flex flex-wrap items-stretch gap-2 w-full mb-4">
+        <div className="mt-1.5 portfolio-island__row flex flex-wrap items-stretch gap-1 w-full">
           {/* Preview section: now grouped with Compile & Files */}
           <div className={segmentClass}>
             <div className="portfolio-island__segment-label">
               <span className={labelClass}>Preview</span>
             </div>
-            <div className="portfolio-island__segment-actions">
+            <div className="portfolio-island__segment-actions min-w-0">
               {previewRunningState ? (
                 <>
                   <button
@@ -290,7 +313,7 @@ export default function PortfolioIsland(): React.ReactElement | null {
                     }}
                   >
                     <Square size={14} className="text-[color:var(--danger)]" aria-hidden="true" />
-                    <span>Stop</span>
+                    {renderLabel('Stop')}
                   </button>
 
                   {previewLocalState && (
@@ -308,7 +331,7 @@ export default function PortfolioIsland(): React.ReactElement | null {
                         }}
                       >
                         <RefreshCw size={14} />
-                        <span>Reload</span>
+                        {renderLabel('Reload')}
                       </button>
                       <a
                         title="Open preview in browser"
@@ -326,17 +349,17 @@ export default function PortfolioIsland(): React.ReactElement | null {
                         }}
                       >
                         <Eye size={14} />
-                        <span>Open</span>
+                        {renderLabel('Open')}
                       </a>
                       {previewLanState ? (
                         <a title="Open LAN preview" aria-label="Open LAN preview" href={previewLanState} target="_blank" rel="noreferrer" className={actionBtnClass}>
                           <ExternalLink size={14} />
-                          <span>Open LAN</span>
+                          {renderLabel('Open LAN')}
                         </a>
                       ) : (
                         <button type="button" title="Open LAN preview (not available)" aria-label="Open LAN preview" className={actionBtnClass} disabled>
                           <ExternalLink size={14} />
-                          <span>Open LAN</span>
+                          {renderLabel('Open LAN')}
                         </button>
                       )}
                     </>
@@ -356,7 +379,7 @@ export default function PortfolioIsland(): React.ReactElement | null {
                   }}
                 >
                   <Play size={14} />
-                  <span>Start</span>
+                  {renderLabel('Start')}
                 </button>
               )}
               <button
@@ -368,7 +391,7 @@ export default function PortfolioIsland(): React.ReactElement | null {
                 onClick={() => handleOpenSettings('preview')}
               >
                 <SlidersHorizontal size={14} />
-                <span>Preview Settings</span>
+                {renderLabel('Preview Settings')}
               </button>
             </div>
           </div>
@@ -378,7 +401,7 @@ export default function PortfolioIsland(): React.ReactElement | null {
             <div className="portfolio-island__segment-label">
               <span className={labelClass}>Compile</span>
             </div>
-            <div className="portfolio-island__segment-actions">
+            <div className="portfolio-island__segment-actions min-w-0">
               <button
                 type="button"
                 className={primaryActionClass}
@@ -391,7 +414,7 @@ export default function PortfolioIsland(): React.ReactElement | null {
                 title="Export project"
               >
                 <ExternalLink size={14} />
-                Export
+                {renderLabel('Export')}
               </button>
               <button
                 type="button"
@@ -401,7 +424,7 @@ export default function PortfolioIsland(): React.ReactElement | null {
                 title="Build settings"
               >
                 <SlidersHorizontal size={14} />
-                <span>Build Settings</span>
+                {renderLabel('Build Settings')}
               </button>
             </div>
           </div>
@@ -410,7 +433,7 @@ export default function PortfolioIsland(): React.ReactElement | null {
             <div className="portfolio-island__segment-label">
               <span className={labelClass}>Files</span>
             </div>
-            <div className="portfolio-island__segment-actions">
+            <div className="portfolio-island__segment-actions min-w-0">
               {user && !isCloudProject && (
                 <button
                   type="button"
@@ -429,7 +452,7 @@ export default function PortfolioIsland(): React.ReactElement | null {
                   ) : (
                     <UploadCloud size={14} />
                   )}
-                  <span>{syncingSelected ? 'Syncing…' : 'Sync to cloud'}</span>
+                  {renderLabel(syncingSelected ? 'Syncing…' : 'Sync to cloud')}
                 </button>
               )}
               <button
@@ -444,7 +467,7 @@ export default function PortfolioIsland(): React.ReactElement | null {
                 title="Open project folder"
               >
                 <FolderOpen size={14} />
-                Open
+                {renderLabel('Open')}
               </button>
 
               <button
@@ -462,7 +485,7 @@ export default function PortfolioIsland(): React.ReactElement | null {
                 title={isCloudProject ? 'Save to cloud' : 'Save project'}
               >
                 <Save size={14} />
-                {isCloudProject ? 'Sync' : 'Save'}
+                {renderLabel(isCloudProject ? 'Sync' : 'Save')}
               </button>
               <button
                 type="button"
@@ -480,7 +503,7 @@ export default function PortfolioIsland(): React.ReactElement | null {
                     </span>
                   )}
                 </span>
-                Autosave
+                {renderLabel('Autosave')}
               </button>
               <button
                 type="button"
@@ -490,14 +513,14 @@ export default function PortfolioIsland(): React.ReactElement | null {
                 title="Save settings"
               >
                 <SlidersHorizontal size={14} />
-                Save settings
+                {renderLabel('Save settings')}
               </button>
             </div>
           </div>
         </div>
 
         {!hasSelection && (
-          <p className="mt-3 text-xs text-[color:var(--fg-muted)]">
+          <p className="mt-2 text-xs text-[color:var(--fg-muted)]">
             Pick a portfolio from Home to enable the quick-launch controls.
           </p>
         )}

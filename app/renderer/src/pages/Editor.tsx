@@ -1393,7 +1393,7 @@ export default function EditorPage() {
       </section>
 
       {/* Theme subsection under Portfolio Canvas */}
-      <div className="mt-4 relative surface rounded-2xl border border-[color:var(--border)] shadow-lg bg-[color:var(--surface)]/80 p-4 overflow-hidden">
+      <div className="mt-4 surface rounded-2xl border border-[color:var(--border)] shadow-lg bg-[color:var(--surface)] p-4">
         <div className="w-full">
           <div>
             <p className="section-title">Theme</p>
@@ -1401,55 +1401,66 @@ export default function EditorPage() {
           </div>
 
           {/* Current theme + settings subsection */}
-          <div className="mt-4 flex flex-wrap items-center gap-3">
-            <div className="flex items-center gap-3 px-3 py-2 rounded-lg border border-[color:var(--border)] bg-[color:var(--surface)]/70 shadow-sm">
-              <div>
-                <p className="text-[10px] uppercase tracking-wide text-[color:var(--fg-muted)]">Current theme</p>
-                <p className="mt-1 text-sm">{activeTheme?.name ?? 'Default'}</p>
+          <div className="mt-4 flex flex-col gap-4 md:flex-row md:items-stretch">
+            <div className="flex-1 min-w-0 rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface-soft)]/60 p-4 shadow-sm">
+              <p className="text-[10px] uppercase tracking-wide text-[color:var(--fg-muted)]">Current theme</p>
+              <p className="mt-2 text-base font-medium text-[color:var(--fg)] whitespace-normal break-words">{activeTheme?.name ?? 'Default'}</p>
+              <div className="mt-4 flex flex-wrap items-center gap-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="w-10 h-10 rounded-md border border-[color:var(--border)] flex-shrink-0" style={{ background: activeTheme?.colors?.primary || '#111827' }} title="Primary color" />
+                  <div className="w-10 h-10 rounded-md border border-[color:var(--border)] flex-shrink-0" style={{ background: activeTheme?.colors?.secondary || '#f3f4f6' }} title="Secondary color" />
+                </div>
               </div>
             </div>
-
-            <div className="flex items-center gap-3 px-3 py-2 rounded-lg border border-[color:var(--border)] bg-[color:var(--surface)]/70 shadow-sm">
-              <div className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-md border border-[color:var(--border)]" style={{ background: activeTheme?.colors?.primary || '#111827' }} title="Primary color" />
-                <div className="w-8 h-8 rounded-md border border-[color:var(--border)]" style={{ background: activeTheme?.colors?.secondary || '#f3f4f6' }} title="Secondary color" />
-              </div>
-              <div>
-                <button
-                  className="btn btn-ghost btn-sm flex items-center gap-2"
-                  onClick={() => { if (selectedProject) openSettings({ projectId: selectedProject.id, section: 'theme' }); }}
-                  title="Open theme settings"
-                >
-                  <Settings size={14} />
-                  <span>Theme settings</span>
-                </button>
-              </div>
+            <div className="min-w-0 w-full md:w-auto flex items-start md:items-center justify-end">
+              <button
+                className="btn btn-ghost btn-sm flex items-center gap-2 w-full md:w-auto justify-center"
+                onClick={() => { if (selectedProject) openSettings({ projectId: selectedProject.id, section: 'theme' }); }}
+                title="Open theme settings"
+              >
+                <Settings size={14} />
+                <span>Theme settings</span>
+              </button>
             </div>
           </div>
 
           {/* Color hex controls subsection */}
           {activeTheme && selectedProject && (
             <div className="mt-4 px-3 py-2 rounded-lg border border-[color:var(--border)] bg-[color:var(--surface)]/70 shadow-sm">
-              <p className="text-[10px] uppercase tracking-wide text-[color:var(--fg-muted)]">Colors</p>
-              <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="flex flex-col gap-1">
+                <p className="text-xs uppercase tracking-wide text-[color:var(--fg-muted)]">Colors</p>
+                <p className="text-sm text-[color:var(--fg-muted)]">Adjust theme palette values applied across the editor.</p>
+              </div>
+              <div className="mt-4 grid gap-4 md:grid-cols-2">
                 {Object.keys(activeTheme.colors).map((k) => {
                   const key = k as keyof typeof activeTheme.colors;
                   const val = activeTheme.colors[key] as string;
+                  const inputId = `theme-color-${key}`;
                   return (
-                    <label key={k} className="flex items-center gap-3 text-xs">
-                      <span className="w-28 text-[10px] uppercase tracking-wide text-[color:var(--fg-muted)]">{key}</span>
+                    <div key={k} className="flex flex-col gap-3">
+                      <div className="flex flex-wrap items-center gap-3">
+                        <span className="text-xs font-medium uppercase tracking-wide text-[color:var(--fg-muted)]">{key}</span>
+                        <button
+                          type="button"
+                          className="w-10 h-10 rounded-md border border-[color:var(--border)]"
+                          style={{ background: val }}
+                          aria-label={`Select ${key} color`}
+                          onClick={() => document.getElementById(inputId)?.click()}
+                        />
+                        <input
+                          id={inputId}
+                          type="color"
+                          className="sr-only"
+                          value={val}
+                          onChange={(e) => updateTheme(selectedProject.id, activeTheme.themeId, { colors: { [key]: e.target.value } as any })}
+                        />
+                      </div>
                       <input
-                        type="color"
-                        className="w-9 h-9 rounded border border-[color:var(--border)]"
+                        className="input text-sm w-full"
                         value={val}
                         onChange={(e) => updateTheme(selectedProject.id, activeTheme.themeId, { colors: { [key]: e.target.value } as any })}
                       />
-                      <input
-                        className="input text-sm w-auto max-w-[10rem]"
-                        value={val}
-                        onChange={(e) => updateTheme(selectedProject.id, activeTheme.themeId, { colors: { [key]: e.target.value } as any })}
-                      />
-                    </label>
+                    </div>
                   );
                 })}
               </div>

@@ -19,32 +19,27 @@ export default function AccountDashboard({
     highlight?: boolean;
 }) {
     return (
-        <div className={`surface border border-[color:var(--border)] rounded-2xl p-4 space-y-4 shadow-lg shadow-black/14 bg-[color:var(--surface)]/80 ${highlight ? 'highlight-pulse' : ''}`}>
-            <div className="flex items-center justify-between gap-3">
-                <div className="flex items-center gap-3">
-                    {/* <div className="w-10 h-10 rounded-full bg-[color:var(--muted)]/40 border border-[color:var(--border)] flex items-center justify-center text-sm font-semibold">
-                        {userDisplay ? userDisplay.charAt(0).toUpperCase() : "U"}
-                    </div> */}
-                    <div>
-                        <p className="section-title">Account dashboard</p>
-                        <p className="text-sm text-[color:var(--fg)] mt-0.5 leading-tight truncate max-w-[18rem]">
-                            <span className="font-medium">{userDisplay}</span>
-                        </p>
-                    </div>
+        <div className={`surface border border-[color:var(--border)] rounded-2xl p-4 shadow-lg shadow-black/14 bg-[color:var(--surface)]/80 account-dashboard ${highlight ? 'highlight-pulse' : ''}`}>
+            <div className="account-dashboard__header">
+                <div className="account-dashboard__identity">
+                    <p className="section-title">Account dashboard</p>
+                    <p className="text-sm text-[color:var(--fg)] mt-0.5 leading-tight break-words">
+                        <span className="font-medium">{userDisplay}</span>
+                    </p>
                 </div>
-                <div className="flex items-center gap-2">
-                    <button className="btn btn-sm shadow-sm" onClick={onOpenSettings} title="Open account settings">
+                <div className="account-dashboard__actions">
+                    <button className="btn btn-sm shadow-sm account-dashboard__settings-btn" onClick={onOpenSettings} title="Open account settings">
                         <SettingsIcon size={14} />
                         <span className="ml-2">Account Settings</span>
                     </button>
                 </div>
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
-                <div className="rounded-xl border border-[color:var(--border)] bg-[color:var(--muted)]/40 p-4">
+            <div className="account-dashboard__stats">
+                <div className="account-dashboard__stat">
                     <div className="text-xs text-[color:var(--fg-muted)] uppercase tracking-wide">Cloud usage</div>
                     <div className="mt-2 text-lg font-semibold">{usageMB} <span className="text-xs text-[color:var(--fg-muted)]">/ {maxStorageMB} MB</span></div>
                 </div>
-                <div className="rounded-xl border border-[color:var(--border)] bg-[color:var(--muted)]/40 p-4">
+                <div className="account-dashboard__stat">
                     <div className="text-xs text-[color:var(--fg-muted)] uppercase tracking-wide">Cloud projects</div>
                     <div className="mt-2 text-lg font-semibold">{projectCount} <span className="text-xs text-[color:var(--fg-muted)]">/ {projectQuota}</span></div>
                 </div>
