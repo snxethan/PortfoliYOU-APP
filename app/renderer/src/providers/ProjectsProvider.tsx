@@ -330,9 +330,21 @@ function flushQueuedStore() {
 		/* ignore storage failures */
 	}
 }
-function writeStore(list: LocalProject[]) {
+function writeStore(list: LocalProject[], immediate = false) {
 	const locals = list.filter(p => (p.storage ?? 'local') === 'local');
 	queuedStorePayload = locals;
+	if (immediate) {
+		if (pendingStoreWrite !== null) {
+			if (typeof window !== 'undefined' && typeof window.cancelIdleCallback === 'function') {
+				window.cancelIdleCallback(pendingStoreWrite as unknown as number);
+			} else {
+				clearTimeout(pendingStoreWrite as unknown as number);
+			}
+			pendingStoreWrite = null;
+		}
+		flushQueuedStore();
+		return;
+	}
 	if (pendingStoreWrite !== null) return;
 	const schedule = () => {
 		pendingStoreWrite = null;
@@ -370,6 +382,8 @@ function pushRevisionSnapshot(proj: LocalProject) {
 
 export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 	const [projects, setProjects] = useState<LocalProject[]>([]);
+	const projectsRef = useRef<LocalProject[]>(projects);
+	useEffect(() => { projectsRef.current = projects; }, [projects]);
 	const { add: notify } = useNotifications();
 	const notifyRef = useRef(notify);
 	useEffect(() => { notifyRef.current = notify; }, [notify]);
@@ -607,7 +621,24 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 						setCloudProjectsCount(snapshot.size);
 						setProjects(prev => {
 							const locals = prev.filter(p => (p.storage ?? 'local') === 'local');
-							const merged = [...cloudList, ...locals];
+							// Merge cloud projects, but preserve local cloud projects if they're newer
+							const cloudMap = new Map(cloudList.map(p => [p.id, p]));
+							const existingClouds = prev.filter(p => (p.storage ?? 'local') === 'cloud');
+							const mergedClouds = existingClouds.map(existing => {
+								const fromServer = cloudMap.get(existing.id);
+								if (!fromServer) return existing;
+								// Keep local version if it's newer (optimistic update pending sync)
+								const localTime = existing.updatedAt || '';
+								const serverTime = fromServer.updatedAt || '';
+								return localTime > serverTime ? existing : fromServer;
+							});
+							// Add any cloud projects from server that we don't have locally
+							for (const cloud of cloudList) {
+								if (!existingClouds.some(p => p.id === cloud.id)) {
+									mergedClouds.push(cloud);
+								}
+							}
+							const merged = [...mergedClouds, ...locals];
 							writeStore(merged);
 							return merged;
 						});
@@ -1540,7 +1571,7 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 			autosaveEnabled,
 			setAutosaveEnabled: (v: boolean) => { try { localStorage.setItem('py_autosave_enabled', v ? '1' : '0'); } catch { /* noop */ } setAutosaveEnabled(v); try { notify({ type: 'info', message: v ? 'Autosave enabled' : 'Autosave disabled', persistent: false }); } catch { /* ignore */ } },
 			getPageItems: (projectId: string, pageId: string) => {
-				const proj = projects.find(p => p.id === projectId); if (!proj) return [];
+				const proj = projectsRef.current.find(p => p.id === projectId); if (!proj) return [];
 				const page = proj.pages[pageId]; if (!page) return [];
 				const ids = page.widgets || [];
 				const out: Array<{ id: string; x: number; y: number; w: number; h: number; z: number; title?: string; type?: string; props?: unknown; schemaVersion?: number; pinned?: boolean; locked?: boolean; }> = [];
@@ -1568,55 +1599,72 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 				return out;
 			},
 			setPageItems: (projectId: string, pageId: string, items) => {
-				const idx = projects.findIndex(p => p.id === projectId); if (idx < 0) return;
-				const proj = projects[idx];
-				const page = proj.pages[pageId]; if (!page) return;
-				const nowStr = now();
-				// Update or create widgets for this page
-				const nextWidgets: Record<string, Widget> = { ...proj.widgets };
-				for (let i = 0; i < items.length; i++) {
-					const it = items[i];
-					const existing = nextWidgets[it.id];
-					const createdAt = existing?.createdAt || nowStr;
-					const schemaVersion = typeof it.schemaVersion === 'number' ? it.schemaVersion : (typeof existing?.schemaVersion === 'number' ? existing?.schemaVersion : 1);
-					nextWidgets[it.id] = {
-						widgetId: it.id,
-						type: it.type || existing?.type || 'custom',
-						slot: existing?.slot || 'default',
-						order: i,
-						props: it.props ?? existing?.props ?? {},
-						layout: {
-							x: it.x, y: it.y, w: it.w, h: it.h, z: it.z,
-							pinned: !!it.pinned, locked: !!it.locked, title: it.title ?? ((existing?.layout as { title?: string } | undefined)?.title) ?? undefined,
-						},
-						schemaVersion,
-						createdAt,
+				setProjects((prev) => {
+					const idx = prev.findIndex(p => p.id === projectId);
+					if (idx < 0) return prev;
+					const proj = prev[idx];
+					const page = proj.pages[pageId];
+					if (!page) return prev;
+					const nowStr = now();
+					const nextWidgets: Record<string, Widget> = { ...proj.widgets };
+					for (let i = 0; i < items.length; i++) {
+						const it = items[i];
+						const existing = nextWidgets[it.id];
+						const createdAt = existing?.createdAt || nowStr;
+						const schemaVersion = typeof it.schemaVersion === 'number'
+							? it.schemaVersion
+							: (typeof existing?.schemaVersion === 'number' ? existing?.schemaVersion : 1);
+						nextWidgets[it.id] = {
+							widgetId: it.id,
+							type: it.type || existing?.type || 'custom',
+							slot: existing?.slot || 'default',
+							order: i,
+							props: it.props ?? existing?.props ?? {},
+							layout: {
+								x: it.x, y: it.y, w: it.w, h: it.h, z: it.z,
+								pinned: !!it.pinned, locked: !!it.locked,
+								title: it.title ?? ((existing?.layout as { title?: string } | undefined)?.title) ?? undefined,
+							},
+							schemaVersion,
+							createdAt,
+							updatedAt: nowStr,
+						} as Widget;
+					}
+					const updatedPage: Page = { ...page, widgets: items.map(it => it.id), order: page.order, updatedAt: nowStr };
+					const referenced = new Set<string>();
+					for (const id of updatedPage.widgets) referenced.add(id);
+					for (const pid of proj.pageOrder) {
+						if (pid === pageId) continue;
+						const pg = proj.pages[pid];
+						for (const id of (pg.widgets || [])) referenced.add(id);
+					}
+					const compactWidgets: Record<string, Widget> = {};
+					for (const [wid, w] of Object.entries(nextWidgets)) {
+						if (referenced.has(wid)) compactWidgets[wid] = w;
+					}
+					const nextProj: LocalProject = {
+						...proj,
+						pages: { ...proj.pages, [pageId]: updatedPage },
+						widgets: compactWidgets,
 						updatedAt: nowStr,
-					} as Widget;
-				}
-				// Page widgets list in the order provided
-				const updatedPage: Page = { ...page, widgets: items.map(it => it.id), order: page.order, updatedAt: nowStr };
-				// Remove orphan widgets not referenced by any page
-				const referenced = new Set<string>();
-				// include current page changes
-				for (const id of updatedPage.widgets) referenced.add(id);
-				// include other pages
-				for (const pid of proj.pageOrder) {
-					if (pid === pageId) continue;
-					const pg = proj.pages[pid];
-					for (const id of (pg.widgets || [])) referenced.add(id);
-				}
-				const compactWidgets: Record<string, Widget> = {};
-				for (const [wid, w] of Object.entries(nextWidgets)) {
-					if (referenced.has(wid)) compactWidgets[wid] = w;
-				}
-				const nextProj: LocalProject = {
-					...proj,
-					pages: { ...proj.pages, [pageId]: updatedPage },
-					widgets: compactWidgets,
-					updatedAt: nowStr,
-				} as LocalProject;
-				const next = [...projects]; next[idx] = nextProj; setProjects(next); writeStore(next);
+					} as LocalProject;
+					const next = [...prev];
+					next[idx] = nextProj;
+					writeStore(next, true); // Immediate write for widget changes
+					if ((nextProj.storage ?? 'local') === 'local' && nextProj._filePath && window.api?.writeFile) {
+						void (async () => {
+							try {
+								const base64 = await buildArchiveBase64(nextProj);
+								if (window.api!.writeFileBytes) {
+									await window.api!.writeFileBytes({ filePath: nextProj._filePath!, dataBase64: base64 });
+								} else {
+									await window.api!.writeFile({ filePath: nextProj._filePath!, data: base64, encoding: 'base64' });
+								}
+							} catch { /* ignore */ }
+						})();
+					}
+					return next;
+				});
 			},
 			setActiveTheme: (projectId: string, themeId: string) => {
 				const idx = projects.findIndex(p => p.id === projectId); if (idx < 0) return;

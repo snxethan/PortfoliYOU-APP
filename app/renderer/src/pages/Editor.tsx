@@ -145,26 +145,33 @@ export default function EditorPage() {
   const suppressHydrateRef = useRef(false);
   const dragInProgressRef = useRef(false);
   const autoPersistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastLoadedSignatureRef = useRef<string>('');
   const replaceItems = useCallback((next: GridItem[]) => {
     itemsRef.current = next;
     setItems(next);
-    lastPersistedSignatureRef.current = snapshotSignature(next);
-  }, [snapshotSignature]);
+    lastLoadedSignatureRef.current = JSON.stringify(serializeGridItems(next));
+  }, []);
   const persistItems = useCallback((snapshot?: GridItem[]) => {
     if (!selectedProject || !currentPageId) return;
+    const source = snapshot ?? itemsRef.current;
+    const serialized = serializeGridItems(source);
+    const signature = JSON.stringify(serialized);
+
+    if (lastPersistedSignatureRef.current === signature) {
+      // Already persisted, but ensure loaded signature matches
+      lastLoadedSignatureRef.current = signature;
+      return;
+    }
+
+    suppressHydrateRef.current = true;
     try {
-      suppressHydrateRef.current = true;
-      const source = snapshot ?? itemsRef.current;
-      const serialized = serializeGridItems(source);
-      const signature = JSON.stringify(serialized);
-      if (lastPersistedSignatureRef.current === signature) {
-        suppressHydrateRef.current = false;
-        return;
-      }
       setPageItems(selectedProject.id, currentPageId, serialized);
       lastPersistedSignatureRef.current = signature;
-    } catch {
-      suppressHydrateRef.current = false;
+      // Update loaded signature to match what we just saved
+      lastLoadedSignatureRef.current = signature;
+    } finally {
+      // Keep suppress flag set; it will be cleared by the load effect after comparing signatures
+      // This prevents the effect from re-rendering unnecessarily when the provider updates
     }
   }, [selectedProject?.id, currentPageId, setPageItems]);
   const cancelAutoPersist = useCallback(() => {
@@ -205,26 +212,37 @@ export default function EditorPage() {
   const getPageItemsRef = useRef(getPageItems);
   useEffect(() => { getPageItemsRef.current = getPageItems; }, [getPageItems]);
 
-  const currentPageRevision = selectedProject && currentPageId
-    ? (selectedProject.pages?.[currentPageId]?.updatedAt ?? null)
-    : null;
-
-  // Load items from provider whenever project/page changes or page data updates
+  // Load items from provider only when project/page selection changes, not on every update
+  // The local state is the source of truth; suppressHydrateRef prevents unnecessary reloads
+  // when we've just persisted changes and the provider state updates as a result.
   useEffect(() => {
     if (!selectedProject || !currentPageId) {
-      suppressHydrateRef.current = false;
+      lastLoadedSignatureRef.current = '';
       replaceItems([]);
-      return;
-    }
-    if (suppressHydrateRef.current) {
-      suppressHydrateRef.current = false;
       return;
     }
     const getter = getPageItemsRef.current;
     if (!getter) return;
     const loaded = getter(selectedProject.id, currentPageId) as GridItem[];
-    replaceItems(loaded);
-  }, [selectedProject?.id, currentPageId, currentPageRevision, replaceItems]);
+    const loadedSignature = JSON.stringify(serializeGridItems(loaded));
+
+    // Skip if we're in the middle of persisting AND the data hasn't changed
+    if (suppressHydrateRef.current && loadedSignature === lastLoadedSignatureRef.current) {
+      suppressHydrateRef.current = false;
+      return;
+    }
+
+    suppressHydrateRef.current = false;
+
+    // Only replace if the data actually changed from what we last loaded
+    if (loadedSignature !== lastLoadedSignatureRef.current) {
+      replaceItems(loaded);
+    } else {
+      // Even if we skip, ensure the signature is updated
+      lastLoadedSignatureRef.current = loadedSignature;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedProject?.id, currentPageId]);
 
   const presentWidgetTypes = useMemo(() => {
     const set = new Set<string>();

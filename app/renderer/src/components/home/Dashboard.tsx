@@ -17,12 +17,12 @@ export default function Dashboard({
                 <div className="portfolio-workspace-card__identity">
                     <div className="portfolio-workspace-card__logo-block relative">
                         <img
-                            src="/icon.png"
+                            src="./icon.png"
                             onError={(e) => {
                                 const img = e.currentTarget as HTMLImageElement;
                                 if (!img.dataset.fallback) {
                                     img.dataset.fallback = '1';
-                                    img.src = '/icon.svg';
+                                    img.src = './icon.svg';
                                 }
                             }}
                             alt="Portfoli-YOU icon"

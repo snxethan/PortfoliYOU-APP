@@ -188,12 +188,12 @@ export default function FrameBar() {
             <div className="window-frame__center flex items-center justify-center gap-2" aria-hidden={false}>
                 <div className="relative flex items-center gap-2">
                     <img
-                        src="/icon.png"
+                        src="./icon.png"
                         alt="Portfoli-YOU icon"
                         className="w-5 h-5 rounded-sm object-cover"
                         onError={(e) => {
                             const t = e.currentTarget as HTMLImageElement;
-                            if (!t.dataset.fallback) { t.dataset.fallback = '1'; t.src = '/icon.svg'; }
+                            if (!t.dataset.fallback) { t.dataset.fallback = '1'; t.src = './icon.svg'; }
                         }}
                     />
                     <div className="text-[color:var(--fg-muted)] text-sm font-semibold">Portfoli-YOU</div>

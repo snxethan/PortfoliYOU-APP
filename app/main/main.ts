@@ -11,6 +11,7 @@ import http from "node:http";
 import fs from "node:fs/promises";
 
 import { app, BrowserWindow, shell, ipcMain, dialog, Menu, clipboard } from "electron";
+import { autoUpdater } from 'electron-updater';
 import { APP_NAME, APP_ID, resolveAppIconPath, brandTitle } from "../shared/brand";
 
 import { startStaticServer, stopStaticServer, isServerRunning } from './staticServer';
@@ -148,6 +149,13 @@ function create() {
   }
 
   // App identity already set above via APP_ID
+  // Auto-update: check on startup in production
+  try {
+    if (!isDev) {
+      autoUpdater.autoDownload = true;
+      autoUpdater.checkForUpdatesAndNotify();
+    }
+  } catch { /* ignore auto-update errors in dev */ }
 
   // Handle new window requests (popups)
   win.webContents.setWindowOpenHandler(({ url }) => {
