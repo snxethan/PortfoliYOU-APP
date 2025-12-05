@@ -26,7 +26,7 @@ export function AssetsProvider({ children }: { children: React.ReactNode }) {
     const [list, setList] = useState<AssetMeta[]>([]);
     const urlsRef = useRef<Record<string, string>>({});
     const { add: notify } = useNotifications();
-    const { selectedProject } = useProjects();
+    const { selectedProject, projects } = useProjects();
     const LARGE_IMAGE_THRESHOLD = 2 * 1024 * 1024; // 2MB
     function formatBytes(bytes: number) {
         if (bytes < 1024) return bytes + ' B';
@@ -40,8 +40,10 @@ export function AssetsProvider({ children }: { children: React.ReactNode }) {
         const items = await idbAllMeta();
         // Only show assets that belong to the currently selected project
         const pid = selectedProject?.id ?? null;
+        console.info('AssetsProvider.refresh: pid=', pid, 'totalAssets=', items.length);
         if (pid) {
             setList(items.filter(it => it.projectId === pid));
+            console.info('AssetsProvider.refresh: matched=', items.filter(it => it.projectId === pid).length);
         } else {
             // If no project selected, show no assets
             setList([]);
@@ -54,10 +56,21 @@ export function AssetsProvider({ children }: { children: React.ReactNode }) {
         const results: AssetMeta[] = [];
         if (!files || (Array.isArray(files) && files.length === 0) || ('length' in (files as FileList) && (files as FileList).length === 0)) return results;
         const arr = Array.from(files as File[]);
+        console.info('AssetsProvider.addFiles: selectedProjectId=', selectedProject?.id, 'fileCount=', arr.length);
         for (const file of arr) {
             const hash = await computeHash(file);
             const existing = await idbGet<AssetMeta>(stores.STORE_META, hash);
-            if (existing) { results.push(existing); continue; }
+            if (existing) {
+                // If an existing meta exists but isn't attached to the current project,
+                // attach it so it's visible in the current project's Assets list.
+                const currentPid = selectedProject?.id ?? undefined;
+                if (currentPid && existing.projectId !== currentPid) {
+                    const patched: AssetMeta = { ...existing, projectId: currentPid };
+                    try { await idbPut(stores.STORE_META, hash, patched); results.push(patched); continue; } catch { /* ignore */ }
+                }
+                results.push(existing);
+                continue;
+            }
             const dim = await getImageSize(file);
             const meta: AssetMeta = {
                 hash,
@@ -89,12 +102,42 @@ export function AssetsProvider({ children }: { children: React.ReactNode }) {
             }
         }
         await refresh();
+        console.info('AssetsProvider.addFiles: stored assets', results.map(r => ({ hash: r.hash, projectId: r.projectId, cloudUrl: r.cloudUrl })));
+        // Auto-sync to cloud if this is a cloud project
+        try {
+            const isCloudProject = !!(selectedProject as unknown as { _cloudId?: string })?._cloudId;
+            const user = auth.currentUser;
+            if (isCloudProject && user && results.length) {
+                for (const m of results) {
+                    void (async () => {
+                        try {
+                            await syncToCloud(m.hash);
+                        } catch (err) {
+                            console.warn('Automatic syncToCloud failed for asset', m.hash, err);
+                        }
+                    })();
+                }
+            }
+        } catch (err) { /* ignore */ }
         return results;
     }, [refresh, selectedProject?.id]);
 
     const getUrl = useCallback(async (hash: string) => {
         if (urlsRef.current[hash]) return urlsRef.current[hash];
-        const blob = await idbGet<Blob>(stores.STORE_BLOBS, hash);
+        let blob = await idbGet<Blob>(stores.STORE_BLOBS, hash);
+        if (!blob) {
+            // Try to fetch the blob from cloud and store locally
+            try {
+                const meta = await idbGet<AssetMeta>(stores.STORE_META, hash);
+                if (meta?.cloudUrl) {
+                    const resp = await fetch(meta.cloudUrl);
+                    if (resp.ok) {
+                        blob = await resp.blob();
+                        await idbPut(stores.STORE_BLOBS, hash, blob);
+                    }
+                }
+            } catch { /* ignore */ }
+        }
         if (!blob) return null;
         const url = URL.createObjectURL(blob);
         urlsRef.current[hash] = url;
@@ -122,7 +165,17 @@ export function AssetsProvider({ children }: { children: React.ReactNode }) {
             try { notify({ type: 'error', title: selectedProject?.name, message: 'Select a portfolio before syncing assets to the cloud.', persistent: false }); } catch { /* noop */ }
             return meta;
         }
+        // Ensure selectedProject ownership when syncing to cloud; only the owner can upload assets to the project's cloud path
+        try {
+            const proj = projects?.find(p => p.id === projectId);
+            if (proj && typeof proj.ownerUid === 'string' && proj.ownerUid !== user.uid) {
+                try { notify({ type: 'error', title: proj.name, message: 'Unable to sync assets: you are not the owner of this cloud project.', persistent: false }); } catch { /* noop */ }
+                console.warn('syncToCloud: user is not owner of project', { projectId, ownerUid: proj.ownerUid, currentUid: user.uid });
+                return meta;
+            }
+        } catch { /* ignore */ }
         const path = buildProjectAssetPath(user.uid, projectId, hash);
+        console.info('syncToCloud: uploading asset', { hash, projectId, path });
         try {
             // Try to get an existing URL (dedupe)
             let url: string | null = null;
@@ -134,6 +187,8 @@ export function AssetsProvider({ children }: { children: React.ReactNode }) {
             const next: AssetMeta = { ...meta, cloudPath: path, cloudUrl: url || undefined, syncedAt: new Date().toISOString() };
             await idbPut(stores.STORE_META, hash, next);
             await refresh();
+            try { notify({ type: 'success', title: selectedProject?.name, message: 'Asset uploaded to cloud', persistent: false }); } catch { /* noop */ }
+            console.info('syncToCloud: upload complete', { hash, cloudUrl: url });
             return next;
         } catch {
             return meta;

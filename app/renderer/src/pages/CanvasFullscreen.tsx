@@ -106,6 +106,7 @@ export type CanvasFullscreenProps = {
 
     // Exit handler
     onExit: () => void;
+    isClosing?: boolean;
 };
 
 export default function CanvasFullscreen(props: CanvasFullscreenProps) {
@@ -183,6 +184,7 @@ export default function CanvasFullscreen(props: CanvasFullscreenProps) {
         dragPointerOffset,
         onKeyDown,
         onExit,
+        isClosing,
     } = props;
 
     // Drag overlay cursor alignment
@@ -215,7 +217,7 @@ export default function CanvasFullscreen(props: CanvasFullscreenProps) {
         : { width: paletteWidth, minWidth: 260, maxWidth: 520 };
 
     return (
-        <div className="fixed flex flex-col bg-[color:var(--bg)] overflow-auto" style={{ top: 'var(--frame-bar-h, 36px)', left: 0, right: 0, bottom: 0, zIndex: 9999, animation: 'py-pop 0.3s ease-out' }}>
+        <div className="fixed flex flex-col bg-[color:var(--bg)] overflow-auto" style={{ top: 'var(--frame-bar-h, 36px)', left: 0, right: 0, bottom: 0, zIndex: 9999, animation: isClosing ? 'py-pop-out 0.3s ease-out' : 'py-pop 0.3s ease-out' }}>
             {/* Header: Editor and Page Settings */}
             <div
                 className={`w-full flex flex-col bg-[color:var(--muted)] border-b border-[color:var(--border)]/30 shadow-lg flex-shrink-0 relative transition-all duration-300 ease-in-out ${headerCollapsed ? 'cursor-pointer' : ''}`}

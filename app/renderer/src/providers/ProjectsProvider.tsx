@@ -5,16 +5,18 @@ import { auth, db, storage } from "../lib/firebase";
 import { collection, doc, getDoc, getDocs, setDoc, serverTimestamp, query, where, orderBy, onSnapshot, writeBatch, deleteDoc } from "firebase/firestore";
 import type { FirestoreError, Unsubscribe } from "firebase/firestore";
 import { ref as storageRef, uploadBytes, getDownloadURL, getMetadata, getBytes, deleteObject } from "firebase/storage";
+import { idbGet, idbPut, stores, computeHash, type AssetMeta } from "../lib/assetsStore";
 import JSZip from "jszip";
 
 import type { VideoWidgetProps } from "../../../shared/widgets/videoProps";
+import { sanitizeVideoProps } from "../widgets/videoProps";
 import type { Theme, ThemePatch } from "../themes/types";
 import { THEME_PRESETS, DEFAULT_THEME_PRESET_ID, getPresetById } from "../themes/presets";
 import { createThemeFromPreset as createThemeFromPresetUtil, mergeTheme } from "../themes/utils";
 
 import { useNotifications } from "./NotificationsProvider";
 
-type ZipEntry = { dir: boolean; name: string };
+type ZipEntry = any;
 
 export type Page = {
 	pageId: string;
@@ -450,6 +452,12 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 			for (const [projectId, proj] of pendingEntries) {
 				if (!proj || (proj.storage ?? 'local') !== 'cloud') continue;
 				const ownerUid = proj.ownerUid || user.uid;
+				// Skip cloud persist for projects owned by a different user
+				if (proj.ownerUid && (proj.ownerUid !== user.uid)) {
+					try { notify({ type: 'warning', title: proj.name, message: 'Skipping cloud save: you are not the owner of this portfolio.', persistent: false }); } catch { /* noop */ }
+					console.warn('flushCloudPersist: skipping persist for project owned by another user', { projectId, ownerUid: proj.ownerUid, currentUid: user.uid });
+					continue;
+				}
 				if (!ownerUid) continue;
 				const sanitizedForCloud = sanitizeProjectVideoWidgets(ensurePortfolioMeta(ensureProjectThemes(proj)));
 				let assetManifest: AssetManifest | null = null;
@@ -927,6 +935,7 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 					};
 					await idbPut(stores.STORE_META, hash, nextMeta);
 				}
+				console.info('uploadReferencedAssetsToStorage: uploaded asset', { hash, path, downloadUrl });
 				manifest[hash] = { path, downloadUrl };
 			} catch (err) {
 				console.error('Failed to upload referenced asset to storage', hash, err);

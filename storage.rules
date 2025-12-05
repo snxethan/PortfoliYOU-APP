@@ -31,5 +31,15 @@ service firebase.storage {
       allow write: if isOwner();
       allow delete: if isOwner();
     }
+
+    // Project assets (images, videos, etc.)
+    match /users/{uid}/project/{projectId}/assets/{assetId} {
+      function isOwner() {
+        return request.auth != null && request.auth.uid == uid;
+      }
+      allow read: if isOwner();
+      allow write: if isOwner();
+      allow delete: if isOwner();
+    }
   }
 }

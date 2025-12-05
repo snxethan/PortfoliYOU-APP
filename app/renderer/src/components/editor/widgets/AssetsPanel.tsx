@@ -22,6 +22,8 @@ export default function AssetsPanel({ hideHeader = false }: { hideHeader?: boole
         const q = query.trim().toLowerCase();
         return list.filter(a => !q || a.name.toLowerCase().includes(q));
     }, [list, query]);
+    // Debug log: show list count and filtered count
+    React.useEffect(() => { console.info('AssetsPanel: selectedProjectId=', selectedProject?.id, 'listCount=', list.length, 'filteredCount=', filtered.length); }, [list, filtered.length, selectedProject?.id]);
 
     type Cat = 'Images' | 'Audio' | 'Video' | 'Other';
     const grouped = useMemo(() => {
@@ -45,8 +47,27 @@ export default function AssetsPanel({ hideHeader = false }: { hideHeader?: boole
     const handleFilesSelected = async (files: FileList | null) => {
         if (!files || files.length === 0) return;
         setUploading(true);
+        if (!selectedProject) {
+            try { notify({ type: 'error', message: 'Select a portfolio before uploading assets.', persistent: false }); } catch { /* noop */ }
+            setUploading(false);
+            if (uploadInputRef.current) uploadInputRef.current.value = '';
+            return;
+        }
         try {
-            await addFiles(files);
+            const metas = await addFiles(files);
+            if (isCloudProject && user) {
+                for (const meta of metas) {
+                    try {
+                        setSyncing(s => ({ ...s, [meta.hash]: true }));
+                        await syncToCloud(meta.hash);
+                    } catch (err) {
+                        console.error('AssetsPanel: syncToCloud failed', err);
+                        try { notify({ type: 'error', message: `Failed to sync ${meta.name} to cloud`, persistent: false }); } catch { /* noop */ }
+                    } finally {
+                        setSyncing(s => ({ ...s, [meta.hash]: false }));
+                    }
+                }
+            }
         } catch (err) {
             console.error('AssetsPanel: addFiles failed', err);
             try { notify({ type: 'error', message: 'Failed to upload assets', persistent: false }); } catch { /* noop */ }

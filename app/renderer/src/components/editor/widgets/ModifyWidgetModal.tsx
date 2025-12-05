@@ -229,6 +229,7 @@ export default function ModifyWidgetModal({
         const hasDimensions = typeof asset.width === 'number' && asset.width > 0 && typeof asset.height === 'number' && asset.height > 0;
         return hasDimensions;
     }), [assets.list]);
+    React.useEffect(() => { console.info('ModifyWidgetModal: imageAssetOptionsCount=', imageAssetOptions.length, 'assetsListCount=', assets.list.length); }, [imageAssetOptions.length, assets.list.length]);
     const videoAssetOptions = useMemo(() => assets.list.filter(asset => asset.type?.startsWith('video/')), [assets.list]);
     const resolvedDefType = defType || item.type || null;
     const isCarousel = resolvedDefType === 'carousel';

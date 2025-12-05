@@ -84,6 +84,7 @@ function IconFullscreen() {
 export default function EditorPage() {
   // Fullscreen state for canvas
   const [isCanvasFullscreen, setIsCanvasFullscreen] = useState(false);
+  const [isClosingFullscreen, setIsClosingFullscreen] = useState(false);
   const { selectedProject, createPage, duplicatePage, deletePage, renamePage, getPageItems, setPageItems, setPageStarter, setPageBackground, activeTheme, updateTheme } = useProjects();
   const { add: notify } = useNotifications();
   const { openSettings } = usePortfolioSettings();
@@ -1827,8 +1828,9 @@ export default function EditorPage() {
       )}
 
       {/* Fullscreen Canvas Page */}
-      {isCanvasFullscreen && (
+      {(isCanvasFullscreen || isClosingFullscreen) && (
         <CanvasFullscreen
+          isClosing={isClosingFullscreen}
           pageWidth={pageWidth}
           pageHeight={pageHeight}
           setPageWidth={setPageWidth}
@@ -1917,7 +1919,13 @@ export default function EditorPage() {
           dragOverlaySize={dragOverlaySize}
           dragPointerOffset={dragPointerOffset}
           onKeyDown={onKeyDown}
-          onExit={() => setIsCanvasFullscreen(false)}
+          onExit={() => {
+            setIsClosingFullscreen(true);
+            setTimeout(() => {
+              setIsClosingFullscreen(false);
+              setIsCanvasFullscreen(false);
+            }, 300);
+          }}
         />
       )}
     </div>
