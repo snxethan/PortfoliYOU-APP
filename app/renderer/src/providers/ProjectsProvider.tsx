@@ -426,7 +426,9 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 			return;
 		}
 		const pendingEntries = Object.entries(state.pending);
+		console.info('ProjectsProvider.flushCloudPersist: starting flush');
 		if (!pendingEntries.length) {
+			console.info('ProjectsProvider.flushCloudPersist: pendingEntriesCount=', pendingEntries.length);
 			if (state.timer) {
 				clearTimeout(state.timer);
 				state.timer = null;
@@ -478,11 +480,13 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 				return;
 			}
 			try { notify({ type: 'info', message: 'Saving to cloud…', persistent: false }); } catch { /* noop */ }
+			console.info('ProjectsProvider.flushCloudPersist: committing batch for projects', pendingEntries.map(([id]) => id));
 			await batch.commit();
 			state.lastFlushAt = Date.now();
 			state.slowModeUntil = 0;
 			state.saving = false;
 			try { notify({ type: 'success', message: 'Cloud save complete.', persistent: false }); } catch { /* noop */ }
+			console.info('ProjectsProvider.flushCloudPersist: cloud save complete');
 		} catch (err) {
 			console.error('Failed to persist cloud projects', err);
 			const retryPayload = Object.fromEntries(pendingEntries) as Record<string, LocalProject>;
@@ -496,6 +500,7 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 	}, [notify, signalCloudSlowdown]);
 
 	const queueCloudPersist = useCallback((proj: LocalProject) => {
+		console.info('ProjectsProvider.queueCloudPersist: enqueue project', { projectId: proj?.id, storage: proj?.storage });
 		if (!proj || (proj.storage ?? 'local') !== 'cloud') return;
 		const state = cloudPersistStateRef.current;
 		state.pending[proj.id] = proj;
@@ -710,6 +715,8 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 
 	// Helper: serialize project + referenced assets into a zip (base64)
 	const buildArchiveBase64 = async (proj: LocalProject, opts?: BuildArchiveOptions) => {
+		const startTs = Date.now();
+		console.info('ProjectsProvider.buildArchiveBase64: starting archive build', { projectId: proj.id, pages: proj.pageOrder?.length, opts: !!opts });
 		const sanitizedProject = sanitizeProjectVideoWidgets(proj);
 		const zip = new JSZip();
 		const payload: { _format: string; _version: number; exportedAt: string; project: LocalProject } = {
@@ -862,6 +869,7 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 		// Yield before final ZIP generation
 		await new Promise(resolve => setTimeout(resolve, 0));
 		const base64 = await zip.generateAsync({ type: 'base64' });
+		console.info('ProjectsProvider.buildArchiveBase64: archive build complete', { projectId: proj.id, durationMs: Date.now() - startTs, sizeBase64: base64.length });
 		return base64;
 	};
 

@@ -262,6 +262,8 @@ function GlobalPreviewStarter() {
         captureGlobalStyleSnapshot(),
         Promise.resolve(getWidgetThemeSnapshot(activeTheme))
       ]);
+      console.info('App.GlobalPreviewStarter: building preview', { projectId: selectedProject?.id, reason });
+      const buildStartTs = Date.now();
       const buildRes = await (window as any).api?.buildStaticSite?.({
         project: selectedProject,
         assets: assetsBase64,
@@ -281,6 +283,7 @@ function GlobalPreviewStarter() {
         const msg = `Preview build output: ${buildRes.path}`;
         appendPreviewLog(selectedProjectCloudId, msg);
         window.dispatchEvent(new CustomEvent('py:preview:log', { detail: { line: msg, projectId: selectedProjectCloudId } }));
+        console.info('App.GlobalPreviewStarter: preview build succeeded', { projectId: selectedProject?.id, buildPath: buildRes.path, durationMs: Date.now() - buildStartTs });
       } catch { }
 
       const meta = (selectedProject as any)?.portfolioMeta?.buildSettings || {};

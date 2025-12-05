@@ -613,52 +613,8 @@ export default function PortfolioSettingsModal({ open, mode, projectId, cloudId,
                     <div className="text-xs text-[color:var(--fg-muted)] mt-1">Optional base path for the generated site.</div>
                 </label>
             </div>
-            {showBuildSyncCta && (
-                <div className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)]/60 p-4 space-y-3">
-                    <div className="flex flex-wrap items-start gap-3">
-                        <div className="flex-1 min-w-[220px]">
-                            <p className="text-sm font-semibold">Sync builds to Projects</p>
-                            <p className="text-xs text-[color:var(--fg-muted)]">Upload this local portfolio so the Deploy tab and other devices can build it.</p>
-                        </div>
-                        <button
-                            className="btn btn-primary btn-sm"
-                            disabled={Boolean(syncDisabledReason) || syncingBuild}
-                            onClick={handleSyncFromBuildSection}
-                        >
-                            {syncingBuild ? <Loader2 size={14} className="animate-spin" /> : <UploadCloud size={14} />}
-                            <span className="ml-2">{syncingBuild ? "Syncing…" : "Sync to Projects"}</span>
-                        </button>
-                    </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs text-[color:var(--fg-muted)]">
-                        <div className="rounded-xl border border-[color:var(--border)] bg-[color:var(--surface)]/70 p-3">
-                            <p className="uppercase tracking-wide text-[10px]">Cloud projects</p>
-                            <p className="text-sm font-semibold text-white">
-                                {normalizedProjectCap ? `${Math.min(cloudProjectsCount, normalizedProjectCap)} / ${normalizedProjectCap}` : cloudProjectsCount}
-                            </p>
-                        </div>
-                        <div className="rounded-xl border border-[color:var(--border)] bg-[color:var(--surface)]/70 p-3">
-                            <p className="uppercase tracking-wide text-[10px]">Storage usage</p>
-                            <p className="text-sm font-semibold text-white">{storageUsageLabel}</p>
-                            {storageLimitBytes > 0 && (
-                                <div className="mt-2 h-2 rounded-full bg-[color:var(--border)]/60 overflow-hidden">
-                                    <div
-                                        className="h-full rounded-full bg-[color:var(--accent)]"
-                                        style={{ width: `${storageUsagePercent}%` }}
-                                    ></div>
-                                </div>
-                            )}
-                        </div>
-                    </div>
-                    {syncDisabledReason && (
-                        <p className="text-xs text-red-300">{syncDisabledReason}</p>
-                    )}
-                </div>
-            )}
-            {!showBuildSyncCta && !isCreateMode && activeIsCloudProject && (
-                <div className="rounded-xl border border-[color:var(--border)] bg-[color:var(--surface)]/60 p-3 text-xs text-[color:var(--fg-muted)]">
-                    This portfolio already syncs to your Projects workspace. Builds deploy from the cloud automatically.
-                </div>
-            )}
+            {/* Sync builds to Projects card intentionally removed - builds are handled via the Deploy workspace and cloud project sync. */}
+            {/* Removed tooltip for cloud projects in Build settings per UX update */}
         </div>
     );
 
@@ -682,6 +638,23 @@ export default function PortfolioSettingsModal({ open, mode, projectId, cloudId,
                     </div>
                 </div>
             </div>
+            {project && user && !activeIsCloudProject && (
+                <div className="rounded-xl border border-[color:var(--border)] bg-[color:var(--surface)]/60 p-3 text-xs text-[color:var(--fg-muted)]">
+                    <p className="mb-2">Tip: This portfolio isn't synced to the cloud. You can sync it to your Projects workspace to enable cloud builds and editing from other devices.</p>
+                    <div className="flex items-center gap-2">
+                        <button className="btn btn-accent btn-sm flex items-center gap-2" onClick={async () => { await handleCloudSync(); }} disabled={cloudSyncing}>
+                            {cloudSyncing ? <Loader2 size={14} className="animate-spin" /> : <UploadCloud size={14} />}
+                            <span className="ml-2">{cloudSyncing ? "Syncing…" : "Sync to cloud"}</span>
+                        </button>
+                        <p className="text-[10px] text-[color:var(--fg-muted)]">Save changes, then run the sync to upload updated assets and metadata.</p>
+                    </div>
+                </div>
+            )}
+            {project && activeIsCloudProject && (
+                <div className="rounded-xl border border-[color:var(--border)] bg-[color:var(--surface)]/60 p-3 text-xs text-[color:var(--fg-muted)]">
+                    <p>This portfolio is a cloud project — saving will update the cloud backend so they can be accessed anywhere at anytime.</p>
+                </div>
+            )}
         </div>
     );
 
@@ -743,7 +716,7 @@ export default function PortfolioSettingsModal({ open, mode, projectId, cloudId,
         if (!project && targetCloudId) {
             return (
                 <div className="space-y-3">
-                    <p className="text-sm text-[color:var(--fg-muted)]">This cloud portfolio isn't open locally, but you can still rename or delete it.</p>
+                    <p className="text-sm text-[color:var(--fg-muted)]">This cloud portfolio isn't available locally, but you can still rename or delete it.</p>
                     <div className="flex gap-2">
                         <button className="btn btn-ghost btn-sm" disabled={cloudBusy} onClick={async () => {
                             const next = prompt("Rename cloud portfolio", "New cloud name");
@@ -972,11 +945,11 @@ export default function PortfolioSettingsModal({ open, mode, projectId, cloudId,
                 </div>
                 <div className="p-4 space-y-4 max-h-[70vh] overflow-y-auto">
                     {renderSection("portfolio", "Portfolio", mode === "create" ? "Draft" : "Details", renderPortfolioFields())}
-                    {showCloudSection && renderSection("cloud", "Cloud", cloudStatus, renderCloudBody())}
                     {!isCreateMode && renderSection("theme", "Theme", activeTheme ? activeTheme.name : "Unavailable", renderThemeBody())}
+                    {!isCreateMode && renderSection("saving", "Saving", undefined, renderSavingBody())}
+                    {showCloudSection && renderSection("cloud", "Cloud", cloudStatus, renderCloudBody())}
                     {!isCreateMode && renderSection("preview", "Preview", undefined, renderPreviewBody())}
                     {renderSection("build", "Build", undefined, renderBuildBody())}
-                    {!isCreateMode && renderSection("saving", "Saving", undefined, renderSavingBody())}
                     {formError && <div className="text-sm text-red-500">{formError}</div>}
                 </div>
                 <div className="flex items-center justify-between gap-3 px-4 py-3 border-t border-[color:var(--border)]">

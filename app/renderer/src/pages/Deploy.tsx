@@ -249,6 +249,7 @@ export default function DeployPage() {
 		clearPreviewLog(selectedProjectCloudId);
 		setExportedFilePath(null);
 		appendLog('Starting export...');
+		console.info('Deploy.handleExportZip: start', { projectId: selectedProject?.id, projectName: selectedProject?.name });
 		try {
 			const assetsBase64: Record<string, string> = {};
 			if (includeAssets) {
@@ -267,6 +268,7 @@ export default function DeployPage() {
 			}
 
 			appendLog('Building static site...');
+			console.info('Deploy.handleExportZip: building static site', { projectId: selectedProject?.id });
 			const activeTheme = selectedProject?.themes?.[selectedProject.activeThemeId] ?? null;
 			const [styleSnapshot, themeSnapshot] = await Promise.all([
 				captureGlobalStyleSnapshot(),
@@ -287,6 +289,7 @@ export default function DeployPage() {
 			appendLog(`✅ Build succeeded: ${buildRes.path}`);
 			window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'success', message: 'Build succeeded', persistent: false } }));
 
+			console.info('Deploy.handleExportZip: build succeeded', { projectId: selectedProject?.id, path: buildRes.path });
 			// Try embedding into existing project package if possible, else fallback to ZIP
 			try {
 				const rawProjectPath = (selectedProject as any)?._filePath as string | undefined;
@@ -314,6 +317,7 @@ export default function DeployPage() {
 				}
 
 				appendLog('Preparing export folder for ZIP...');
+				console.info('Deploy.handleExportZip: preparing export folder', { buildPath: buildRes.path });
 				const exportRes = await (window as any).api?.buildExportFolder?.({ distDir: buildRes.path, projectName: (selectedProject && selectedProject.name) || (selectedProject && (selectedProject as any).title) || 'portfolio' });
 				let zipSourceDir = buildRes.path;
 				if (!exportRes || !exportRes.ok) {
@@ -324,6 +328,7 @@ export default function DeployPage() {
 				}
 
 				appendLog('⚠️ Creating ZIP from export folder');
+				console.info('Deploy.handleExportZip: creating zip', { zipSourceDir });
 				const zipRes = await (window as any).api?.zipDir?.({ dir: zipSourceDir });
 				if (!zipRes || !zipRes.ok) {
 					appendLog('❌ ZIP failed: ' + (zipRes?.error || 'unknown'));
@@ -333,6 +338,7 @@ export default function DeployPage() {
 				const saveRes = await (window as any).api?.saveFileBytes?.({ defaultPath: `${selectedProject.name || 'portfolio'}.zip`, dataBase64: zipRes.dataBase64 });
 				if (saveRes && saveRes.filePath) {
 					appendLog('✅ ZIP saved: ' + saveRes.filePath);
+					console.info('Deploy.handleExportZip: zip saved', { projectId: selectedProject?.id, filePath: saveRes.filePath });
 					setExportedFilePath(saveRes.filePath);
 					window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'success', message: 'ZIP saved: ' + saveRes.filePath, href: saveRes.filePath, ctaLabel: 'Reveal', persistent: false } }));
 				} else {
@@ -548,7 +554,7 @@ export default function DeployPage() {
 							<div className="rounded-xl border border-[color:var(--border)] bg-[color:var(--surface)]/80 p-4">
 								<div className="max-w-5xl mx-auto">
 									{!previewRunning ? (
-										<div className="flex flex-col sm:flex-row items-center justify-center gap-3 text-center">
+										<div className="flex flex-wrap flex-col sm:flex-row items-center justify-center gap-3 text-center">
 											<div className="flex items-center gap-2">
 												<button className="btn btn-accent w-full sm:w-auto gap-2 text-base font-semibold shadow-lg shadow-[color:var(--accent)]/25" onClick={() => handleStartLocalPreview()} disabled={previewStarting || exporting} title="Start local preview" style={{ animation: 'py-fade-in 0.2s ease-out' }}>
 													<Play size={16} /> <span>Start Preview</span>
@@ -565,7 +571,7 @@ export default function DeployPage() {
 											</button>
 										</div>
 									) : (
-										<div className="flex flex-col sm:flex-row items-center justify-center gap-3 text-center">
+										<div className="flex flex-wrap flex-col sm:flex-row items-center justify-center gap-3 text-center">
 											<button className="btn btn-danger w-full sm:w-auto gap-2 text-base font-semibold" onClick={() => handleStopLocalPreview()} title="Stop preview" style={{ animation: 'py-fade-in 0.2s ease-out' }}>
 												<Square size={16} className="text-[color:var(--danger)]" aria-hidden="true" /> <span>Stop</span>
 											</button>

@@ -15,6 +15,8 @@ export async function compileStaticSite(
     assets: Record<string, Buffer | Blob>,
     outputDir: string
 ): Promise<void> {
+    const startTs = Date.now();
+    console.info('compileStaticSite: Starting compile', { projectId: project.id, pages: project.pageOrder.length, assets: Object.keys(assets).length, outputDir });
     // Ensure output directory exists
     await fs.ensureDir(outputDir);
     await fs.ensureDir(path.join(outputDir, 'assets'));
@@ -226,6 +228,8 @@ body { margin: 0; font-family: system-ui, -apple-system, 'Segoe UI', Roboto, Int
         const firstPageId = project.pageOrder[0];
         await fs.copyFile(path.join(outputDir, `${firstPageId}.html`), path.join(outputDir, 'index.html'));
     }
+    const dur = Date.now() - startTs;
+    console.info('compileStaticSite: Completed compile', { projectId: project.id, durationMs: dur, pages: project.pageOrder.length, assets: Object.keys(assets).length, outputDir });
 }
 
 // Note: server-side widget rendering is handled inline in renderWidgetToHtml
