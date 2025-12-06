@@ -88,14 +88,14 @@ export default function ProjectsList({
                                             <Settings size={14} />
                                         </button>
                                         <button
-                                            className={`btn btn-ghost btn-xxs ${isCloud ? 'text-[color:var(--accent)]' : ''}`}
+                                            className={`btn btn-ghost btn-xxs hover-accent ${isCloud ? 'text-[color:var(--accent)]' : ''}`}
                                             title={isCloud ? 'Cloud project settings' : 'Link to cloud'}
                                             onClick={(e) => { e.stopPropagation(); onOpenSettings(p.id, 'cloud'); }}
                                             disabled={!userSignedIn}
                                         >
                                             <Cloud size={14} />
                                         </button>
-                                        <button className="btn btn-ghost btn-xxs text-red-400 border border-red-500/40 hover:bg-red-500/10" title="Delete" onClick={async (e) => {
+                                        <button className="btn btn-ghost btn-xxs text-red-400 border border-red-500/40 hover:bg-red-500/10 hover-accent transition" title="Delete" onClick={async (e) => {
                                             e.stopPropagation();
                                             if (isCloud) {
                                                 if (!userSignedIn) {

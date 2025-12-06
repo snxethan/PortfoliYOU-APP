@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 //
 
@@ -19,7 +19,7 @@ import { auth } from "../lib/firebase";
 
 export default function HomePage() {
 	const { user } = useAuth();
-	const { projects, hasAny, importProject, selectProject, deleteProject, deleteCloudProjectByCloudId, saveProject, selectedProjectId, cloudMaxProjects, cloudMaxStorageMB, cloudBytesUsed, cloudProjectsCount } = useProjects();
+	const { projects, hasAny, importProject, selectProject, deleteProject, deleteCloudProjectByCloudId, saveProject, selectedProjectId, cloudMaxProjects, cloudMaxStorageMB, cloudBytesUsed, cloudProjectsCount, recomputeCloudStorageUsage, getCloudProjectTotalSizeByCloudId } = useProjects();
 	const { notifications, dismiss, clearAll } = useNotifications();
 	const { openSettings, openCreate } = usePortfolioSettings();
 	const navigate = useNavigate();
@@ -33,8 +33,17 @@ export default function HomePage() {
 	const cloudRemoteCount = useMemo(() => cloudPortfolioList.length, [cloudPortfolioList]);
 	const cloudQuota = cloudMaxProjects;
 	const usageMb = useMemo(() => ((cloudBytesUsed || 0) / (1024 * 1024)).toFixed(2), [cloudBytesUsed]);
+	const [usageMbStr, setUsageMbStr] = useState(usageMb);
+	useEffect(() => { setUsageMbStr(usageMb); }, [usageMb]);
+	const usagePercent = useMemo(() => {
+		if (!cloudMaxStorageMB || cloudMaxStorageMB <= 0) return 0;
+		const bytes = cloudMaxStorageMB * 1024 * 1024;
+		return Math.min(100, Math.round(((cloudBytesUsed || 0) / bytes) * 100));
+	}, [cloudBytesUsed, cloudMaxStorageMB]);
 	const projectCountStat = useMemo(() => cloudProjectsCount || cloudRemoteCount, [cloudProjectsCount, cloudRemoteCount]);
 	const [notificationsOpen, setNotificationsOpen] = useState(false);
+	const [usageRefreshing, setUsageRefreshing] = useState(false);
+	const [projectSizes, setProjectSizes] = useState<Record<string, number>>({});
 	const unseenCount = useMemo(() => notifications.length, [notifications.length]);
 	const [notificationsPulse, setNotificationsPulse] = useState(false);
 
@@ -46,6 +55,36 @@ export default function HomePage() {
 		}
 		return () => { if (t) { clearTimeout(t); } };
 	}, [notificationsOpen]);
+
+	// Ensure usage is accurate on mount (and when user changes)
+	const recomputeProjectSizes = useCallback(async () => {
+		const map: Record<string, number> = {};
+		const entries = cloudPortfolioList.slice(0, 5);
+		for (const p of entries) {
+			const cloudId = (p as any)._cloudId;
+			if (!cloudId) { map[p.id] = 0; continue; }
+			try { map[p.id] = await getCloudProjectTotalSizeByCloudId(cloudId); } catch { map[p.id] = 0; }
+		}
+		setProjectSizes(map);
+	}, [cloudPortfolioList, getCloudProjectTotalSizeByCloudId]);
+
+	useEffect(() => {
+		let mounted = true;
+		const run = async () => {
+			if (!user) return;
+			setUsageRefreshing(true);
+			try {
+				await recomputeCloudStorageUsage();
+				if (mounted) await recomputeProjectSizes();
+			} catch (err) {
+				console.warn('Failed to recompute cloud storage usage on home mount', err);
+			} finally {
+				if (mounted) setUsageRefreshing(false);
+			}
+		};
+		void run();
+		return () => { mounted = false; };
+	}, [user, recomputeCloudStorageUsage, recomputeProjectSizes]);
 
 	useEffect(() => {
 		const handler = (_e: any) => {
@@ -126,6 +165,36 @@ export default function HomePage() {
 
 	// recent computed above to keep hook order stable
 
+	const handleRefreshUsage = async () => {
+		setUsageRefreshing(true);
+		try {
+			await recomputeCloudStorageUsage();
+			await recomputeProjectSizes();
+		} catch (err) {
+			console.warn('Failed to recompute usage', err);
+		} finally {
+			setUsageRefreshing(false);
+		}
+	};
+
+	const handleOpenProjectFromAccount = (id: string) => {
+		try { selectProject(id); } catch { /* ignore */ }
+		listRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+		// pulse the list
+		setPulseList(true);
+		window.setTimeout(() => setPulseList(false), 1600);
+	};
+
+	// refresh usage when cloud projects count changes
+	useEffect(() => {
+		try {
+			if (user && cloudPortfolioList.length > 0) {
+				void recomputeCloudStorageUsage();
+				void recomputeProjectSizes();
+			}
+		} catch { }
+	}, [cloudPortfolioList.length, user, recomputeCloudStorageUsage, recomputeProjectSizes]);
+
 	return (
 		<div className="home-content space-y-6">
 			<Dashboard onToggleNotifications={() => setNotificationsOpen(v => !v)} notifBadge={unseenCount} notificationsOpen={notificationsOpen} />
@@ -179,11 +248,19 @@ export default function HomePage() {
 					<div id="py-account" ref={accountRef} className={`${pulseAccount ? 'highlight-pulse' : ''}`}>
 						<AccountDashboard
 							userDisplay={(user?.email ?? user?.uid) as string}
-							usageMB={usageMb}
+							usageMB={usageMbStr}
+							cloudBytesUsed={cloudBytesUsed}
 							maxStorageMB={String(cloudMaxStorageMB || 1024)}
+							usagePercent={usagePercent}
 							projectCount={projectCountStat}
 							projectQuota={cloudQuota}
 							onOpenSettings={() => setAccountOpen(true)}
+							onRefresh={() => void handleRefreshUsage()}
+							refreshing={usageRefreshing}
+							cloudProjects={cloudPortfolioList.map(p => ({ id: p.id, name: p.name, updatedAt: p.updatedAt, pageCount: p.pageOrder?.length || Object.keys(p.pages || {}).length }))}
+							projectSizes={projectSizes}
+							onSelectProject={(id) => handleOpenProjectFromAccount(id)}
+							selectedProjectId={selectedProjectId}
 							linkedProviders={auth.currentUser?.providerData || []}
 						/>
 					</div>

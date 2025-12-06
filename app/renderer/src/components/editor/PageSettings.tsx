@@ -12,7 +12,7 @@ export type PageSettingsProps = {
     onSelectPage: (id: string | null) => void;
     onCreatePage: () => void;
     onDuplicatePage: () => void;
-    onRenameInline: (newName: string) => void;
+    onRenameInline: (newName: string) => boolean;
     onDeleteCurrentPage: () => void;
     onOpenSettings: () => void;
     pageBackground?: string | null;
@@ -39,6 +39,7 @@ export default function PageSettings({
 }: PageSettingsProps) {
     const [editing, setEditing] = useState<boolean>(false);
     const [draft, setDraft] = useState<string>('');
+    const [error, setError] = useState<string | null>(null);
     const fallbackTheme = useMemo(() => {
         const raw = (themeBackground || '').trim();
         return HEX_COLOR_RE.test(raw) ? raw : DEFAULT_PAGE_BG;
@@ -145,29 +146,36 @@ export default function PageSettings({
                         </button>
                     </div>
                 ) : (
-                    <div className={rowClass}>
-                        <input
-                            className={inputClass}
-                            value={draft}
-                            onChange={(e) => setDraft(e.target.value)}
-                            onKeyDown={(e) => {
-                                if (e.key === 'Enter') {
-                                    const t = (draft || '').trim();
-                                    if (t) { onRenameInline(t); }
-                                    setEditing(false);
-                                }
-                                if (e.key === 'Escape') setEditing(false);
-                            }}
-                            autoFocus
-                            placeholder="Page name"
-                        />
-                        <button className="btn btn-accent btn-xs" onClick={() => { const t = (draft || '').trim(); if (t) { onRenameInline(t); } setEditing(false); }}>
-                            <span className="text-xs">Save</span>
-                        </button>
-                        <button className="btn btn-outline btn-xs" onClick={() => setEditing(false)}>
-                            <span className="text-xs">Cancel</span>
-                        </button>
-                    </div>
+                    <>
+                        <div className={rowClass}>
+                            <input
+                                className={inputClass}
+                                value={draft}
+                                onChange={(e) => { setDraft(e.target.value); setError(null); }}
+                                onKeyDown={(e) => {
+                                    if (e.key === 'Enter') {
+                                        const t = (draft || '').trim();
+                                        if (t) {
+                                            const ok = onRenameInline(t);
+                                            if (ok) { setEditing(false); setError(null); } else { setError('That page title already exists.'); }
+                                        }
+                                    }
+                                    if (e.key === 'Escape') setEditing(false);
+                                }}
+                                autoFocus
+                                placeholder="Page name"
+                            />
+                            <button className="btn btn-accent btn-xs" onClick={() => { const t = (draft || '').trim(); if (t) { const ok = onRenameInline(t); if (ok) { setEditing(false); setError(null); } else { setError('That page title already exists.'); } } }}>
+                                <span className="text-xs">Save</span>
+                            </button>
+                            <button className="btn btn-outline btn-xs" onClick={() => { setEditing(false); setError(null); }}>
+                                <span className="text-xs">Cancel</span>
+                            </button>
+                        </div>
+                        {error && (
+                            <div className="text-sm text-red-500 mt-2">{error}</div>
+                        )}
+                    </>
                 )}
             </div>
         </div>

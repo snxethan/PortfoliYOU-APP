@@ -38,6 +38,256 @@
 			"isBackground": false,
 			"problemMatcher": [],
 			"group": "build"
+		},
+		{
+			"label": "Run tests",
+			"type": "shell",
+			"command": "npm test",
+			"args": [],
+			"isBackground": false,
+			"problemMatcher": [
+				"$vitest - run"
+			]
+		},
+		{
+			"label": "Run tests",
+			"type": "shell",
+			"command": "npm test",
+			"args": [],
+			"isBackground": false,
+			"problemMatcher": [
+				"$vitest - run"
+			]
+		},
+		{
+			"label": "Run tests",
+			"type": "shell",
+			"command": "npm test",
+			"args": [],
+			"isBackground": false,
+			"problemMatcher": [
+				"$vitest - run"
+			]
+		},
+		{
+			"label": "Run tests",
+			"type": "shell",
+			"command": "npm test",
+			"args": [],
+			"isBackground": false,
+			"problemMatcher": [
+				"$vitest - run"
+			]
+		},
+		{
+			"label": "Run tests",
+			"type": "shell",
+			"command": "npm test",
+			"args": [],
+			"isBackground": false,
+			"problemMatcher": [
+				"$vitest - run"
+			]
+		},
+		{
+			"label": "Run tests",
+			"type": "shell",
+			"command": "npm test",
+			"args": [],
+			"isBackground": false,
+			"problemMatcher": [
+				"$vitest - run"
+			]
+		},
+		{
+			"label": "Run tests",
+			"type": "shell",
+			"command": "npm test",
+			"args": [],
+			"isBackground": false,
+			"problemMatcher": [
+				"$vitest - run"
+			]
+		},
+		{
+			"label": "Run tests",
+			"type": "shell",
+			"command": "npm test",
+			"args": [],
+			"isBackground": false,
+			"problemMatcher": [
+				"$vitest - run"
+			]
+		},
+		{
+			"label": "Run tests",
+			"type": "shell",
+			"command": "npm test",
+			"args": [],
+			"isBackground": false,
+			"problemMatcher": [
+				"$vitest - run"
+			]
+		},
+		{
+			"label": "Run tests",
+			"type": "shell",
+			"command": "npm test",
+			"args": [],
+			"isBackground": false,
+			"problemMatcher": [
+				"$vitest - run"
+			]
+		},
+		{
+			"label": "Run tests",
+			"type": "shell",
+			"command": "npm test",
+			"args": [],
+			"isBackground": false,
+			"problemMatcher": [
+				"$vitest - run"
+			]
+		},
+		{
+			"label": "Run tests",
+			"type": "shell",
+			"command": "npm test",
+			"args": [],
+			"isBackground": false,
+			"problemMatcher": [
+				"$vitest - run"
+			]
+		},
+		{
+			"label": "Run clone reuse test",
+			"type": "shell",
+			"command": "npx vitest run tests/unit/providers/ProjectsProvider.clone-reuse.spec.ts --run",
+			"args": [],
+			"isBackground": false,
+			"problemMatcher": [
+				"$vitest - run"
+			]
+		},
+		{
+			"label": "Run clone reuse test (debug)",
+			"type": "shell",
+			"command": "npx vitest run tests/unit/providers/ProjectsProvider.clone-reuse.spec.ts --run",
+			"args": [],
+			"isBackground": false,
+			"problemMatcher": [
+				"$vitest - run"
+			]
+		},
+		{
+			"label": "Run clone reuse test (debug visible)",
+			"type": "shell",
+			"command": "npx vitest run tests/unit/providers/ProjectsProvider.clone-reuse.spec.ts --run -t clone",
+			"args": [],
+			"isBackground": false,
+			"problemMatcher": [
+				"$vitest - run"
+			]
+		},
+		{
+			"label": "Run vitest with verbose",
+			"type": "shell",
+			"command": "npx vitest run tests/unit/providers/ProjectsProvider.clone-reuse.spec.ts --reporter verbose",
+			"args": [],
+			"isBackground": false,
+			"problemMatcher": [
+				"$vitest - run"
+			]
+		},
+		{
+			"label": "Run clone reuse test with error logging",
+			"type": "shell",
+			"command": "npx vitest run tests/unit/providers/ProjectsProvider.clone-reuse.spec.ts --reporter verbose",
+			"args": [],
+			"isBackground": false,
+			"problemMatcher": [
+				"$vitest - run"
+			]
+		},
+		{
+			"label": "Run clone reuse test (more debug)",
+			"type": "shell",
+			"command": "npx vitest run tests/unit/providers/ProjectsProvider.clone-reuse.spec.ts --reporter verbose",
+			"args": [],
+			"isBackground": false,
+			"problemMatcher": [
+				"$vitest - run"
+			]
+		},
+		{
+			"label": "Run clone reuse test (error details)",
+			"type": "shell",
+			"command": "npx vitest run tests/unit/providers/ProjectsProvider.clone-reuse.spec.ts --reporter verbose",
+			"args": [],
+			"isBackground": false,
+			"problemMatcher": [
+				"$vitest - run"
+			]
+		},
+		{
+			"label": "Run tests",
+			"type": "shell",
+			"command": "npm test --silent",
+			"args": [],
+			"isBackground": false,
+			"problemMatcher": [
+				"$vitest - run"
+			]
+		},
+		{
+			"label": "Run clone reuse test (logging)",
+			"type": "shell",
+			"command": "npx vitest run tests/unit/providers/ProjectsProvider.clone-reuse.spec.ts --reporter verbose --run",
+			"args": [],
+			"isBackground": false,
+			"problemMatcher": [
+				"$vitest - run"
+			]
+		},
+		{
+			"label": "Run clone reuse test (cloneCount)",
+			"type": "shell",
+			"command": "npx vitest run tests/unit/providers/ProjectsProvider.clone-reuse.spec.ts --reporter verbose",
+			"args": [],
+			"isBackground": false,
+			"problemMatcher": [
+				"$vitest - run"
+			]
+		},
+		{
+			"label": "Run tests (post-fixes)",
+			"type": "shell",
+			"command": "npm test",
+			"args": [],
+			"isBackground": false,
+			"problemMatcher": [
+				"$vitest - run"
+			]
+		},
+		{
+			"label": "Run all tests detailed",
+			"type": "shell",
+			"command": "npx vitest run --reporter verbose",
+			"args": [],
+			"isBackground": false,
+			"problemMatcher": [
+				"$vitest - run"
+			]
+		},
+		{
+			"label": "Run tests after async changes",
+			"type": "shell",
+			"command": "npm test",
+			"args": [],
+			"isBackground": false,
+			"problemMatcher": [
+				"$vitest - run"
+			]
 		}
 	]
 }

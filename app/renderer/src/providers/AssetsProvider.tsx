@@ -1,6 +1,8 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { onAuthStateChanged } from 'firebase/auth';
-import { ref as storageRef, getDownloadURL, uploadBytes } from 'firebase/storage';
+import { ref as storageRef, getDownloadURL, uploadBytes, deleteObject } from 'firebase/storage';
+import { doc, updateDoc, deleteField } from 'firebase/firestore';
+import { db } from '../lib/firebase';
 
 import { AssetMeta, computeHash, getImageSize, idbAllMeta, idbDelete, idbGet, idbPut, stores } from '../lib/assetsStore';
 import { auth, storage } from '../lib/firebase';
@@ -26,7 +28,7 @@ export function AssetsProvider({ children }: { children: React.ReactNode }) {
     const [list, setList] = useState<AssetMeta[]>([]);
     const urlsRef = useRef<Record<string, string>>({});
     const { add: notify } = useNotifications();
-    const { selectedProject, projects } = useProjects();
+    const { selectedProject, projects, recomputeCloudStorageUsage } = useProjects();
     const LARGE_IMAGE_THRESHOLD = 2 * 1024 * 1024; // 2MB
     function formatBytes(bytes: number) {
         if (bytes < 1024) return bytes + ' B';
@@ -145,11 +147,56 @@ export function AssetsProvider({ children }: { children: React.ReactNode }) {
     }, []);
 
     const remove = useCallback(async (hash: string) => {
+        // Revoke any blob object URL
         try { if (urlsRef.current[hash]) { URL.revokeObjectURL(urlsRef.current[hash]); delete urlsRef.current[hash]; } } catch { /* noop */ }
-        await idbDelete(stores.STORE_BLOBS, hash);
-        await idbDelete(stores.STORE_META, hash);
-        await refresh();
-    }, [refresh]);
+
+        const meta = await idbGet<AssetMeta>(stores.STORE_META, hash);
+        // If the asset has a cloudPath, attempt removal from Firebase Storage
+        let deletedCloudObject = false;
+        if (meta?.cloudPath) {
+            try {
+                await deleteObject(storageRef(storage, meta.cloudPath));
+                deletedCloudObject = true;
+            } catch (err) {
+                console.warn('AssetsProvider.remove: failed to delete cloud object', { hash, cloudPath: meta.cloudPath, err });
+            }
+        }
+
+        // If this asset belongs to a cloud project, attempt to remove manifest entry in Firestore
+        try {
+            const pid = meta?.projectId;
+            if (pid) {
+                const proj = projects?.find(p => p.id === pid);
+                // Prefer Firestore project id stored in project doc as _cloudId
+                const cloudId = (proj as any)?._cloudId as string | undefined;
+                if (cloudId) {
+                    try {
+                        await updateDoc(doc(db, 'projects', cloudId), { [`assetManifest.${hash}`]: deleteField() });
+                        try { notify({ type: 'success', title: 'Cloud asset removed', message: `${meta?.name || 'Asset'} removed from cloud project`, persistent: false }); } catch { /* noop */ }
+                    } catch (err) {
+                        console.warn('AssetsProvider.remove: failed to remove assetManifest entry from project', { cloudId, hash, err });
+                        try { notify({ type: 'warning', title: 'Cloud asset removed', message: `${meta?.name || 'Asset'} removed from cloud but manifest update failed`, persistent: false }); } catch { /* noop */ }
+                    }
+                }
+            }
+        } catch (err) {
+            console.warn('AssetsProvider.remove: failed to update project manifest', err);
+        }
+
+        // Remove blolb and meta from idb finally
+        try {
+            await idbDelete(stores.STORE_BLOBS, hash);
+            await idbDelete(stores.STORE_META, hash);
+            await refresh();
+            try { notify({ type: 'success', message: `${meta?.name || 'Asset'} removed.`, persistent: false }); } catch { /* noop */ }
+        } catch (err) {
+            console.error('AssetsProvider.remove: failed to cleanup local IDB', { hash, err });
+            try { notify({ type: 'error', message: `Failed to remove asset ${meta?.name || hash}`, persistent: false }); } catch { /* noop */ }
+        }
+
+        // Recompute cloud usage for app-wide accuracy
+        try { if (recomputeCloudStorageUsage) await recomputeCloudStorageUsage(); } catch (err) { /* ignore */ }
+    }, [refresh, projects, recomputeCloudStorageUsage]);
 
     const syncToCloud = useCallback(async (hash: string): Promise<AssetMeta | null> => {
         const user = auth.currentUser; if (!user) return null;

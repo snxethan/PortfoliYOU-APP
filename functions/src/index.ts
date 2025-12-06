@@ -11,7 +11,7 @@ function getDefaultBucket(): string {
   try {
     const cfg = JSON.parse(process.env.FIREBASE_CONFIG || '{}');
     if (typeof cfg.storageBucket === 'string' && cfg.storageBucket) return cfg.storageBucket as string;
-  } catch {}
+  } catch { }
   // Fallback for older projects
   const proj = process.env.GCLOUD_PROJECT || process.env.GCP_PROJECT;
   return proj ? `${proj}.firebasestorage.app` : '';
@@ -113,7 +113,7 @@ export const deleteProject = onCall(async (request) => {
           const [m] = await b.file(storagePath).getMetadata();
           const sz = (m as any).size as unknown;
           sizeBytes = typeof sz === 'number' ? sz : parseInt((sz as string) || '0', 10) || 0;
-        } catch {}
+        } catch { }
       }
       await b.file(storagePath).delete({ ignoreNotFound: true });
     }
@@ -155,9 +155,9 @@ export const updateProjectSize = onCall(async (request) => {
   const b = storage.bucket(storageBucket || undefined);
   let newSize = 0;
   try {
-  const [m] = await b.file(storagePath).getMetadata();
-  const sz = (m as any).size as unknown;
-  newSize = typeof sz === 'number' ? sz : parseInt((sz as string) || '0', 10) || 0;
+    const [m] = await b.file(storagePath).getMetadata();
+    const sz = (m as any).size as unknown;
+    newSize = typeof sz === 'number' ? sz : parseInt((sz as string) || '0', 10) || 0;
   } catch {
     newSize = 0;
   }
@@ -171,4 +171,83 @@ export const updateProjectSize = onCall(async (request) => {
   }, { merge: true });
 
   return { ok: true, sizeBytes: newSize };
+});
+
+// Delete account: remove projects, storage and user record, then delete the auth user
+export const deleteAccount = onCall(async (request) => {
+  const auth = request.auth;
+  if (!auth) throw new HttpsError('unauthenticated', 'Sign in required');
+  const uid = auth.uid;
+  try {
+    const projectsSnap = await db.collection('projects').where('ownerUid', '==', uid).get();
+    let totalFreed = 0;
+    for (const docSnap of projectsSnap.docs) {
+      const projId = docSnap.id;
+      const metadata = docSnap.data() as Record<string, unknown>;
+      const storageBucket = (metadata['storageBucket'] as string | undefined) || getDefaultBucket();
+      const storagePath = typeof metadata['storagePath'] === 'string' ? metadata['storagePath'] as string : undefined;
+      const manifestRaw = metadata['assetManifest'];
+      const manifest = manifestRaw && typeof manifestRaw === 'object' ? manifestRaw as Record<string, { path: string; downloadUrl?: string }> : undefined;
+      const b = storage.bucket(storageBucket || undefined);
+      // Attempt to delete the main .portfoliyou project file and count its size
+      try {
+        if (storagePath) {
+          try {
+            const [m] = await b.file(storagePath).getMetadata();
+            const sz = (m as any).size;
+            const sizeNum = typeof sz === 'number' ? sz : parseInt((sz as string) || '0', 10) || 0;
+            totalFreed += sizeNum;
+          } catch { }
+          try { await b.file(storagePath).delete({ ignoreNotFound: true }); } catch { }
+        }
+      } catch { }
+      // Delete any assets referenced via manifest
+      if (manifest) {
+        for (const entry of Object.values(manifest)) {
+          if (!entry || !entry.path) continue;
+          try {
+            const [m] = await b.file(entry.path).getMetadata();
+            const sz = (m as any).size;
+            const sizeNum = typeof sz === 'number' ? sz : parseInt((sz as string) || '0', 10) || 0;
+            totalFreed += sizeNum;
+          } catch { }
+          try { await b.file(entry.path).delete({ ignoreNotFound: true }); } catch { }
+        }
+      }
+      // Finally attempt to delete the whole project prefix (assets folder)
+      try {
+        const prefix = `users/${uid}/projects/${projId}/`;
+        await b.deleteFiles({ prefix, force: true });
+      } catch { }
+      // Remove the Firestore doc
+      try { await db.collection('projects').doc(projId).delete(); } catch { }
+    }
+
+    // Remove any other storage under user's path (e.g. root user assets)
+    try {
+      const bucketName = getDefaultBucket();
+      const b = storage.bucket(bucketName || undefined);
+      await b.deleteFiles({ prefix: `users/${uid}/`, force: true });
+    } catch { }
+
+    // Delete user doc in Firestore
+    try { await db.collection('users').doc(uid).delete(); } catch { }
+
+    // Optionally delete other user-owned documents across collections - best-effort
+    // List of known ephemeral collections to sweep (none currently specified)
+    // TODO: add other per-user collections as needed
+
+    // Finally, delete the auth user
+    try {
+      await admin.auth().deleteUser(uid);
+    } catch (err) {
+      // If admin delete fails, still swallow as we may want to remove Firestore & storage
+      console.warn('Failed to delete auth user', err);
+    }
+
+    return { ok: true, freedBytes: totalFreed };
+  } catch (err) {
+    console.error('deleteAccount failed', err);
+    throw new HttpsError('internal', 'Failed to delete account');
+  }
 });

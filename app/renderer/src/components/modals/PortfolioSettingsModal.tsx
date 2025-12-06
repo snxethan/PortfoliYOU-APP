@@ -349,6 +349,7 @@ export default function PortfolioSettingsModal({ open, mode, projectId, cloudId,
     const storageUsagePercent = storageLimitBytes > 0 && cloudBytesUsed > 0
         ? Math.min(100, Math.round((cloudBytesUsed / storageLimitBytes) * 100))
         : 0;
+    const storageBarClass = storageUsagePercent >= 90 ? 'bg-red-400' : storageUsagePercent >= 50 ? 'bg-amber-400' : 'bg-[color:var(--accent)]';
 
     const loadCloudInfo = useCallback(async () => {
         if (!targetCloudId) { setCloudInfo(null); return; }
@@ -716,6 +717,20 @@ export default function PortfolioSettingsModal({ open, mode, projectId, cloudId,
         if (!project && targetCloudId) {
             return (
                 <div className="space-y-3">
+                    <div className="rounded-lg border border-[color:var(--border)] bg-[color:var(--surface)]/60 p-3">
+                        <div className="flex items-center justify-between">
+                            <div>
+                                <p className="text-xs uppercase tracking-[0.3em] text-[color:var(--fg-muted)]">Data usage</p>
+                                <p className="text-sm font-semibold">{storageUsageLabel}</p>
+                            </div>
+                            <button className="btn btn-ghost btn-xs" onClick={loadCloudInfo} disabled={cloudLoading}><RefreshCcw size={12} /></button>
+                        </div>
+                        {storageLimitBytes > 0 && (
+                            <div className="h-2 rounded-full bg-[color:var(--border)]/60 overflow-hidden mt-2">
+                                <div className={`h-full ${storageBarClass}`} style={{ width: `${storageUsagePercent}%` }}></div>
+                            </div>
+                        )}
+                    </div>
                     <p className="text-sm text-[color:var(--fg-muted)]">This cloud portfolio isn't available locally, but you can still rename or delete it.</p>
                     <div className="flex gap-2">
                         <button className="btn btn-ghost btn-sm" disabled={cloudBusy} onClick={async () => {
@@ -728,7 +743,7 @@ export default function PortfolioSettingsModal({ open, mode, projectId, cloudId,
                             await handleCloudAction(async () => { await deleteCloudProjectByCloudId(targetCloudId); });
                         }}><Trash2 size={14} className="mr-1" /> Delete cloud</button>
                     </div>
-                    <CloudDetails info={cloudInfo} loading={cloudLoading} onRefresh={loadCloudInfo} />
+                    <CloudDetails info={cloudInfo} loading={cloudLoading} onRefresh={loadCloudInfo} cloudId={targetCloudId} />
                 </div>
             );
         }
@@ -764,6 +779,20 @@ export default function PortfolioSettingsModal({ open, mode, projectId, cloudId,
         const cloudId = project._cloudId || project.id;
         return (
             <div className="space-y-3">
+                <div className="rounded-lg border border-[color:var(--border)] bg-[color:var(--surface)]/60 p-3">
+                    <div className="flex items-center justify-between">
+                        <div>
+                            <p className="text-xs uppercase tracking-[0.3em] text-[color:var(--fg-muted)]">Data usage</p>
+                            <p className="text-sm font-semibold">{storageUsageLabel}</p>
+                        </div>
+                        <button className="btn btn-ghost btn-xs" onClick={loadCloudInfo} disabled={cloudLoading}><RefreshCcw size={12} /></button>
+                    </div>
+                    {storageLimitBytes > 0 && (
+                        <div className="h-2 rounded-full bg-[color:var(--border)]/60 overflow-hidden mt-2">
+                            <div className={`h-full ${storageBarClass}`} style={{ width: `${storageUsagePercent}%` }}></div>
+                        </div>
+                    )}
+                </div>
                 <p className="text-sm text-[color:var(--fg-muted)]">Cloud portfolios save automatically. Export a .portfoliyou file if you need an offline backup.</p>
                 <div className="flex flex-wrap gap-2">
                     <button className="btn btn-primary btn-sm" disabled={cloudBusy} onClick={() => handleCloudAction(async () => { await exportProject(project.id); })}><Download size={14} className="mr-1" /> Save as local file</button>
@@ -779,7 +808,7 @@ export default function PortfolioSettingsModal({ open, mode, projectId, cloudId,
                     }}><Trash2 size={14} className="mr-1" /> Delete cloud</button>
                 </div>
                 <p className="text-xs text-[color:var(--fg-muted)]">Exports include all pages, widgets, and uploaded assets for safekeeping.</p>
-                <CloudDetails info={cloudInfo} loading={cloudLoading} onRefresh={loadCloudInfo} />
+                <CloudDetails info={cloudInfo} loading={cloudLoading} onRefresh={loadCloudInfo} cloudId={cloudId} />
             </div>
         );
     };
@@ -985,6 +1014,7 @@ type CloudDetailsProps = {
     info: { storagePath: string; sizeBytes: number; updatedAt: string } | null;
     loading: boolean;
     onRefresh: () => void;
+    cloudId?: string | null;
 };
 
 function ColorField({ label, value, onChange }: ColorFieldProps) {
@@ -1010,7 +1040,22 @@ function ColorField({ label, value, onChange }: ColorFieldProps) {
     );
 }
 
-function CloudDetails({ info, loading, onRefresh }: CloudDetailsProps) {
+function CloudDetails({ info, loading, onRefresh, cloudId }: CloudDetailsProps) {
+    const { getCloudProjectTotalSizeByCloudId } = useProjects();
+    const [projectTotalBytes, setProjectTotalBytes] = useState<number | null>(null);
+    useEffect(() => {
+        let mounted = true;
+        const load = async () => {
+            if (!cloudId) { setProjectTotalBytes(null); return; }
+            try {
+                const total = await getCloudProjectTotalSizeByCloudId(cloudId);
+                if (!mounted) return;
+                setProjectTotalBytes(total);
+            } catch { if (mounted) setProjectTotalBytes(null); }
+        };
+        void load();
+        return () => { mounted = false; };
+    }, [cloudId, getCloudProjectTotalSizeByCloudId]);
     return (
         <div className="border border-dashed border-[color:var(--border)] rounded-md p-3 text-xs">
             <div className="flex items-center justify-between mb-2">
@@ -1023,6 +1068,9 @@ function CloudDetails({ info, loading, onRefresh }: CloudDetailsProps) {
                 <ul className="space-y-1">
                     <li><strong>Path:</strong> <span className="font-mono break-all">{info.storagePath}</span></li>
                     <li><strong>Size:</strong> {(info.sizeBytes / (1024 * 1024)).toFixed(2)} MB</li>
+                    {typeof projectTotalBytes === 'number' && (
+                        <li><strong>Total (project + assets):</strong> {(projectTotalBytes / (1024 * 1024)).toFixed(2)} MB</li>
+                    )}
                     <li><strong>Updated:</strong> {new Date(info.updatedAt).toLocaleString()}</li>
                 </ul>
             ) : (

@@ -5,6 +5,7 @@ import { ChevronsLeft, ChevronsRight, ChevronDown, ChevronRight, GripVertical, S
 import { DndContext, PointerSensor, MouseSensor, TouchSensor, useSensor, useSensors, DragEndEvent, DragStartEvent, rectIntersection, DragOverlay, type Modifier } from "@dnd-kit/core";
 
 import { useProjects } from "../providers/ProjectsProvider";
+import { applyRenameMapToItems, applyRenameMapToIdList } from '../lib/renameUtils';
 import { useNotifications } from '../providers/NotificationsProvider';
 import { usePortfolioSettings } from "../providers/PortfolioSettingsProvider";
 import type { GridItem } from "../components/editor/canvas/GridCanvas";
@@ -85,7 +86,7 @@ export default function EditorPage() {
   // Fullscreen state for canvas
   const [isCanvasFullscreen, setIsCanvasFullscreen] = useState(false);
   const [isClosingFullscreen, setIsClosingFullscreen] = useState(false);
-  const { selectedProject, createPage, duplicatePage, deletePage, renamePage, getPageItems, setPageItems, setPageStarter, setPageBackground, activeTheme, updateTheme } = useProjects();
+  const { selectedProject, selectProject, createPage, duplicatePage, deletePage, renamePage, getPageItems, setPageItems, setPageStarter, setPageBackground, activeTheme, updateTheme } = useProjects();
   const { add: notify } = useNotifications();
   const { openSettings } = usePortfolioSettings();
 
@@ -99,14 +100,14 @@ export default function EditorPage() {
   // Track current page within the selected project
   const [currentPageId, setCurrentPageId] = useState<string | null>(null);
   useEffect(() => {
-    if (!selectedProject) { setCurrentPageId(null); return; }
+    if (!selectedProject) { selectPage(null); return; }
     try {
       const stored = localStorage.getItem(`py_current_page_${selectedProject.id}`);
       const fallback = selectedProject.pageOrder?.[0] || null;
-      setCurrentPageId(stored || fallback || null);
+      selectPage(stored || fallback || null);
     } catch {
       const fallback = selectedProject.pageOrder?.[0] || null;
-      setCurrentPageId(fallback || null);
+      selectPage(fallback || null);
     }
   }, [selectedProject?.id]);
 
@@ -118,7 +119,7 @@ export default function EditorPage() {
     const idx = (selectedProject.pageOrder || []).indexOf(currentPageId);
     if (idx >= 10) {
       const fallback = selectedProject.pageOrder?.[0] || null;
-      setCurrentPageId(fallback);
+      selectPage(fallback);
       try { if (fallback) localStorage.setItem(`py_current_page_${selectedProject.id}`, fallback); } catch { /* ignore */ }
       window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'warn', message: 'Cloud projects support up to 10 pages. Showing first page.' } }));
     }
@@ -151,6 +152,14 @@ export default function EditorPage() {
     itemsRef.current = next;
     setItems(next);
     lastLoadedSignatureRef.current = JSON.stringify(serializeGridItems(next));
+    if (process.env.NODE_ENV === 'development') {
+      try { console.debug('[Editor] replaceItems: page=', currentPageId, 'items=', next.map(i => i.id).join(', ')); } catch { /* ignore */ }
+    }
+    if (process.env.NODE_ENV === 'development') {
+      try {
+        console.debug('[Editor] replaceItems: page=', currentPageId, 'items=', next.map(i => i.id).join(', '));
+      } catch { /* ignore */ }
+    }
   }, []);
   const persistItems = useCallback((snapshot?: GridItem[]) => {
     if (!selectedProject || !currentPageId) return;
@@ -165,11 +174,34 @@ export default function EditorPage() {
     }
 
     suppressHydrateRef.current = true;
+    if (process.env.NODE_ENV === 'development') {
+      try { console.debug('[Editor] persistItems: scheduling save', { projectId: selectedProject?.id, pageId: currentPageId, items: source.map(i => i.id), signature }); } catch { /* ignore */ }
+    }
     try {
-      setPageItems(selectedProject.id, currentPageId, serialized);
+      try { cancelAutoPersist(); } catch { /* noop */ }
+      // Autosave should not clear widgets unintentionally. Do not pass allowClear here.
+      const saved = setPageItems(selectedProject.id, currentPageId, serialized) as any;
+      if (process.env.NODE_ENV === 'development') {
+        try { console.debug('[Editor] persistItems: setPageItems returned', { projectId: selectedProject?.id, pageId: currentPageId, savedPages: (saved && saved.pages && saved.pages[currentPageId] && saved.pages[currentPageId].widgets ? saved.pages[currentPageId].widgets.length : 0) }); } catch { /* ignore */ }
+      }
       lastPersistedSignatureRef.current = signature;
-      // Update loaded signature to match what we just saved
-      lastLoadedSignatureRef.current = signature;
+      // If provider returns a project snapshot, compute the saved signature from it
+      try {
+        if (saved && saved.pages && saved.pages[currentPageId]) {
+          const savedIds = saved.pages[currentPageId].widgets || [];
+          const savedItems = savedIds.map((wid: string) => {
+            const w = saved.widgets[wid];
+            const layout = (w.layout || {}) as any;
+            return { id: w.widgetId, x: Number(layout.x ?? 0), y: Number(layout.y ?? 0), w: Number(layout.w ?? 1), h: Number(layout.h ?? 1), z: Number(layout.z ?? 0), title: layout.title || undefined, type: w.type || undefined, props: w.props, schemaVersion: typeof w.schemaVersion === 'number' ? w.schemaVersion : 1, pinned: Boolean(layout.pinned), locked: Boolean(layout.locked) } as GridItem;
+          });
+          lastLoadedSignatureRef.current = JSON.stringify(serializeGridItems(savedItems));
+        } else {
+          // fallback to signature of what we sent
+          lastLoadedSignatureRef.current = signature;
+        }
+      } catch {
+        lastLoadedSignatureRef.current = signature;
+      }
     } finally {
       // Keep suppress flag set; it will be cleared by the load effect after comparing signatures
       // This prevents the effect from re-rendering unnecessarily when the provider updates
@@ -185,6 +217,9 @@ export default function EditorPage() {
     cancelAutoPersist();
     autoPersistTimerRef.current = setTimeout(() => {
       autoPersistTimerRef.current = null;
+      if (process.env.NODE_ENV === 'development') {
+        try { console.debug('[Editor] scheduleAutoPersist: running scheduled persist', { projectId: selectedProject?.id, pageId: currentPageId }); } catch { /* ignore */ }
+      }
       persistItems();
     }, 600);
   }, [cancelAutoPersist, persistItems]);
@@ -213,6 +248,8 @@ export default function EditorPage() {
   const getPageItemsRef = useRef(getPageItems);
   useEffect(() => { getPageItemsRef.current = getPageItems; }, [getPageItems]);
 
+
+
   // Load items from provider only when project/page selection changes, not on every update
   // The local state is the source of truth; suppressHydrateRef prevents unnecessary reloads
   // when we've just persisted changes and the provider state updates as a result.
@@ -226,6 +263,11 @@ export default function EditorPage() {
     if (!getter) return;
     const loaded = getter(selectedProject.id, currentPageId) as GridItem[];
     const loadedSignature = JSON.stringify(serializeGridItems(loaded));
+    if (process.env.NODE_ENV === 'development') {
+      try {
+        console.debug('[Editor] hydrate: project=', selectedProject.id, 'page=', currentPageId, 'loaded=', loaded.map(i => i.id).join(', '), 'sig=', loadedSignature.slice(0, 64));
+      } catch { /* noop */ }
+    }
 
     // Skip if we're in the middle of persisting AND the data hasn't changed
     if (suppressHydrateRef.current && loadedSignature === lastLoadedSignatureRef.current) {
@@ -244,6 +286,49 @@ export default function EditorPage() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedProject?.id, currentPageId]);
+
+  // Synchronously select a page and hydrate items to reduce race conditions where the
+  // UI updates current page id before the items state has been updated.
+  const selectPage = useCallback((id: string | null) => {
+    // Persist current page's items before switching to avoid losing recent edits
+    try { persistItems(); } catch { /* noop */ }
+    if (process.env.NODE_ENV === 'development') {
+      try { console.debug('[Editor] selectPage: switching from', { projectId: selectedProject?.id, currentPageId, to: id }); } catch { /* ignore */ }
+    }
+    setCurrentPageId(id);
+    if (!id || !selectedProject) {
+      lastLoadedSignatureRef.current = '';
+      replaceItems([]);
+      return;
+    }
+    try {
+      const items = getPageItems(selectedProject.id, id) as GridItem[];
+      // Defensive: sometimes pages reference widget ids that aren't present in the project's widgets mapping
+      // In that case, rebuild items from project's widget mapping if possible so the canvas shows something
+      if ((!items || items.length === 0) && selectedProject) {
+        const page = selectedProject.pages[id];
+        if (page && Array.isArray(page.widgets) && page.widgets.length > 0) {
+          const rebuilt = page.widgets.map(wid => {
+            const w = selectedProject.widgets[wid] as any;
+            if (!w) return null;
+            const layout = (w.layout || {}) as any;
+            return { id: w.widgetId, x: Number(layout.x ?? 0), y: Number(layout.y ?? 0), w: Number(layout.w ?? 1), h: Number(layout.h ?? 1), z: Number(layout.z ?? 0), title: layout.title || undefined, type: w.type || undefined, props: w.props, schemaVersion: typeof w.schemaVersion === 'number' ? w.schemaVersion : 1, pinned: Boolean(layout.pinned), locked: Boolean(layout.locked) } as GridItem;
+          }).filter(Boolean) as GridItem[];
+          if (rebuilt.length > 0) {
+            if (process.env.NODE_ENV === 'development') console.warn('[Editor] selectPage: rebuilt items from project.widgets because getPageItems returned empty', { projectId: selectedProject.id, pageId: id, rebuiltCount: rebuilt.length });
+            lastLoadedSignatureRef.current = JSON.stringify(serializeGridItems(rebuilt));
+            replaceItems(rebuilt);
+            return;
+          }
+        }
+      }
+      lastLoadedSignatureRef.current = JSON.stringify(serializeGridItems(items));
+      replaceItems(items);
+    } catch (e) {
+      lastLoadedSignatureRef.current = '';
+      replaceItems([]);
+    }
+  }, [selectedProject, setCurrentPageId, getPageItems, replaceItems]);
 
   const presentWidgetTypes = useMemo(() => {
     const set = new Set<string>();
@@ -264,7 +349,7 @@ export default function EditorPage() {
 
   // Simple undo/redo stacks (keep last 50 operations)
   type ItemsUpdater = (prev: GridItem[]) => GridItem[];
-  type HistoryEntry = { label: string; undo: ItemsUpdater; redo: ItemsUpdater; onUndo?: () => void; onRedo?: () => void };
+  type HistoryEntry = { label: string; projectId?: string | null; pageId?: string | null; prevItems?: GridItem[]; nextItems?: GridItem[]; undo: ItemsUpdater; redo: ItemsUpdater; onUndo?: () => void; onRedo?: () => void };
   const MAX_HISTORY = 50;
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [redoStack, setRedoStack] = useState<HistoryEntry[]>([]);
@@ -274,7 +359,15 @@ export default function EditorPage() {
       const next = makeNext(prev);
       itemsRef.current = next;
       setHistory(h => {
-        const entry: HistoryEntry = { label, undo: () => prev, redo: () => next };
+        const entry: HistoryEntry = {
+          label,
+          projectId: selectedProject?.id ?? null,
+          pageId: currentPageId ?? null,
+          prevItems: prev,
+          nextItems: next,
+          undo: () => prev,
+          redo: () => next,
+        };
         const nh = [...h, entry];
         return nh.length > MAX_HISTORY ? nh.slice(nh.length - MAX_HISTORY) : nh;
       });
@@ -290,12 +383,31 @@ export default function EditorPage() {
     const entry = history[history.length - 1];
     console.log('Undoing:', entry.label);
 
-    setItems(prev => {
-      const undone = entry.undo(prev);
-      itemsRef.current = undone;
-      persistItems(undone);
-      return undone;
-    });
+    // If this entry has a recorded project/page snapshot, apply it via setPageItems for those IDs
+    if (entry.projectId && entry.pageId && entry.prevItems) {
+      try {
+        setPageItems(entry.projectId, entry.pageId, serializeGridItems(entry.prevItems), { allowClear: true, force: true });
+      } catch { /* noop */ }
+      // Ensure the editor selects the correct project/page so the items display correctly
+      try {
+        if (selectedProject?.id !== entry.projectId) selectProject(entry.projectId);
+        // Defer selectPage slightly to allow provider writes to propagate
+        queueMicrotask(() => selectPage(entry.pageId!));
+      } catch { /* noop */ }
+      // Update local state to the snapshot so the visual tree updates correctly
+      setItems(prev => {
+        const undone = entry.prevItems || prev;
+        itemsRef.current = undone;
+        return undone;
+      });
+    } else {
+      setItems(prev => {
+        const undone = entry.undo(prev);
+        itemsRef.current = undone;
+        void persistItems(undone);
+        return undone;
+      });
+    }
 
     setHistory(h => h.slice(0, -1));
     setRedoStack(r => [...r, entry]);
@@ -311,12 +423,25 @@ export default function EditorPage() {
     if (redoStack.length === 0) return;
     const entry = redoStack[redoStack.length - 1];
 
-    setItems(prev => {
-      const redone = entry.redo(prev);
-      itemsRef.current = redone;
-      persistItems(redone);
-      return redone;
-    });
+    if (entry.projectId && entry.pageId && entry.nextItems) {
+      try { setPageItems(entry.projectId, entry.pageId, serializeGridItems(entry.nextItems), { allowClear: true, force: true }); } catch { /* noop */ }
+      try {
+        if (selectedProject?.id !== entry.projectId) selectProject(entry.projectId);
+        queueMicrotask(() => selectPage(entry.pageId!));
+      } catch { /* noop */ }
+      setItems(prev => {
+        const redone = entry.nextItems || prev;
+        itemsRef.current = redone;
+        return redone;
+      });
+    } else {
+      setItems(prev => {
+        const redone = entry.redo(prev);
+        itemsRef.current = redone;
+        persistItems(redone);
+        return redone;
+      });
+    }
 
     setRedoStack(r => r.slice(0, -1));
     setHistory(h => [...h, entry]);
@@ -593,6 +718,36 @@ export default function EditorPage() {
       return next.length === prev.length ? prev : next;
     });
   }, [items]);
+
+  // Reconcile runtime widget id renames emitted by ProjectsProvider
+  useEffect(() => {
+    const onPageItemsRenamed = (ev: Event) => {
+      try {
+        const detail = (ev as CustomEvent)?.detail as { projectId: string; pageId: string; renameMap: Record<string, string> } | undefined;
+        if (!detail || !detail.projectId || !detail.pageId || !detail.renameMap) return;
+        if (!selectedProject || selectedProject.id !== detail.projectId) return;
+        if (!currentPageId || currentPageId !== detail.pageId) return;
+        const map = detail.renameMap;
+        const keys = Object.keys(map);
+        if (!keys.length) return;
+        const impacted = itemsRef.current.some(it => !!map[it.id]);
+        if (!impacted) return;
+        if (process.env.NODE_ENV === 'development') console.debug('[Editor] page-items-renamed', { projectId: detail.projectId, pageId: detail.pageId, renameMap: map });
+        const nextItems = applyRenameMapToItems(itemsRef.current, map);
+        itemsRef.current = nextItems;
+        setItems(nextItems);
+        setSelectedIds(prev => applyRenameMapToIdList(prev, map));
+        setClipboard(prev => (prev ? applyRenameMapToItems(prev, map) : prev));
+        try {
+          const sig = JSON.stringify(serializeGridItems(nextItems));
+          lastLoadedSignatureRef.current = sig;
+          lastPersistedSignatureRef.current = sig;
+        } catch { /* ignore */ }
+      } catch { /* ignore */ }
+    };
+    window.addEventListener('py:page-items-renamed', onPageItemsRenamed as EventListener);
+    return () => { window.removeEventListener('py:page-items-renamed', onPageItemsRenamed as EventListener); };
+  }, [selectedProject?.id, currentPageId]);
 
   // Global keyboard shortcuts for copy/paste/cut/duplicate/undo/redo
   useEffect(() => {
@@ -1059,7 +1214,7 @@ export default function EditorPage() {
                   }}
                   onOpenThemeSettings={selectedProject ? () => openSettings({ projectId: selectedProject.id, section: "theme" }) : undefined}
                   onSelectPage={(id) => {
-                    setCurrentPageId(id);
+                    selectPage(id);
                     if (selectedProject && id) {
                       try { localStorage.setItem(`py_current_page_${selectedProject.id}`, id); } catch { /* ignore */ }
                       replaceItems(getPageItems(selectedProject.id, id) as GridItem[]);
@@ -1073,7 +1228,7 @@ export default function EditorPage() {
                     const prevPageId = currentPageId;
                     const newPageId = createPage(projectId) || null;
                     if (newPageId) {
-                      setCurrentPageId(newPageId);
+                      selectPage(newPageId);
                       try { localStorage.setItem(`py_current_page_${projectId}`, newPageId); } catch { /* ignore */ }
                       replaceItems([]);
                       setHistory(h => {
@@ -1088,7 +1243,7 @@ export default function EditorPage() {
                             const proj = selectedProject;
                             const backId = prevPageId && proj?.pages[prevPageId] ? prevPageId : (proj?.pageOrder?.[0] || null);
                             if (backId) {
-                              setCurrentPageId(backId);
+                              selectPage(backId);
                               const loaded = getPageItems(projectId, backId) as GridItem[];
                               replaceItems(loaded);
                             }
@@ -1097,7 +1252,7 @@ export default function EditorPage() {
                             console.log('REDO: Create page');
                             const redoPageId = createPage(projectId);
                             if (redoPageId) {
-                              setCurrentPageId(redoPageId);
+                              selectPage(redoPageId);
                               replaceItems([]);
                             }
                           }
@@ -1115,7 +1270,7 @@ export default function EditorPage() {
                     const sourcePageItems = getPageItems(projectId, sourcePageId) as GridItem[];
                     const newPageId = duplicatePage(projectId, sourcePageId);
                     if (newPageId) {
-                      setCurrentPageId(newPageId);
+                      selectPage(newPageId);
                       try { localStorage.setItem(`py_current_page_${projectId}`, newPageId); } catch { /* ignore */ }
                       replaceItems(getPageItems(projectId, newPageId) as GridItem[]);
                       setHistory(h => {
@@ -1125,13 +1280,13 @@ export default function EditorPage() {
                           redo: (items) => items,
                           onUndo: () => {
                             deletePage(projectId, newPageId);
-                            setCurrentPageId(sourcePageId);
+                            selectPage(sourcePageId);
                             replaceItems(sourcePageItems);
                           },
                           onRedo: () => {
                             const redoPageId = duplicatePage(projectId, sourcePageId);
                             if (redoPageId) {
-                              setCurrentPageId(redoPageId);
+                              selectPage(redoPageId);
                               replaceItems(getPageItems(projectId, redoPageId) as GridItem[]);
                             }
                           }
@@ -1142,12 +1297,12 @@ export default function EditorPage() {
                     }
                   }}
                   onRenameInline={(newName: string) => {
-                    if (!selectedProject || !currentPageId) return;
+                    if (!selectedProject || !currentPageId) return false;
                     const projectId = selectedProject.id;
                     const pageId = currentPageId;
                     const oldTitle = selectedProject.pages[pageId]?.title || 'Untitled';
                     const trimmed = (newName || '').trim();
-                    if (!trimmed || trimmed === oldTitle) return;
+                    if (!trimmed || trimmed === oldTitle) return false;
                     // history entry
                     setHistory(h => {
                       const entry: HistoryEntry = {
@@ -1160,9 +1315,11 @@ export default function EditorPage() {
                       return [...h, entry];
                     });
                     setRedoStack([]);
-                    renamePage(projectId, pageId, trimmed);
+                    const renameOk = renamePage(projectId, pageId, trimmed);
+                    if (!renameOk) return false;
                     try { localStorage.setItem(`py_current_page_${projectId}`, pageId); } catch { /* ignore */ }
                     try { replaceItems(getPageItems(projectId, pageId) as GridItem[]); } catch { /* ignore */ }
+                    return true;
                   }}
                   onOpenSettings={() => {
                     if (!selectedProject || !currentPageId) return;
@@ -1186,7 +1343,7 @@ export default function EditorPage() {
                     const remaining = (selectedProject.pageOrder || []).filter(id => id !== deletedPageId);
                     const nextId = remaining[0] || null;
                     deletePage(projectId, deletedPageId);
-                    setCurrentPageId(nextId);
+                    selectPage(nextId);
                     if (nextId) replaceItems(getPageItems(projectId, nextId) as GridItem[]); else replaceItems([]);
                     setHistory(h => {
                       let restoredId: string | null = null;
@@ -1194,25 +1351,25 @@ export default function EditorPage() {
                         label: 'Delete page',
                         undo: (items) => items,
                         redo: (items) => items,
-                        onUndo: () => {
+                        onUndo: async () => {
                           const nid = createPage(projectId, title);
                           if (nid) {
                             restoredId = nid;
-                            setPageItems(projectId, nid, serializeGridItems(snapItems));
+                            await setPageItems(projectId, nid, serializeGridItems(snapItems), { allowClear: true, force: true });
                             if (snapBackground) setPageBackground(projectId, nid, snapBackground);
                             if (snapStarter) setPageStarter(projectId, nid, true);
-                            setCurrentPageId(nid);
+                            selectPage(nid);
                             replaceItems(getPageItems(projectId, nid) as GridItem[]);
                           }
                         },
-                        onRedo: () => {
+                        onRedo: async () => {
                           const target = restoredId || deletedPageId;
                           if (target) {
                             deletePage(projectId, target);
                             // Get fresh project state after deletion
                             const proj = selectedProject;
                             const fallback = proj?.pageOrder?.[0] || null;
-                            setCurrentPageId(fallback);
+                            selectPage(fallback);
                             if (fallback) replaceItems(getPageItems(projectId, fallback) as GridItem[]);
                           }
                         },
@@ -1444,7 +1601,7 @@ export default function EditorPage() {
                         }}
                         onNavigatePage={(pid) => {
                           if (!selectedProject) return;
-                          setCurrentPageId(pid);
+                          selectPage(pid);
                           try { localStorage.setItem(`py_current_page_${selectedProject.id}`, pid); } catch { /* ignore */ }
                         }}
                         currentPageId={currentPageId || undefined}
@@ -1672,7 +1829,7 @@ export default function EditorPage() {
             background={effectivePageBackground}
             onNavigatePage={(pid) => {
               if (!selectedProject) return;
-              setCurrentPageId(pid);
+              selectPage(pid);
               try { localStorage.setItem(`py_current_page_${selectedProject.id}`, pid); } catch { /* ignore */ }
             }}
             themeSnapshot={widgetThemeSnapshot}
@@ -1706,13 +1863,14 @@ export default function EditorPage() {
               return [...h, entry];
             });
             setRedoStack([]);
-            renamePage(projectId, pageId, trimmed);
+            const ok = renamePage(projectId, pageId, trimmed);
+            if (!ok) { return; }
             setPageBackground(projectId, pageId, backgroundColor);
             // Update starter setting
             try { setPageStarter(projectId, pageId, Boolean(starter)); } catch { /* ignore */ }
             try {
               try { localStorage.setItem(`py_current_page_${projectId}`, pageId); } catch { /* ignore */ }
-              setCurrentPageId(pageId);
+              selectPage(pageId);
               replaceItems(getPageItems(projectId, pageId) as GridItem[]);
             } catch { /* ignore */ }
             setRenameModalOpen(false);
@@ -1736,7 +1894,7 @@ export default function EditorPage() {
             const nextId = remaining[0] || null;
 
             deletePage(projectId, deletedPageId);
-            setCurrentPageId(nextId);
+            selectPage(nextId);
             if (nextId) replaceItems(getPageItems(projectId, nextId) as GridItem[]); else replaceItems([]);
 
             setHistory(h => {
@@ -1744,13 +1902,13 @@ export default function EditorPage() {
                 label: 'Delete page',
                 undo: (items) => items,
                 redo: (items) => items,
-                onUndo: () => {
+                onUndo: async () => {
                   const nid = createPage(projectId, title);
                   if (nid) {
-                    setPageItems(projectId, nid, serializeGridItems(snapItems));
+                    await setPageItems(projectId, nid, serializeGridItems(snapItems), { allowClear: true, force: true });
                     if (snapBackground) setPageBackground(projectId, nid, snapBackground);
                     if (snapStarter) setPageStarter(projectId, nid, true);
-                    setCurrentPageId(nid);
+                    selectPage(nid);
                     replaceItems(getPageItems(projectId, nid) as GridItem[]);
                   }
                 },
@@ -1760,7 +1918,7 @@ export default function EditorPage() {
                     deletePage(projectId, target);
                     const remaining = (selectedProject.pageOrder || []).filter(id => id !== target);
                     const fallback = remaining[0] || null;
-                    setCurrentPageId(fallback);
+                    selectPage(fallback);
                     if (fallback) replaceItems(getPageItems(projectId, fallback) as GridItem[]); else replaceItems([]);
                   }
                 }
@@ -1775,7 +1933,7 @@ export default function EditorPage() {
             const sourcePageItems = getPageItems(projectId, sourcePageId) as GridItem[];
             const newPageId = duplicatePage(projectId, sourcePageId);
             if (newPageId) {
-              setCurrentPageId(newPageId);
+              selectPage(newPageId);
               try { localStorage.setItem(`py_current_page_${projectId}`, newPageId); } catch { /* ignore */ }
               replaceItems(getPageItems(projectId, newPageId) as GridItem[]);
               setHistory(h => {
@@ -1785,13 +1943,13 @@ export default function EditorPage() {
                   redo: (items) => items,
                   onUndo: () => {
                     deletePage(projectId, newPageId);
-                    setCurrentPageId(sourcePageId);
+                    selectPage(sourcePageId);
                     replaceItems(sourcePageItems);
                   },
                   onRedo: () => {
                     const redoPageId = duplicatePage(projectId, sourcePageId);
                     if (redoPageId) {
-                      setCurrentPageId(redoPageId);
+                      selectPage(redoPageId);
                       replaceItems(getPageItems(projectId, redoPageId) as GridItem[]);
                     }
                   }
@@ -1874,7 +2032,7 @@ export default function EditorPage() {
           onOpenWebpage={openWebpage}
           selectedProject={selectedProject}
           currentPageId={currentPageId}
-          setCurrentPageId={setCurrentPageId}
+          setCurrentPageId={selectPage}
           createPage={() => {
             if (selectedProject) {
               createPage(selectedProject.id);
@@ -1884,7 +2042,7 @@ export default function EditorPage() {
             if (selectedProject && currentPageId) {
               const newId = duplicatePage(selectedProject.id, currentPageId);
               if (newId) {
-                setCurrentPageId(newId);
+                selectPage(newId);
                 replaceItems(getPageItems(selectedProject.id, newId) as GridItem[]);
               }
             }
