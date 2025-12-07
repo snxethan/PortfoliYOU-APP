@@ -142,27 +142,44 @@ export default function EditorPage() {
   // Demo items to drag around the canvas
   const [items, setItems] = useState<GridItem[]>([]);
   const itemsRef = useRef<GridItem[]>([]);
+  const itemsPageRef = useRef<string | null>(null);
   const lastPersistedSignatureRef = useRef<string | null>(null);
   const snapshotSignature = useCallback((list: GridItem[]) => JSON.stringify(serializeGridItems(list)), []);
   const suppressHydrateRef = useRef(false);
   const dragInProgressRef = useRef(false);
   const autoPersistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastLoadedSignatureRef = useRef<string>('');
-  const replaceItems = useCallback((next: GridItem[]) => {
+  const replaceItems = useCallback((next: GridItem[], pageId?: string | null) => {
+    const targetPageId = typeof pageId === 'undefined' ? currentPageId : pageId;
+    itemsPageRef.current = targetPageId ?? null;
     itemsRef.current = next;
     setItems(next);
     lastLoadedSignatureRef.current = JSON.stringify(serializeGridItems(next));
     if (process.env.NODE_ENV === 'development') {
-      try { console.debug('[Editor] replaceItems: page=', currentPageId, 'items=', next.map(i => i.id).join(', ')); } catch { /* ignore */ }
+      try { console.debug('[Editor] replaceItems: page=', targetPageId, 'items=', next.map(i => i.id).join(', ')); } catch { /* ignore */ }
     }
     if (process.env.NODE_ENV === 'development') {
       try {
-        console.debug('[Editor] replaceItems: page=', currentPageId, 'items=', next.map(i => i.id).join(', '));
+        console.debug('[Editor] replaceItems: page=', targetPageId, 'items=', next.map(i => i.id).join(', '));
       } catch { /* ignore */ }
     }
-  }, []);
+  }, [currentPageId]);
   const persistItems = useCallback((snapshot?: GridItem[]) => {
     if (!selectedProject || !currentPageId) return;
+    if (!itemsPageRef.current || itemsPageRef.current !== currentPageId) {
+      if (process.env.NODE_ENV === 'development') {
+        try {
+          console.warn('[Editor] persistItems: skipped save due to page mismatch', {
+            projectId: selectedProject.id,
+            currentPageId,
+            itemsPageRef: itemsPageRef.current,
+          });
+        } catch {
+          /* noop */
+        }
+      }
+      return;
+    }
     const source = snapshot ?? itemsRef.current;
     const serialized = serializeGridItems(source);
     const signature = JSON.stringify(serialized);
@@ -256,7 +273,7 @@ export default function EditorPage() {
   useEffect(() => {
     if (!selectedProject || !currentPageId) {
       lastLoadedSignatureRef.current = '';
-      replaceItems([]);
+      replaceItems([], null);
       return;
     }
     const getter = getPageItemsRef.current;
@@ -279,7 +296,7 @@ export default function EditorPage() {
 
     // Only replace if the data actually changed from what we last loaded
     if (loadedSignature !== lastLoadedSignatureRef.current) {
-      replaceItems(loaded);
+      replaceItems(loaded, currentPageId);
     } else {
       // Even if we skip, ensure the signature is updated
       lastLoadedSignatureRef.current = loadedSignature;
@@ -298,7 +315,7 @@ export default function EditorPage() {
     setCurrentPageId(id);
     if (!id || !selectedProject) {
       lastLoadedSignatureRef.current = '';
-      replaceItems([]);
+      replaceItems([], null);
       return;
     }
     try {
@@ -317,18 +334,18 @@ export default function EditorPage() {
           if (rebuilt.length > 0) {
             if (process.env.NODE_ENV === 'development') console.warn('[Editor] selectPage: rebuilt items from project.widgets because getPageItems returned empty', { projectId: selectedProject.id, pageId: id, rebuiltCount: rebuilt.length });
             lastLoadedSignatureRef.current = JSON.stringify(serializeGridItems(rebuilt));
-            replaceItems(rebuilt);
+            replaceItems(rebuilt, id);
             return;
           }
         }
       }
       lastLoadedSignatureRef.current = JSON.stringify(serializeGridItems(items));
-      replaceItems(items);
+      replaceItems(items, id);
     } catch (e) {
       lastLoadedSignatureRef.current = '';
-      replaceItems([]);
+      replaceItems([], null);
     }
-  }, [selectedProject, setCurrentPageId, getPageItems, replaceItems]);
+  }, [selectedProject, setCurrentPageId, getPageItems, replaceItems, persistItems, currentPageId]);
 
   const presentWidgetTypes = useMemo(() => {
     const set = new Set<string>();
@@ -1217,9 +1234,9 @@ export default function EditorPage() {
                     selectPage(id);
                     if (selectedProject && id) {
                       try { localStorage.setItem(`py_current_page_${selectedProject.id}`, id); } catch { /* ignore */ }
-                      replaceItems(getPageItems(selectedProject.id, id) as GridItem[]);
+                      replaceItems(getPageItems(selectedProject.id, id) as GridItem[], id);
                     } else {
-                      replaceItems([]);
+                      replaceItems([], null);
                     }
                   }}
                   onCreatePage={() => {
@@ -1230,7 +1247,7 @@ export default function EditorPage() {
                     if (newPageId) {
                       selectPage(newPageId);
                       try { localStorage.setItem(`py_current_page_${projectId}`, newPageId); } catch { /* ignore */ }
-                      replaceItems([]);
+                      replaceItems([], newPageId);
                       setHistory(h => {
                         const entry: HistoryEntry = {
                           label: 'Create page',
@@ -1245,7 +1262,7 @@ export default function EditorPage() {
                             if (backId) {
                               selectPage(backId);
                               const loaded = getPageItems(projectId, backId) as GridItem[];
-                              replaceItems(loaded);
+                              replaceItems(loaded, backId);
                             }
                           },
                           onRedo: () => {
@@ -1253,7 +1270,7 @@ export default function EditorPage() {
                             const redoPageId = createPage(projectId);
                             if (redoPageId) {
                               selectPage(redoPageId);
-                              replaceItems([]);
+                              replaceItems([], redoPageId);
                             }
                           }
                         };
@@ -1272,7 +1289,7 @@ export default function EditorPage() {
                     if (newPageId) {
                       selectPage(newPageId);
                       try { localStorage.setItem(`py_current_page_${projectId}`, newPageId); } catch { /* ignore */ }
-                      replaceItems(getPageItems(projectId, newPageId) as GridItem[]);
+                      replaceItems(getPageItems(projectId, newPageId) as GridItem[], newPageId);
                       setHistory(h => {
                         const entry: HistoryEntry = {
                           label: 'Duplicate page',
@@ -1281,13 +1298,13 @@ export default function EditorPage() {
                           onUndo: () => {
                             deletePage(projectId, newPageId);
                             selectPage(sourcePageId);
-                            replaceItems(sourcePageItems);
+                            replaceItems(sourcePageItems, sourcePageId);
                           },
                           onRedo: () => {
                             const redoPageId = duplicatePage(projectId, sourcePageId);
                             if (redoPageId) {
                               selectPage(redoPageId);
-                              replaceItems(getPageItems(projectId, redoPageId) as GridItem[]);
+                              replaceItems(getPageItems(projectId, redoPageId) as GridItem[], redoPageId);
                             }
                           }
                         };
@@ -1318,7 +1335,7 @@ export default function EditorPage() {
                     const renameOk = renamePage(projectId, pageId, trimmed);
                     if (!renameOk) return false;
                     try { localStorage.setItem(`py_current_page_${projectId}`, pageId); } catch { /* ignore */ }
-                    try { replaceItems(getPageItems(projectId, pageId) as GridItem[]); } catch { /* ignore */ }
+                    try { replaceItems(getPageItems(projectId, pageId) as GridItem[], pageId); } catch { /* ignore */ }
                     return true;
                   }}
                   onOpenSettings={() => {
@@ -1344,7 +1361,7 @@ export default function EditorPage() {
                     const nextId = remaining[0] || null;
                     deletePage(projectId, deletedPageId);
                     selectPage(nextId);
-                    if (nextId) replaceItems(getPageItems(projectId, nextId) as GridItem[]); else replaceItems([]);
+                    if (nextId) replaceItems(getPageItems(projectId, nextId) as GridItem[], nextId); else replaceItems([], null);
                     setHistory(h => {
                       let restoredId: string | null = null;
                       const entry: HistoryEntry = {
@@ -1359,7 +1376,7 @@ export default function EditorPage() {
                             if (snapBackground) setPageBackground(projectId, nid, snapBackground);
                             if (snapStarter) setPageStarter(projectId, nid, true);
                             selectPage(nid);
-                            replaceItems(getPageItems(projectId, nid) as GridItem[]);
+                            replaceItems(getPageItems(projectId, nid) as GridItem[], nid);
                           }
                         },
                         onRedo: async () => {
@@ -1370,7 +1387,7 @@ export default function EditorPage() {
                             const proj = selectedProject;
                             const fallback = proj?.pageOrder?.[0] || null;
                             selectPage(fallback);
-                            if (fallback) replaceItems(getPageItems(projectId, fallback) as GridItem[]);
+                            if (fallback) replaceItems(getPageItems(projectId, fallback) as GridItem[], fallback);
                           }
                         },
                       };
@@ -1871,7 +1888,7 @@ export default function EditorPage() {
             try {
               try { localStorage.setItem(`py_current_page_${projectId}`, pageId); } catch { /* ignore */ }
               selectPage(pageId);
-              replaceItems(getPageItems(projectId, pageId) as GridItem[]);
+              replaceItems(getPageItems(projectId, pageId) as GridItem[], pageId);
             } catch { /* ignore */ }
             setRenameModalOpen(false);
           }}
@@ -1895,7 +1912,7 @@ export default function EditorPage() {
 
             deletePage(projectId, deletedPageId);
             selectPage(nextId);
-            if (nextId) replaceItems(getPageItems(projectId, nextId) as GridItem[]); else replaceItems([]);
+            if (nextId) replaceItems(getPageItems(projectId, nextId) as GridItem[], nextId); else replaceItems([], null);
 
             setHistory(h => {
               const entry: HistoryEntry = {
@@ -1909,7 +1926,7 @@ export default function EditorPage() {
                     if (snapBackground) setPageBackground(projectId, nid, snapBackground);
                     if (snapStarter) setPageStarter(projectId, nid, true);
                     selectPage(nid);
-                    replaceItems(getPageItems(projectId, nid) as GridItem[]);
+                    replaceItems(getPageItems(projectId, nid) as GridItem[], nid);
                   }
                 },
                 onRedo: () => {
@@ -1919,7 +1936,7 @@ export default function EditorPage() {
                     const remaining = (selectedProject.pageOrder || []).filter(id => id !== target);
                     const fallback = remaining[0] || null;
                     selectPage(fallback);
-                    if (fallback) replaceItems(getPageItems(projectId, fallback) as GridItem[]); else replaceItems([]);
+                    if (fallback) replaceItems(getPageItems(projectId, fallback) as GridItem[], fallback); else replaceItems([], null);
                   }
                 }
               };
@@ -1935,7 +1952,7 @@ export default function EditorPage() {
             if (newPageId) {
               selectPage(newPageId);
               try { localStorage.setItem(`py_current_page_${projectId}`, newPageId); } catch { /* ignore */ }
-              replaceItems(getPageItems(projectId, newPageId) as GridItem[]);
+              replaceItems(getPageItems(projectId, newPageId) as GridItem[], newPageId);
               setHistory(h => {
                 const entry: HistoryEntry = {
                   label: 'Duplicate page',
@@ -1944,13 +1961,13 @@ export default function EditorPage() {
                   onUndo: () => {
                     deletePage(projectId, newPageId);
                     selectPage(sourcePageId);
-                    replaceItems(sourcePageItems);
+                    replaceItems(sourcePageItems, sourcePageId);
                   },
                   onRedo: () => {
                     const redoPageId = duplicatePage(projectId, sourcePageId);
                     if (redoPageId) {
                       selectPage(redoPageId);
-                      replaceItems(getPageItems(projectId, redoPageId) as GridItem[]);
+                      replaceItems(getPageItems(projectId, redoPageId) as GridItem[], redoPageId);
                     }
                   }
                 };
@@ -2043,7 +2060,7 @@ export default function EditorPage() {
               const newId = duplicatePage(selectedProject.id, currentPageId);
               if (newId) {
                 selectPage(newId);
-                replaceItems(getPageItems(selectedProject.id, newId) as GridItem[]);
+                replaceItems(getPageItems(selectedProject.id, newId) as GridItem[], newId);
               }
             }
           }}

@@ -399,8 +399,9 @@ export function projectHasPageTitle(proj: LocalProject, title: string, excludePa
 // Generate a unique page title using a base title by appending ` (copy)` or ` (n)` when necessary.
 export function generateUniquePageTitle(proj: LocalProject, baseTitle: string, excludePageId?: string): string {
 	const base = (baseTitle || '').trim() || 'Untitled';
-	let candidate = `${base} copy`;
-	if (!projectHasPageTitle(proj, candidate, excludePageId)) return candidate;
+	if (!projectHasPageTitle(proj, base, excludePageId)) return base;
+	const copyCandidate = `${base} copy`;
+	if (!projectHasPageTitle(proj, copyCandidate, excludePageId)) return copyCandidate;
 	let n = 1;
 	while (true) {
 		const cand = `${base} (${n})`;
@@ -490,26 +491,38 @@ export function resolveIncomingWidgetIds(proj: LocalProject, pageId: string, ite
 				: (typeof original?.schemaVersion === 'number' ? original?.schemaVersion : 1);
 			nextWidgets[newWid] = {
 				widgetId: newWid,
-				if(process.env.NODE_ENV === 'development') {
-					try { console.error('[ProjectsProvider] resolveIncomingWidgetIds: created clone', { projectId: proj.id, pageId, originalWid: wid, newWid });
-} catch { /* noop */ }
-							}
-type: it.type || original?.type || 'custom',
-	slot: original?.slot || 'default',
-		order: 0,
-			props: it.props ?? original?.props ?? {},
-				layout: { x: it.x, y: it.y, w: it.w, h: it.h, z: it.z, title: it.title ?? ((original?.layout as any)?.title) ?? undefined, pinned: !!it.pinned, locked: !!it.locked },
-schemaVersion,
-	createdAt,
-	updatedAt: nowStr,
-		originWidgetId: original?.widgetId,
+				type: it.type || original?.type || 'custom',
+				slot: original?.slot || 'default',
+				order: 0,
+				props: it.props ?? original?.props ?? {},
+				layout: {
+					x: it.x,
+					y: it.y,
+					w: it.w,
+					h: it.h,
+					z: it.z,
+					title: it.title ?? ((original?.layout as any)?.title) ?? undefined,
+					pinned: !!it.pinned,
+					locked: !!it.locked,
+				},
+				schemaVersion,
+				createdAt,
+				updatedAt: nowStr,
+				originWidgetId: original?.widgetId,
 			} as Widget;
-return { ...it, id: newWid };
+			if (process.env.NODE_ENV === 'development') {
+				try {
+					console.error('[ProjectsProvider] resolveIncomingWidgetIds: created clone', { projectId: proj.id, pageId, originalWid: wid, newWid });
+				} catch {
+					/* noop */
+				}
+			}
+			return { ...it, id: newWid };
 		}
-// id not used by other pages — keep as-is
-return it;
+		// id not used by other pages — keep as-is
+		return it;
 	});
-return { resolvedItems, nextWidgets };
+	return { resolvedItems, nextWidgets };
 }
 
 // Pure helper that applies `setPageItems` logic to a single project instance and returns

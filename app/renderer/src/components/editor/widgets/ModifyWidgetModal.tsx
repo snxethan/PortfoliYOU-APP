@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Pin, PinOff, Lock, Unlock, ChevronsUp, ChevronsDown, ChevronUp, ChevronDown, ChevronRight, X, Trash2 } from "lucide-react";
+import { Pin, PinOff, Lock, Unlock, ChevronsUp, ChevronsDown, ChevronUp, ChevronDown, ChevronRight, X, Trash2, AlignLeft, AlignCenter, AlignRight, Bold as BoldIcon, Italic as ItalicIcon, Type, Link as LinkIcon, Palette, Sparkles } from "lucide-react";
 import { z } from "zod";
 
 import { useAssets } from "../../../providers/AssetsProvider";
@@ -111,6 +111,47 @@ const VIDEO_FIELD_HINTS = ['video', 'clip', 'movie', 'reel', 'media'];
 const GENERIC_ASSET_HINTS = ['asset', 'src', 'source', 'file'];
 const URL_PROTOCOL_SUGGESTIONS = ['https://', 'http://', 'mailto:', 'tel:'] as const;
 
+const TEXT_VARIANTS = ['paragraph', 'h2', 'h3'] as const;
+const TEXT_ALIGNMENTS = ['left', 'center', 'right'] as const;
+const TEXT_FONTS = ['system', 'serif', 'mono'] as const;
+const TEXT_FORMATS = ['plain', 'markdown'] as const;
+const TEXT_WEIGHTS = ['normal', 'bold'] as const;
+const TEXT_WIDGET_FIELD_KEYS = new Set(['text', 'variant', 'align', 'font', 'color', 'fontSize', 'weight', 'italic', 'ariaLabel', 'ariaDescription', 'format']);
+
+type TextVariantOption = typeof TEXT_VARIANTS[number];
+type TextAlignOption = typeof TEXT_ALIGNMENTS[number];
+type TextFontOption = typeof TEXT_FONTS[number];
+type TextFormatOption = typeof TEXT_FORMATS[number];
+type TextWeightOption = typeof TEXT_WEIGHTS[number];
+
+function createStringGuard<T extends readonly string[]>(options: T) {
+    return (value: unknown): value is T[number] => typeof value === 'string' && (options as readonly string[]).includes(value as string);
+}
+
+const isTextVariantValue = createStringGuard(TEXT_VARIANTS);
+const isTextAlignValue = createStringGuard(TEXT_ALIGNMENTS);
+const isTextFontValue = createStringGuard(TEXT_FONTS);
+const isTextFormatValue = createStringGuard(TEXT_FORMATS);
+const isTextWeightValue = createStringGuard(TEXT_WEIGHTS);
+
+const LINK_VARIANTS = ['button', 'text', 'card'] as const;
+const LINK_WIDGET_FIELD_KEYS = new Set(['url', 'label', 'variant', 'iconLeft', 'iconRight', 'font', 'fontSize', 'weight', 'italic', 'ariaLabel', 'ariaDescription']);
+
+type LinkVariantOption = typeof LINK_VARIANTS[number];
+type LinkFontOption = TextFontOption;
+type LinkWeightOption = TextWeightOption;
+
+const isLinkVariantValue = createStringGuard(LINK_VARIANTS);
+const isLinkFontValue = isTextFontValue;
+const isLinkWeightValue = isTextWeightValue;
+
+const NAV_LINK_STYLES = ['link', 'button'] as const;
+const NAV_LINK_WIDGET_FIELD_KEYS = new Set(['label', 'targetPageId', 'style', 'align', 'color', 'textColor', 'underline', 'font', 'fontSize', 'ariaLabel']);
+
+type NavLinkStyleOption = typeof NAV_LINK_STYLES[number];
+
+const isNavLinkStyleValue = createStringGuard(NAV_LINK_STYLES);
+
 type AssetKind = 'image' | 'video' | 'media';
 
 function hasUrlValidation(field: z.ZodTypeAny) {
@@ -217,6 +258,7 @@ export default function ModifyWidgetModal({
     const [zodSchema, setZodSchema] = useState<z.ZodObject<z.ZodRawShape> | null>(null);
     const [formValues, setFormValues] = useState<Record<string, unknown>>({});
     const [formErrors, setFormErrors] = useState<Record<string, string>>({});
+    const [widgetDefaults, setWidgetDefaults] = useState<Record<string, unknown> | null>(null);
     const [defType, setDefType] = useState<string | null>(null);
     const [imageFileName, setImageFileName] = useState<string>("");
     const [videoFileName, setVideoFileName] = useState<string>("");
@@ -372,19 +414,33 @@ export default function ModifyWidgetModal({
             .then((def) => {
                 if (!mounted) return;
                 try { setDefType((def as unknown as { type?: string }).type || item.type || null); } catch { setDefType(item.type || null); }
+                const defaults = (def as unknown as { defaultProps?: Record<string, unknown> }).defaultProps;
+                setWidgetDefaults(defaults ? { ...defaults } : null);
                 const schema = (def as unknown as { zodSchema?: z.ZodObject<z.ZodRawShape> }).zodSchema;
                 setZodSchema(schema ?? null);
+                const currentProps = (item.props as Record<string, unknown>) ?? {};
                 if (schema) {
                     // Initialize form values from current props with defaults for missing keys
                     const shape = schema.shape;
+                    const defaultsObj = (defaults && typeof defaults === 'object') ? defaults : undefined;
                     const initial: Record<string, unknown> = {};
                     for (const key of Object.keys(shape)) {
-                        const current = (item.props as any)?.[key];
-                        initial[key] = current !== undefined ? current : undefined;
+                        if (currentProps[key] !== undefined) {
+                            initial[key] = currentProps[key];
+                        } else if (defaultsObj && defaultsObj[key] !== undefined) {
+                            initial[key] = defaultsObj[key];
+                        } else {
+                            initial[key] = undefined;
+                        }
                     }
-                    setFormValues({ ...initial, ...(item.props as any) });
+                    const merged = {
+                        ...(defaultsObj ?? {}),
+                        ...initial,
+                        ...currentProps,
+                    };
+                    setFormValues(merged);
                     // Validate once to populate errors
-                    const res = schema.safeParse({ ...initial, ...(item.props as any) });
+                    const res = schema.safeParse(merged);
                     if (!res.success) {
                         const errs: Record<string, string> = {};
                         for (const issue of res.error.issues) {
@@ -397,7 +453,10 @@ export default function ModifyWidgetModal({
                         setFormErrors({});
                     }
                 } else {
-                    setFormValues({});
+                    const withDefaults = defaults && typeof defaults === 'object'
+                        ? { ...defaults, ...currentProps }
+                        : currentProps;
+                    setFormValues(withDefaults);
                     setFormErrors({});
                 }
             })
@@ -472,12 +531,30 @@ export default function ModifyWidgetModal({
         validateField(key, value);
     }
 
+    const isTextWidget = resolvedDefType === 'text';
+    const isLinkWidget = resolvedDefType === 'link';
+    const isNavLinkWidget = resolvedDefType === 'nav-link';
+    const textSchemaFields = new Map<string, z.ZodTypeAny>();
+    const linkSchemaFields = new Map<string, z.ZodTypeAny>();
+    const navLinkSchemaFields = new Map<string, z.ZodTypeAny>();
     const schemaFieldBuckets = {
         default: [] as Array<[string, z.ZodTypeAny]>,
         appearance: [] as Array<[string, z.ZodTypeAny]>,
     };
     if (zodSchema) {
         for (const [key, schema] of Object.entries(zodSchema.shape)) {
+            if (isTextWidget && TEXT_WIDGET_FIELD_KEYS.has(key)) {
+                textSchemaFields.set(key, schema as z.ZodTypeAny);
+                continue;
+            }
+            if (isLinkWidget && LINK_WIDGET_FIELD_KEYS.has(key)) {
+                linkSchemaFields.set(key, schema as z.ZodTypeAny);
+                continue;
+            }
+            if (isNavLinkWidget && NAV_LINK_WIDGET_FIELD_KEYS.has(key)) {
+                navLinkSchemaFields.set(key, schema as z.ZodTypeAny);
+                continue;
+            }
             if (isVideo && (key === 'src' || key === 'poster' || VIDEO_APPEARANCE_FIELDS.has(key))) {
                 continue;
             }
@@ -485,6 +562,13 @@ export default function ModifyWidgetModal({
             bucket.push([key, schema as z.ZodTypeAny]);
         }
     }
+
+    const navPages = useMemo(() => {
+        const project = selectedProject;
+        if (!project) return [] as Array<{ id: string; title: string }>;
+        const order = project.pageOrder || [];
+        return order.map((id) => ({ id, title: project.pages?.[id]?.title || id }));
+    }, [selectedProject]);
 
     const renderSchemaField = (key: string, schema: z.ZodTypeAny): React.ReactElement | null => {
         if (!zodSchema) return null;
@@ -718,6 +802,42 @@ export default function ModifyWidgetModal({
 
     const defaultFieldNodes = schemaFieldBuckets.default.map(([key, schema]) => renderSchemaField(key, schema)).filter((node): node is React.ReactElement => Boolean(node));
     const appearanceFieldNodes = schemaFieldBuckets.appearance.map(([key, schema]) => renderSchemaField(key, schema)).filter((node): node is React.ReactElement => Boolean(node));
+    const textWidgetSettingsNode = isTextWidget ? (
+        <TextWidgetSettings
+            values={formValues}
+            errors={formErrors}
+            locked={locked}
+            setFieldValue={setFieldValue}
+            schemaFields={textSchemaFields}
+            onCommitKeyDown={handleEnterSubmitComp}
+            widgetDefaults={widgetDefaults}
+        />
+    ) : null;
+    const linkWidgetSettingsNode = isLinkWidget ? (
+        <LinkWidgetSettings
+            values={formValues}
+            errors={formErrors}
+            locked={locked}
+            setFieldValue={setFieldValue}
+            schemaFields={linkSchemaFields}
+            onCommitKeyDown={handleEnterSubmitComp}
+            widgetDefaults={widgetDefaults}
+            rawUrl={linkRawUrl}
+            fieldError={linkFieldError}
+        />
+    ) : null;
+    const navWidgetSettingsNode = isNavLinkWidget ? (
+        <NavLinkWidgetSettings
+            values={formValues}
+            errors={formErrors}
+            locked={locked}
+            setFieldValue={setFieldValue}
+            schemaFields={navLinkSchemaFields}
+            onCommitKeyDown={handleEnterSubmitComp}
+            widgetDefaults={widgetDefaults}
+            pages={navPages}
+        />
+    ) : null;
 
     function applyProps() {
         if (locked) return;
@@ -1598,8 +1718,12 @@ export default function ModifyWidgetModal({
                                     </div>
                                 )}
 
+                                {textWidgetSettingsNode}
+                                {linkWidgetSettingsNode}
+                                {navWidgetSettingsNode}
+
                                 {/* Zod-backed properties */}
-                                {zodSchema && (
+                                {zodSchema && (!!defaultFieldNodes.length || !!appearanceFieldNodes.length || defType === 'link') && (
                                     <div className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)]/90 p-4">
                                         <div className="text-[color:var(--fg-muted)] mb-2 font-medium">Component Properties</div>
                                         {!!defaultFieldNodes.length && (
@@ -1612,9 +1736,6 @@ export default function ModifyWidgetModal({
                                                 <div className="text-[color:var(--fg-muted)] font-medium">Appearance</div>
                                                 {appearanceFieldNodes}
                                             </div>
-                                        )}
-                                        {defType === 'link' && (
-                                            <LinkPreviewPanel rawUrl={linkRawUrl} fieldError={linkFieldError} disabled={locked} />
                                         )}
                                     </div>
                                 )}
@@ -1632,10 +1753,10 @@ export default function ModifyWidgetModal({
                             <div className="text-[color:var(--fg-muted)]" />
                         </button>
                         {widgetOpen && (
-                            <div className="p-4 bg-[color:var(--surface)]/90 space-y-4">
+                            <div className="p-4 bg-[color:var(--surface)]/95 space-y-5">
                                 {/* Name */}
-                                <div>
-                                    <label className="block text-[color:var(--fg-muted)] mb-1">Name</label>
+                                <div className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)] p-4 space-y-2">
+                                    <label className="block text-[color:var(--fg-muted)] text-xs uppercase tracking-wide">Name</label>
                                     <input
                                         className="input w-full"
                                         value={title}
@@ -1663,19 +1784,19 @@ export default function ModifyWidgetModal({
                                 </div>
 
                                 {/* Protection */}
-                                <div className="rounded-xl border border-[color:var(--border)] bg-[color:var(--surface)]/80">
-                                    <button className="w-full flex items-center justify-between gap-2 px-3 py-2 text-xs font-semibold text-[color:var(--fg-muted)]" onClick={() => persistedToggle('py_widget_protection_open', setProtectionOpen)}>
-                                        <div className="flex items-center gap-2">
-                                            {protectionOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-                                            <span>Protection</span>
-                                        </div>
-                                        <div />
+                                <div className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)]/95">
+                                    <button className="w-full flex items-center justify-between gap-2 px-4 py-3 text-left text-sm font-semibold text-[color:var(--fg)]" onClick={() => persistedToggle('py_widget_protection_open', setProtectionOpen)}>
+                                        <span className="flex items-center gap-2">
+                                            {protectionOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                                            Protection
+                                        </span>
+                                        <span className="text-[11px] text-[color:var(--fg-muted)]">{protectionOpen ? 'Hide' : 'Show'}</span>
                                     </button>
                                     {protectionOpen && (
-                                        <div className="p-3 bg-[color:var(--surface)]/90">
-                                            <div className="flex items-center gap-2">
+                                        <div className="p-4 border-t border-[color:var(--border)] space-y-3">
+                                            <div className="flex flex-wrap gap-2">
                                                 <button
-                                                    className={`btn btn-ghost flex items-center gap-2 ${pinDisabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                                    className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-sm font-semibold transition-colors duration-150 ${pinned ? 'bg-[color:var(--accent)]/20 border-[color:var(--accent)] text-[color:var(--accent)] shadow-sm' : 'border-[color:var(--border)] text-[color:var(--fg-muted)] hover:border-[color:var(--accent)] hover:text-[color:var(--accent)]'} ${pinDisabled ? 'opacity-50 cursor-not-allowed' : ''}`}
                                                     onClick={() => { if (!pinDisabled) onTogglePin(); }}
                                                     title={pinned ? 'Unpin (allow move)' : 'Pin (prevent move)'}
                                                     disabled={pinDisabled}
@@ -1684,7 +1805,7 @@ export default function ModifyWidgetModal({
                                                     <span>{pinned ? 'Pinned' : 'Pin'}</span>
                                                 </button>
                                                 <button
-                                                    className="btn btn-ghost flex items-center gap-2"
+                                                    className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-sm font-semibold transition-colors duration-150 ${locked ? 'bg-[color:var(--accent)]/20 border-[color:var(--accent)] text-[color:var(--accent)] shadow-sm' : 'border-[color:var(--border)] text-[color:var(--fg-muted)] hover:border-[color:var(--accent)] hover:text-[color:var(--accent)]'}`}
                                                     onClick={onToggleLock}
                                                     title={locked ? 'Unlock (allow modify)' : 'Lock (prevent modify)'}
                                                 >
@@ -1692,33 +1813,34 @@ export default function ModifyWidgetModal({
                                                     <span>{locked ? 'Locked' : 'Lock'}</span>
                                                 </button>
                                             </div>
+                                            <p className="text-[11px] text-[color:var(--fg-muted)]">Pinning keeps the widget anchored while locking prevents accidental edits.</p>
                                         </div>
                                     )}
                                 </div>
 
                                 {/* Layer order */}
-                                <div className="rounded-xl border border-[color:var(--border)] bg-[color:var(--surface)]/80">
-                                    <button className="w-full flex items-center justify-between gap-2 px-3 py-2 text-xs font-semibold text-[color:var(--fg-muted)]" onClick={() => persistedToggle('py_widget_layers_open', setLayerOpen)}>
-                                        <div className="flex items-center gap-2">
-                                            {layerOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-                                            <span>Layer order</span>
-                                        </div>
-                                        <div />
+                                <div className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)]/95">
+                                    <button className="w-full flex items-center justify-between gap-2 px-4 py-3 text-left text-sm font-semibold text-[color:var(--fg)]" onClick={() => persistedToggle('py_widget_layers_open', setLayerOpen)}>
+                                        <span className="flex items-center gap-2">
+                                            {layerOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                                            Layer order
+                                        </span>
+                                        <span className="text-[11px] text-[color:var(--fg-muted)]">{layerOpen ? 'Hide' : 'Show'}</span>
                                     </button>
                                     {layerOpen && (
-                                        <div className="p-3">
-                                            <div className="grid grid-cols-2 gap-2">
-                                                <button className="btn btn-ghost flex items-center gap-2" onClick={onBringToFront} disabled={locked} title="Bring to front">
-                                                    <ChevronsUp size={16} /> Bring to front
+                                        <div className="p-4 border-t border-[color:var(--border)]">
+                                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                                <button className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg border border-[color:var(--border)] text-sm font-semibold transition-colors duration-150 hover:border-[color:var(--accent)] hover:text-[color:var(--accent)] disabled:opacity-50" onClick={onBringToFront} disabled={locked} title="Bring to front">
+                                                    <span className="flex items-center gap-2"><ChevronsUp size={16} /> Bring to front</span>
                                                 </button>
-                                                <button className="btn btn-ghost flex items-center gap-2" onClick={onSendToBack} disabled={locked} title="Send to back">
-                                                    <ChevronsDown size={16} /> Send to back
+                                                <button className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg border border-[color:var(--border)] text-sm font-semibold transition-colors duration-150 hover:border-[color:var(--accent)] hover:text-[color:var(--accent)] disabled:opacity-50" onClick={onSendToBack} disabled={locked} title="Send to back">
+                                                    <span className="flex items-center gap-2"><ChevronsDown size={16} /> Send to back</span>
                                                 </button>
-                                                <button className="btn btn-ghost flex items-center gap-2" onClick={onBringForward} disabled={locked} title="Move up one layer">
-                                                    <ChevronUp size={16} /> Move up
+                                                <button className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg border border-[color:var(--border)] text-sm font-semibold transition-colors duration-150 hover:border-[color:var(--accent)] hover:text-[color:var(--accent)] disabled:opacity-50" onClick={onBringForward} disabled={locked} title="Move up one layer">
+                                                    <span className="flex items-center gap-2"><ChevronUp size={16} /> Move up</span>
                                                 </button>
-                                                <button className="btn btn-ghost flex items-center gap-2" onClick={onSendBackward} disabled={locked} title="Move down one layer">
-                                                    <ChevronDown size={16} /> Move down
+                                                <button className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg border border-[color:var(--border)] text-sm font-semibold transition-colors duration-150 hover:border-[color:var(--accent)] hover:text-[color:var(--accent)] disabled:opacity-50" onClick={onSendBackward} disabled={locked} title="Move down one layer">
+                                                    <span className="flex items-center gap-2"><ChevronDown size={16} /> Move down</span>
                                                 </button>
                                             </div>
                                         </div>
@@ -1726,16 +1848,16 @@ export default function ModifyWidgetModal({
                                 </div>
 
                                 {/* Widget info */}
-                                <div>
-                                    <div className="text-[color:var(--fg-muted)] mb-1">Type</div>
-                                    <div className="font-mono text-xs px-2 py-1 rounded bg-[color:var(--muted)]/40 border border-[color:var(--border)] inline-block">
+                                <div className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)] p-4 space-y-1">
+                                    <div className="text-[color:var(--fg-muted)] text-xs uppercase tracking-wide">Type</div>
+                                    <div className="font-mono text-xs px-3 py-2 rounded-lg bg-[color:var(--muted)]/30 border border-[color:var(--border)]">
                                         {item.type ?? 'unknown'}
                                     </div>
                                 </div>
 
                                 {/* JSON settings */}
-                                <div className="border border-[color:var(--border)] rounded-md p-3 bg-[color:var(--muted)]/40">
-                                    <label className="block text-[color:var(--fg-muted)] mb-1">Advanced: Raw JSON settings</label>
+                                <div className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)] p-4 space-y-2">
+                                    <label className="block text-[color:var(--fg-muted)] text-xs uppercase tracking-wide">Advanced: Raw JSON settings</label>
                                     <textarea
                                         className="input w-full font-mono min-h-[10rem]"
                                         value={propsText}
@@ -1744,6 +1866,7 @@ export default function ModifyWidgetModal({
                                         onKeyDown={handleCtrlEnterApplyJson}
                                     />
                                     {propsError && <div className="mt-1 text-xs text-red-500">{propsError}</div>}
+                                    <div className="text-[10px] text-[color:var(--fg-muted)]">Use this area for bulk edits or to paste props from another widget.</div>
                                 </div>
                             </div>
                         )}
@@ -1784,6 +1907,1010 @@ export default function ModifyWidgetModal({
     );
 }
 
+type TextWidgetSettingsProps = {
+    values: Record<string, unknown>;
+    errors: Record<string, string>;
+    locked: boolean;
+    setFieldValue: (key: string, value: unknown) => void;
+    schemaFields: Map<string, z.ZodTypeAny>;
+    onCommitKeyDown: (event: React.KeyboardEvent<HTMLInputElement>) => void;
+    widgetDefaults: Record<string, unknown> | null;
+};
+
+function TextWidgetSettings({ values, errors, locked, setFieldValue, schemaFields, onCommitKeyDown, widgetDefaults }: TextWidgetSettingsProps) {
+    type SectionKey = 'content' | 'typography' | 'accessibility';
+    const [sectionsOpen, setSectionsOpen] = useState<Record<SectionKey, boolean>>({ content: true, typography: true, accessibility: true });
+    const toggleSection = (key: SectionKey) => setSectionsOpen(prev => ({ ...prev, [key]: !prev[key] }));
+    const getDefault = (key: string): unknown => {
+        if (!widgetDefaults) return undefined;
+        return widgetDefaults[key];
+    };
+    const textValue = typeof values.text === 'string'
+        ? values.text
+        : (typeof getDefault('text') === 'string' ? String(getDefault('text')) : '');
+    const formatValue = isTextFormatValue(values.format)
+        ? values.format
+        : (isTextFormatValue(getDefault('format')) ? getDefault('format') as TextFormatOption : 'plain');
+    const variantValue = isTextVariantValue(values.variant)
+        ? values.variant
+        : (isTextVariantValue(getDefault('variant')) ? getDefault('variant') as TextVariantOption : 'paragraph');
+    const alignValue = isTextAlignValue(values.align)
+        ? values.align
+        : (isTextAlignValue(getDefault('align')) ? getDefault('align') as TextAlignOption : 'left');
+    const fontValue = isTextFontValue(values.font)
+        ? values.font
+        : (isTextFontValue(getDefault('font')) ? getDefault('font') as TextFontOption : 'system');
+    const weightValue = isTextWeightValue(values.weight)
+        ? values.weight
+        : (isTextWeightValue(getDefault('weight')) ? getDefault('weight') as TextWeightOption : 'normal');
+    const italicDefault = typeof getDefault('italic') === 'boolean' ? Boolean(getDefault('italic')) : false;
+    const italicValue = typeof values.italic === 'boolean' ? values.italic : italicDefault;
+    const colorValue = typeof values.color === 'string' ? values.color : (typeof getDefault('color') === 'string' ? String(getDefault('color')) : '');
+    const ariaLabelValue = typeof values.ariaLabel === 'string'
+        ? values.ariaLabel
+        : (typeof getDefault('ariaLabel') === 'string' ? String(getDefault('ariaLabel')) : '');
+    const ariaDescriptionValue = typeof values.ariaDescription === 'string'
+        ? values.ariaDescription
+        : (typeof getDefault('ariaDescription') === 'string' ? String(getDefault('ariaDescription')) : '');
+    const fontSizeField = schemaFields.get('fontSize');
+    const fontSizeMeta = fontSizeField instanceof z.ZodNumber ? deriveNumberBounds(fontSizeField as z.ZodNumber) : undefined;
+    const minFontSize = fontSizeMeta?.min ?? 8;
+    const maxFontSize = fontSizeMeta?.max ?? 128;
+    const fontSizeStep = fontSizeMeta?.step ?? 1;
+    const defaultFontSize = getDefault('fontSize');
+    const fallbackFontSize = typeof defaultFontSize === 'number' && Number.isFinite(defaultFontSize)
+        ? Number(defaultFontSize)
+        : Math.min(Math.max(16, minFontSize), maxFontSize);
+    const customFontSize = typeof values.fontSize === 'number' && Number.isFinite(values.fontSize);
+    const sliderFontSize = customFontSize ? Number(values.fontSize) : fallbackFontSize;
+    const fontSizeInputValue = customFontSize ? Number(values.fontSize) : '';
+    const colorSwatch = HEX_COLOR_RE.test(colorValue) ? colorValue : '#1f2937';
+    const SectionCard = ({ sectionKey, title, icon, children }: { sectionKey: SectionKey; title: string; icon: React.ReactNode; children: React.ReactNode; }) => {
+        const open = sectionsOpen[sectionKey];
+        return (
+            <div className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)]/95 shadow-sm">
+                <button
+                    type="button"
+                    className="w-full flex items-center justify-between gap-2 px-4 py-3 text-left text-sm font-semibold text-[color:var(--fg)]"
+                    onClick={() => toggleSection(sectionKey)}
+                    aria-expanded={open}
+                >
+                    <span className="flex items-center gap-2">
+                        {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                        <span className="flex items-center gap-2 text-[color:var(--fg)]">
+                            {icon}
+                            {title}
+                        </span>
+                    </span>
+                    <span className="text-[11px] text-[color:var(--fg-muted)]">{open ? 'Hide' : 'Show'}</span>
+                </button>
+                {open && (
+                    <div className="p-4 space-y-4 border-t border-[color:var(--border)] bg-[color:var(--surface)]">
+                        {children}
+                    </div>
+                )}
+            </div>
+        );
+    };
+    const variantOptions: Array<{ value: TextVariantOption; label: string; description: string }> = [
+        { value: 'paragraph', label: 'Paragraph', description: 'Standard body copy with inline formatting.' },
+        { value: 'h2', label: 'Heading 2', description: 'Large section heading.' },
+        { value: 'h3', label: 'Heading 3', description: 'Smaller heading for sub-sections.' },
+    ];
+    const alignmentOptions: Array<{ value: TextAlignOption; label: string; icon: React.ReactNode }> = [
+        { value: 'left', label: 'Left align', icon: <AlignLeft size={14} /> },
+        { value: 'center', label: 'Center align', icon: <AlignCenter size={14} /> },
+        { value: 'right', label: 'Right align', icon: <AlignRight size={14} /> },
+    ];
+    const fontOptions: Array<{ value: TextFontOption; label: string; sample: string }> = [
+        { value: 'system', label: 'System', sample: 'Aa' },
+        { value: 'serif', label: 'Serif', sample: 'Aa' },
+        { value: 'mono', label: 'Mono', sample: '{ }' },
+    ];
+    const formatHelper = formatValue === 'markdown'
+        ? 'Use **bold**, _italic_, lists, links, and more with GitHub-flavored Markdown.'
+        : 'Best for simple paragraphs. Switch to Markdown for rich formatting.';
+
+    return (
+        <div className="space-y-4">
+            <SectionCard sectionKey="content" title="Text content" icon={<Type size={14} />}>
+                <div>
+                    <label className="block text-[color:var(--fg-muted)] mb-1">Text *</label>
+                    <textarea
+                        className="input w-full min-h-[6rem]"
+                        value={textValue}
+                        onChange={(e) => setFieldValue('text', e.target.value)}
+                        disabled={locked}
+                    />
+                    <div className="text-[10px] text-[color:var(--fg-muted)] mt-1 flex items-center justify-between">
+                        <span>{textValue.length} characters</span>
+                        <span>{formatValue === 'markdown' ? 'Markdown enabled' : 'Plain text'}</span>
+                    </div>
+                    {errors.text && <div className="text-xs text-red-500 mt-1">{errors.text}</div>}
+                </div>
+                <div>
+                    <label className="block text-[color:var(--fg-muted)] mb-1">Format</label>
+                    <div className="flex flex-wrap gap-2">
+                        {TEXT_FORMATS.map((fmt) => (
+                            <button
+                                key={fmt}
+                                type="button"
+                                className={`flex-1 min-w-[8rem] px-3 py-1.5 rounded border text-xs font-semibold transition-colors duration-150 ${formatValue === fmt ? 'bg-[color:var(--accent)]/20 border-[color:var(--accent)] text-[color:var(--accent)]' : 'border-[color:var(--border)] text-[color:var(--fg-muted)] bg-[color:var(--surface)]/70 hover:border-[color:var(--accent)] hover:text-[color:var(--accent)]'}`}
+                                onClick={() => setFieldValue('format', fmt)}
+                                disabled={locked}
+                            >
+                                {fmt === 'plain' ? 'Plain text' : 'Markdown'}
+                            </button>
+                        ))}
+                    </div>
+                    <div className="text-[10px] text-[color:var(--fg-muted)] mt-1">{formatHelper}</div>
+                </div>
+            </SectionCard>
+
+            <SectionCard sectionKey="typography" title="Typography & layout" icon={<AlignLeft size={14} />}>
+                <div className="space-y-2">
+                    <label className="block text-[color:var(--fg-muted)] mb-1">Variant</label>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                        {variantOptions.map((option) => (
+                            <button
+                                key={option.value}
+                                type="button"
+                                className={`text-left px-3 py-2 rounded border transition-colors duration-150 ${variantValue === option.value ? 'border-[color:var(--accent)] bg-[color:var(--accent)]/15 text-[color:var(--accent)] shadow-sm' : 'border-[color:var(--border)] text-[color:var(--fg-muted)] hover:border-[color:var(--accent)] hover:text-[color:var(--accent)]'}`}
+                                onClick={() => setFieldValue('variant', option.value)}
+                                disabled={locked}
+                            >
+                                <div className="text-sm font-semibold">{option.label}</div>
+                                <div className="text-[11px] text-[color:var(--fg-muted)]/90">{option.description}</div>
+                            </button>
+                        ))}
+                    </div>
+                    {errors.variant && <div className="text-xs text-red-500">{errors.variant}</div>}
+                </div>
+
+                <div>
+                    <label className="block text-[color:var(--fg-muted)] mb-1">Alignment</label>
+                    <div className="flex flex-wrap gap-2">
+                        {alignmentOptions.map((option) => (
+                            <button
+                                key={option.value}
+                                type="button"
+                                className={`flex-1 min-w-[5rem] px-3 py-1.5 rounded border text-xs font-semibold transition-colors duration-150 ${alignValue === option.value ? 'bg-[color:var(--accent)]/25 border-[color:var(--accent)] text-[color:var(--accent)] shadow-sm' : 'border-[color:var(--border)] text-[color:var(--fg-muted)] bg-[color:var(--surface)]/70 hover:border-[color:var(--accent)] hover:text-[color:var(--accent)]'}`}
+                                onClick={() => setFieldValue('align', option.value)}
+                                disabled={locked}
+                                title={option.label}
+                            >
+                                <div className="flex items-center justify-center gap-1">
+                                    {option.icon}
+                                    <span className="text-[11px]">{option.label.split(' ')[0]}</span>
+                                </div>
+                            </button>
+                        ))}
+                    </div>
+                    {errors.align && <div className="text-xs text-red-500 mt-1">{errors.align}</div>}
+                </div>
+
+                <div>
+                    <label className="block text-[color:var(--fg-muted)] mb-1">Font family</label>
+                    <div className="rounded-xl border border-[color:var(--accent)] bg-[color:var(--accent)]/12 p-3 shadow-sm">
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-white">
+                            {fontOptions.map((option) => (
+                                <button
+                                    key={option.value}
+                                    type="button"
+                                    className={`px-3 py-2 rounded-lg border text-left text-sm font-semibold transition-colors duration-150 ${fontValue === option.value ? 'bg-[color:var(--accent)] text-white border-[color:var(--accent)] shadow-md' : 'bg-white/5 border-white/30 text-white/80 hover:bg-[color:var(--accent)]/80 hover:text-white'}`}
+                                    onClick={() => setFieldValue('font', option.value)}
+                                    disabled={locked}
+                                >
+                                    <div className="flex items-center justify-between">
+                                        <span>{option.label}</span>
+                                        <span className="text-lg font-semibold">{option.sample}</span>
+                                    </div>
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                    {errors.font && <div className="text-xs text-red-500 mt-1">{errors.font}</div>}
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                        <label className="block text-[color:var(--fg-muted)] mb-1">Weight</label>
+                        <div className="flex gap-2">
+                            {TEXT_WEIGHTS.map((weight) => (
+                                <button
+                                    key={weight}
+                                    type="button"
+                                    className={`flex-1 px-3 py-1.5 rounded border text-xs font-semibold transition-colors duration-150 ${weightValue === weight ? 'bg-[color:var(--accent)]/20 border-[color:var(--accent)] text-[color:var(--accent)] shadow-sm' : 'border-[color:var(--border)] text-[color:var(--fg-muted)] hover:border-[color:var(--accent)] hover:text-[color:var(--accent)]'}`}
+                                    onClick={() => setFieldValue('weight', weight)}
+                                    disabled={locked}
+                                >
+                                    <span className="flex items-center gap-1">
+                                        <BoldIcon size={14} />
+                                        {weight === 'bold' ? 'Bold' : 'Normal'}
+                                    </span>
+                                </button>
+                            ))}
+                        </div>
+                        {errors.weight && <div className="text-xs text-red-500 mt-1">{errors.weight}</div>}
+                    </div>
+                    <div>
+                        <label className="block text-[color:var(--fg-muted)] mb-1">Italic</label>
+                        <button
+                            type="button"
+                            className={`w-full px-3 py-1.5 rounded border text-xs font-semibold transition-colors duration-150 ${italicValue ? 'bg-[color:var(--accent)]/20 border-[color:var(--accent)] text-[color:var(--accent)] shadow-sm' : 'border-[color:var(--border)] text-[color:var(--fg-muted)] hover:border-[color:var(--accent)] hover:text-[color:var(--accent)]'}`}
+                            onClick={() => setFieldValue('italic', !italicValue)}
+                            disabled={locked}
+                        >
+                            <span className="flex items-center gap-2 justify-center">
+                                <ItalicIcon size={14} />
+                                {italicValue ? 'Enabled' : 'Disabled'}
+                            </span>
+                        </button>
+                        {errors.italic && <div className="text-xs text-red-500 mt-1">{errors.italic}</div>}
+                    </div>
+                </div>
+
+                <div>
+                    <label className="block text-[color:var(--fg-muted)] mb-1">Font size</label>
+                    <input
+                        type="range"
+                        className="w-full accent-[color:var(--accent)]"
+                        min={minFontSize}
+                        max={maxFontSize}
+                        step={fontSizeStep}
+                        value={sliderFontSize}
+                        onChange={(e) => setFieldValue('fontSize', Number(e.target.value))}
+                        disabled={locked}
+                    />
+                    <div className="flex flex-wrap items-center gap-2 mt-2">
+                        <input
+                            className="input w-24"
+                            type="number"
+                            min={minFontSize}
+                            max={maxFontSize}
+                            step={fontSizeStep}
+                            value={fontSizeInputValue}
+                            placeholder={`${minFontSize}-${maxFontSize}`}
+                            onChange={(e) => {
+                                const raw = e.target.value;
+                                setFieldValue('fontSize', raw === '' ? undefined : Number(raw));
+                            }}
+                            onKeyDown={onCommitKeyDown}
+                            disabled={locked}
+                        />
+                        <button
+                            type="button"
+                            className="px-3 py-1.5 rounded border border-[color:var(--border)] text-xs font-semibold transition-colors duration-150 hover:border-[color:var(--accent)] hover:text-[color:var(--accent)]"
+                            onClick={() => setFieldValue('fontSize', undefined)}
+                            disabled={locked || !customFontSize}
+                        >
+                            Auto
+                        </button>
+                        <div className="text-[11px] text-[color:var(--fg-muted)]">{customFontSize ? `${fontSizeInputValue}px` : 'Inherit theme size'}</div>
+                    </div>
+                    {errors.fontSize && <div className="text-xs text-red-500 mt-1">{errors.fontSize}</div>}
+                </div>
+
+                <div>
+                    <label className="block text-[color:var(--fg-muted)] mb-1">Text color</label>
+                    <div className="flex flex-wrap items-center gap-2">
+                        <input
+                            type="color"
+                            className="rounded border border-[color:var(--border)] bg-[color:var(--muted)]/40 h-8 w-12 cursor-pointer"
+                            value={colorSwatch}
+                            onChange={(e) => setFieldValue('color', e.target.value)}
+                            disabled={locked}
+                            aria-label="Pick text color"
+                        />
+                        <input
+                            className="input flex-1 font-mono text-xs"
+                            value={colorValue}
+                            placeholder="Inherit"
+                            onChange={(e) => setFieldValue('color', e.target.value || undefined)}
+                            onKeyDown={onCommitKeyDown}
+                            disabled={locked}
+                        />
+                        <button
+                            type="button"
+                            className="px-2 py-1 rounded border border-[color:var(--border)] text-[10px] font-semibold transition-colors duration-150 hover:border-[color:var(--accent)] hover:text-[color:var(--accent)]"
+                            onClick={() => setFieldValue('color', undefined)}
+                            disabled={locked || !colorValue}
+                        >
+                            Reset
+                        </button>
+                    </div>
+                    <div className="text-[10px] text-[color:var(--fg-muted)] mt-1">Leave blank to inherit the theme color or use CSS variables like var(--fg).</div>
+                    {errors.color && <div className="text-xs text-red-500 mt-1">{errors.color}</div>}
+                </div>
+            </SectionCard>
+
+            <SectionCard sectionKey="accessibility" title="Accessibility" icon={<Unlock size={14} />}>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div>
+                        <label className="block text-[color:var(--fg-muted)] mb-1">Aria label</label>
+                        <input
+                            className="input w-full"
+                            value={ariaLabelValue}
+                            onChange={(e) => setFieldValue('ariaLabel', e.target.value || undefined)}
+                            onKeyDown={onCommitKeyDown}
+                            placeholder="Optional short label"
+                            disabled={locked}
+                        />
+                        <div className="text-[10px] text-[color:var(--fg-muted)] mt-1">Helps screen readers describe the block when text is decorative.</div>
+                        {errors.ariaLabel && <div className="text-xs text-red-500 mt-1">{errors.ariaLabel}</div>}
+                    </div>
+                    <div>
+                        <label className="block text-[color:var(--fg-muted)] mb-1">Aria description</label>
+                        <textarea
+                            className="input w-full min-h-[4rem]"
+                            value={ariaDescriptionValue}
+                            onChange={(e) => setFieldValue('ariaDescription', e.target.value || undefined)}
+                            disabled={locked}
+                        />
+                        <div className="text-[10px] text-[color:var(--fg-muted)] mt-1">Add extra context that is not visible on screen.</div>
+                        {errors.ariaDescription && <div className="text-xs text-red-500 mt-1">{errors.ariaDescription}</div>}
+                    </div>
+                </div>
+            </SectionCard>
+        </div>
+    );
+}
+
+type LinkWidgetSettingsProps = {
+    values: Record<string, unknown>;
+    errors: Record<string, string>;
+    locked: boolean;
+    setFieldValue: (key: string, value: unknown) => void;
+    schemaFields: Map<string, z.ZodTypeAny>;
+    onCommitKeyDown: (event: React.KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) => void;
+    widgetDefaults: Record<string, unknown> | null;
+    rawUrl: string;
+    fieldError: string | null;
+};
+
+function LinkWidgetSettings({ values, errors, locked, setFieldValue, schemaFields, onCommitKeyDown, widgetDefaults, rawUrl, fieldError }: LinkWidgetSettingsProps) {
+    type SectionKey = 'destination' | 'appearance' | 'icons';
+    const [sectionsOpen, setSectionsOpen] = useState<Record<SectionKey, boolean>>({ destination: true, appearance: true, icons: true });
+    const toggleSection = (key: SectionKey) => setSectionsOpen(prev => ({ ...prev, [key]: !prev[key] }));
+    const getDefault = (key: string): unknown => (widgetDefaults ? widgetDefaults[key] : undefined);
+    const urlValue = typeof values.url === 'string'
+        ? values.url
+        : (typeof getDefault('url') === 'string' ? String(getDefault('url')) : '');
+    const labelValue = typeof values.label === 'string'
+        ? values.label
+        : (typeof getDefault('label') === 'string' ? String(getDefault('label')) : '');
+    const variantValue = isLinkVariantValue(values.variant)
+        ? values.variant
+        : (isLinkVariantValue(getDefault('variant')) ? getDefault('variant') as LinkVariantOption : 'button');
+    const fontValue = isLinkFontValue(values.font)
+        ? values.font as LinkFontOption
+        : (isLinkFontValue(getDefault('font')) ? getDefault('font') as LinkFontOption : 'system');
+    const weightValue = isLinkWeightValue(values.weight)
+        ? values.weight as LinkWeightOption
+        : (isLinkWeightValue(getDefault('weight')) ? getDefault('weight') as LinkWeightOption : 'bold');
+    const italicDefault = typeof getDefault('italic') === 'boolean' ? Boolean(getDefault('italic')) : false;
+    const italicValue = typeof values.italic === 'boolean' ? values.italic : italicDefault;
+    const iconLeftValue = typeof values.iconLeft === 'string' ? values.iconLeft : '';
+    const iconRightValue = typeof values.iconRight === 'string' ? values.iconRight : '';
+    const ariaLabelValue = typeof values.ariaLabel === 'string'
+        ? values.ariaLabel
+        : (typeof getDefault('ariaLabel') === 'string' ? String(getDefault('ariaLabel')) : '');
+    const ariaDescriptionValue = typeof values.ariaDescription === 'string'
+        ? values.ariaDescription
+        : (typeof getDefault('ariaDescription') === 'string' ? String(getDefault('ariaDescription')) : '');
+    const fontSizeField = schemaFields.get('fontSize');
+    const fontSizeMeta = fontSizeField instanceof z.ZodNumber ? deriveNumberBounds(fontSizeField as z.ZodNumber) : undefined;
+    const minFontSize = fontSizeMeta?.min ?? 8;
+    const maxFontSize = fontSizeMeta?.max ?? 128;
+    const fontSizeStep = fontSizeMeta?.step ?? 1;
+    const defaultFontSize = widgetDefaults && typeof widgetDefaults.fontSize === 'number' ? widgetDefaults.fontSize : 16;
+    const customFontSize = typeof values.fontSize === 'number' && Number.isFinite(values.fontSize);
+    const sliderFontSize = customFontSize ? Number(values.fontSize) : defaultFontSize;
+    const fontSizeInputValue = customFontSize ? Number(values.fontSize) : '';
+    const SectionCard = ({ sectionKey, title, icon, children }: { sectionKey: SectionKey; title: string; icon: React.ReactNode; children: React.ReactNode; }) => {
+        const open = sectionsOpen[sectionKey];
+        return (
+            <div className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)]/95 shadow-sm">
+                <button
+                    type="button"
+                    className="w-full flex items-center justify-between gap-2 px-4 py-3 text-left text-sm font-semibold"
+                    onClick={() => toggleSection(sectionKey)}
+                    aria-expanded={open}
+                >
+                    <span className="flex items-center gap-2 text-[color:var(--fg)]">
+                        {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                        <span className="flex items-center gap-2 text-[color:var(--fg)]">
+                            {icon}
+                            {title}
+                        </span>
+                    </span>
+                    <span className="text-[11px] text-[color:var(--fg-muted)]">{open ? 'Hide' : 'Show'}</span>
+                </button>
+                {open && (
+                    <div className="p-4 space-y-4 border-t border-[color:var(--border)] bg-[color:var(--surface)]">
+                        {children}
+                    </div>
+                )}
+            </div>
+        );
+    };
+    const variantOptions: Array<{ value: LinkVariantOption; label: string; description: string }> = [
+        { value: 'button', label: 'Button', description: 'Rounded pill-style button with accent fill.' },
+        { value: 'text', label: 'Text link', description: 'Inline link that inherits theme accent.' },
+        { value: 'card', label: 'Card', description: 'Full-width card with border and metadata.' },
+    ];
+    const fontOptions: Array<{ value: LinkFontOption; label: string; sample: string }> = [
+        { value: 'system', label: 'System', sample: 'Aa' },
+        { value: 'serif', label: 'Serif', sample: 'Aa' },
+        { value: 'mono', label: 'Mono', sample: '{ }' },
+    ];
+    const iconCharLimit = 24;
+    return (
+        <div className="space-y-4">
+            <SectionCard sectionKey="destination" title="Destination & label" icon={<LinkIcon size={14} />}>
+                <div className="space-y-2">
+                    <label className="block text-[color:var(--fg-muted)] mb-1">URL *</label>
+                    <SchemaUrlField
+                        value={urlValue}
+                        disabled={locked}
+                        onChange={(next) => setFieldValue('url', next ?? '')}
+                        onKeyDown={onCommitKeyDown}
+                    />
+                    <div className="text-[10px] text-[color:var(--fg-muted)]">Supports {ALLOWED_HTTP_SCHEME_LABEL} links. Missing protocol defaults to https://.</div>
+                    {errors.url && <div className="text-xs text-red-500">{errors.url}</div>}
+                </div>
+                <div>
+                    <label className="block text-[color:var(--fg-muted)] mb-1">Label *</label>
+                    <input
+                        className="input w-full"
+                        value={labelValue}
+                        maxLength={80}
+                        onChange={(e) => setFieldValue('label', e.target.value)}
+                        onKeyDown={onCommitKeyDown}
+                        disabled={locked}
+                    />
+                    <div className="text-[10px] text-[color:var(--fg-muted)] flex justify-between mt-1">
+                        <span>{labelValue.length}/80 characters</span>
+                        <span>Shown to visitors</span>
+                    </div>
+                    {errors.label && <div className="text-xs text-red-500 mt-1">{errors.label}</div>}
+                </div>
+                <LinkPreviewPanel rawUrl={rawUrl} fieldError={fieldError} disabled={locked} />
+            </SectionCard>
+
+            <SectionCard sectionKey="appearance" title="Appearance" icon={<Palette size={14} />}>
+                <div className="space-y-2">
+                    <label className="block text-[color:var(--fg-muted)] mb-1">Variant</label>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                        {variantOptions.map((option) => (
+                            <button
+                                key={option.value}
+                                type="button"
+                                className={`text-left px-3 py-2 rounded border transition-colors duration-150 ${variantValue === option.value ? 'border-[color:var(--accent)] bg-[color:var(--accent)]/15 text-[color:var(--accent)] shadow-sm' : 'border-[color:var(--border)] text-[color:var(--fg-muted)] hover:border-[color:var(--accent)] hover:text-[color:var(--accent)]'}`}
+                                onClick={() => setFieldValue('variant', option.value)}
+                                disabled={locked}
+                            >
+                                <div className="text-sm font-semibold">{option.label}</div>
+                                <div className="text-[11px] text-[color:var(--fg-muted)]/90">{option.description}</div>
+                            </button>
+                        ))}
+                    </div>
+                    {errors.variant && <div className="text-xs text-red-500">{errors.variant}</div>}
+                </div>
+
+                <div>
+                    <label className="block text-[color:var(--fg-muted)] mb-1">Font</label>
+                    <div className="rounded-xl border border-[color:var(--accent)] bg-[color:var(--accent)]/12 p-3 shadow-sm">
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-white">
+                            {fontOptions.map((option) => (
+                                <button
+                                    key={option.value}
+                                    type="button"
+                                    className={`px-3 py-2 rounded-lg border text-left text-sm font-semibold transition-colors duration-150 ${fontValue === option.value ? 'bg-[color:var(--accent)] text-white border-[color:var(--accent)] shadow-md' : 'bg-white/5 border-white/30 text-white/80 hover:bg-[color:var(--accent)]/80 hover:text-white'}`}
+                                    onClick={() => setFieldValue('font', option.value)}
+                                    disabled={locked}
+                                >
+                                    <div className="flex items-center justify-between">
+                                        <span>{option.label}</span>
+                                        <span className="text-lg font-semibold">{option.sample}</span>
+                                    </div>
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                    {errors.font && <div className="text-xs text-red-500 mt-1">{errors.font}</div>}
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                        <label className="block text-[color:var(--fg-muted)] mb-1">Weight</label>
+                        <div className="flex gap-2">
+                            {TEXT_WEIGHTS.map((weight) => (
+                                <button
+                                    key={weight}
+                                    type="button"
+                                    className={`flex-1 px-3 py-1.5 rounded border text-xs font-semibold transition-colors duration-150 ${weightValue === weight ? 'bg-[color:var(--accent)]/20 border-[color:var(--accent)] text-[color:var(--accent)] shadow-sm' : 'border-[color:var(--border)] text-[color:var(--fg-muted)] hover:border-[color:var(--accent)] hover:text-[color:var(--accent)]'}`}
+                                    onClick={() => setFieldValue('weight', weight)}
+                                    disabled={locked}
+                                >
+                                    <span className="flex items-center gap-1">
+                                        <BoldIcon size={14} />
+                                        {weight === 'bold' ? 'Bold' : 'Normal'}
+                                    </span>
+                                </button>
+                            ))}
+                        </div>
+                        {errors.weight && <div className="text-xs text-red-500 mt-1">{errors.weight}</div>}
+                    </div>
+                    <div>
+                        <label className="block text-[color:var(--fg-muted)] mb-1">Italic</label>
+                        <button
+                            type="button"
+                            className={`w-full px-3 py-1.5 rounded border text-xs font-semibold transition-colors duration-150 ${italicValue ? 'bg-[color:var(--accent)]/20 border-[color:var(--accent)] text-[color:var(--accent)] shadow-sm' : 'border-[color:var(--border)] text-[color:var(--fg-muted)] hover:border-[color:var(--accent)] hover:text-[color:var(--accent)]'}`}
+                            onClick={() => setFieldValue('italic', !italicValue)}
+                            disabled={locked}
+                        >
+                            <span className="flex items-center gap-2 justify-center">
+                                <ItalicIcon size={14} />
+                                {italicValue ? 'Enabled' : 'Disabled'}
+                            </span>
+                        </button>
+                        {errors.italic && <div className="text-xs text-red-500 mt-1">{errors.italic}</div>}
+                    </div>
+                </div>
+
+                <div>
+                    <label className="block text-[color:var(--fg-muted)] mb-1">Font size</label>
+                    <input
+                        type="range"
+                        className="w-full accent-[color:var(--accent)]"
+                        min={minFontSize}
+                        max={maxFontSize}
+                        step={fontSizeStep}
+                        value={sliderFontSize}
+                        onChange={(e) => setFieldValue('fontSize', Number(e.target.value))}
+                        disabled={locked}
+                    />
+                    <div className="flex flex-wrap items-center gap-2 mt-2">
+                        <input
+                            className="input w-24"
+                            type="number"
+                            min={minFontSize}
+                            max={maxFontSize}
+                            step={fontSizeStep}
+                            value={fontSizeInputValue}
+                            placeholder={`${minFontSize}-${maxFontSize}`}
+                            onChange={(e) => {
+                                const raw = e.target.value;
+                                setFieldValue('fontSize', raw === '' ? undefined : Number(raw));
+                            }}
+                            onKeyDown={onCommitKeyDown}
+                            disabled={locked}
+                        />
+                        <button
+                            type="button"
+                            className="px-3 py-1.5 rounded border border-[color:var(--border)] text-xs font-semibold transition-colors duration-150 hover:border-[color:var(--accent)] hover:text-[color:var(--accent)]"
+                            onClick={() => setFieldValue('fontSize', undefined)}
+                            disabled={locked || !customFontSize}
+                        >
+                            Auto
+                        </button>
+                        <div className="text-[11px] text-[color:var(--fg-muted)]">{customFontSize ? `${fontSizeInputValue}px` : `Defaults to ${defaultFontSize}px`}</div>
+                    </div>
+                    {errors.fontSize && <div className="text-xs text-red-500 mt-1">{errors.fontSize}</div>}
+                </div>
+            </SectionCard>
+
+            <SectionCard sectionKey="icons" title="Icons & accessibility" icon={<Sparkles size={14} />}>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div>
+                        <label className="block text-[color:var(--fg-muted)] mb-1">Icon left</label>
+                        <input
+                            className="input w-full"
+                            value={iconLeftValue}
+                            maxLength={iconCharLimit}
+                            onChange={(e) => setFieldValue('iconLeft', e.target.value || undefined)}
+                            disabled={locked}
+                        />
+                        <div className="text-[10px] text-[color:var(--fg-muted)] flex justify-between mt-1">
+                            <span>{iconLeftValue.length}/{iconCharLimit}</span>
+                            <span>Emoji or short text</span>
+                        </div>
+                        {errors.iconLeft && <div className="text-xs text-red-500 mt-1">{errors.iconLeft}</div>}
+                    </div>
+                    <div>
+                        <label className="block text-[color:var(--fg-muted)] mb-1">Icon right</label>
+                        <input
+                            className="input w-full"
+                            value={iconRightValue}
+                            maxLength={iconCharLimit}
+                            onChange={(e) => setFieldValue('iconRight', e.target.value || undefined)}
+                            disabled={locked}
+                        />
+                        <div className="text-[10px] text-[color:var(--fg-muted)] flex justify-between mt-1">
+                            <span>{iconRightValue.length}/{iconCharLimit}</span>
+                            <span>Optional suffix</span>
+                        </div>
+                        {errors.iconRight && <div className="text-xs text-red-500 mt-1">{errors.iconRight}</div>}
+                    </div>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div>
+                        <label className="block text-[color:var(--fg-muted)] mb-1">Aria label</label>
+                        <input
+                            className="input w-full"
+                            value={ariaLabelValue}
+                            onChange={(e) => setFieldValue('ariaLabel', e.target.value || undefined)}
+                            onKeyDown={onCommitKeyDown}
+                            placeholder="Optional short label"
+                            disabled={locked}
+                        />
+                        <div className="text-[10px] text-[color:var(--fg-muted)] mt-1">Overrides the spoken label for screen readers.</div>
+                        {errors.ariaLabel && <div className="text-xs text-red-500 mt-1">{errors.ariaLabel}</div>}
+                    </div>
+                    <div>
+                        <label className="block text-[color:var(--fg-muted)] mb-1">Aria description</label>
+                        <textarea
+                            className="input w-full min-h-[4rem]"
+                            value={ariaDescriptionValue}
+                            onChange={(e) => setFieldValue('ariaDescription', e.target.value || undefined)}
+                            disabled={locked}
+                        />
+                        <div className="text-[10px] text-[color:var(--fg-muted)] mt-1">Add longer context without cluttering the UI.</div>
+                        {errors.ariaDescription && <div className="text-xs text-red-500 mt-1">{errors.ariaDescription}</div>}
+                    </div>
+                </div>
+            </SectionCard>
+        </div>
+    );
+}
+
+type NavLinkPageOption = { id: string; title: string };
+
+type NavLinkWidgetSettingsProps = {
+    values: Record<string, unknown>;
+    errors: Record<string, string>;
+    locked: boolean;
+    setFieldValue: (key: string, value: unknown) => void;
+    schemaFields: Map<string, z.ZodTypeAny>;
+    onCommitKeyDown: (event: React.KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) => void;
+    widgetDefaults: Record<string, unknown> | null;
+    pages: NavLinkPageOption[];
+};
+
+function NavLinkWidgetSettings({ values, errors, locked, setFieldValue, schemaFields, onCommitKeyDown, widgetDefaults, pages }: NavLinkWidgetSettingsProps) {
+    type SectionKey = 'destination' | 'style' | 'colors' | 'accessibility';
+    const [sectionsOpen, setSectionsOpen] = useState<Record<SectionKey, boolean>>({ destination: true, style: true, colors: true, accessibility: true });
+    const toggleSection = (key: SectionKey) => setSectionsOpen(prev => ({ ...prev, [key]: !prev[key] }));
+    const getDefault = (key: string): unknown => (widgetDefaults ? widgetDefaults[key] : undefined);
+    const labelValue = typeof values.label === 'string'
+        ? values.label
+        : (typeof getDefault('label') === 'string' ? String(getDefault('label')) : '');
+    const targetPageValue = typeof values.targetPageId === 'string'
+        ? values.targetPageId
+        : (typeof getDefault('targetPageId') === 'string' ? String(getDefault('targetPageId')) : '');
+    const styleValue = isNavLinkStyleValue(values.style)
+        ? values.style as NavLinkStyleOption
+        : (isNavLinkStyleValue(getDefault('style')) ? getDefault('style') as NavLinkStyleOption : 'link');
+    const alignValue = isTextAlignValue(values.align)
+        ? values.align as TextAlignOption
+        : (isTextAlignValue(getDefault('align')) ? getDefault('align') as TextAlignOption : 'left');
+    const fontValue = isTextFontValue(values.font)
+        ? values.font as TextFontOption
+        : (isTextFontValue(getDefault('font')) ? getDefault('font') as TextFontOption : 'system');
+    const underlineDefault = typeof getDefault('underline') === 'boolean' ? Boolean(getDefault('underline')) : false;
+    const underlineValue = typeof values.underline === 'boolean' ? values.underline : underlineDefault;
+    const ariaLabelValue = typeof values.ariaLabel === 'string'
+        ? values.ariaLabel
+        : (typeof getDefault('ariaLabel') === 'string' ? String(getDefault('ariaLabel')) : '');
+    const colorDefault = typeof getDefault('color') === 'string' ? String(getDefault('color')) : '';
+    const colorValue = typeof values.color === 'string' ? values.color : colorDefault;
+    const textColorDefault = typeof getDefault('textColor') === 'string' ? String(getDefault('textColor')) : '';
+    const textColorValue = typeof values.textColor === 'string' ? values.textColor : textColorDefault;
+    const fontSizeField = schemaFields.get('fontSize');
+    const fontSizeMeta = fontSizeField instanceof z.ZodNumber ? deriveNumberBounds(fontSizeField as z.ZodNumber) : undefined;
+    const minFontSize = fontSizeMeta?.min ?? 10;
+    const maxFontSize = fontSizeMeta?.max ?? 64;
+    const fontSizeStep = fontSizeMeta?.step ?? 1;
+    const defaultFontSize = typeof getDefault('fontSize') === 'number' ? Number(getDefault('fontSize')) : 14;
+    const customFontSize = typeof values.fontSize === 'number' && Number.isFinite(values.fontSize);
+    const sliderFontSize = customFontSize ? Number(values.fontSize) : defaultFontSize;
+    const fontSizeInputValue = customFontSize ? Number(values.fontSize) : '';
+    const labelCharLimit = 60;
+    const SectionCard = ({ sectionKey, title, icon, children }: { sectionKey: SectionKey; title: string; icon: React.ReactNode; children: React.ReactNode; }) => {
+        const open = sectionsOpen[sectionKey];
+        return (
+            <div className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)]/95 shadow-sm">
+                <button
+                    type="button"
+                    className="w-full flex items-center justify-between gap-2 px-4 py-3 text-left text-sm font-semibold"
+                    onClick={() => toggleSection(sectionKey)}
+                    aria-expanded={open}
+                >
+                    <span className="flex items-center gap-2 text-[color:var(--fg)]">
+                        {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                        <span className="flex items-center gap-2 text-[color:var(--fg)]">
+                            {icon}
+                            {title}
+                        </span>
+                    </span>
+                    <span className="text-[11px] text-[color:var(--fg-muted)]">{open ? 'Hide' : 'Show'}</span>
+                </button>
+                {open && (
+                    <div className="p-4 space-y-4 border-t border-[color:var(--border)] bg-[color:var(--surface)]">
+                        {children}
+                    </div>
+                )}
+            </div>
+        );
+    };
+    const styleOptions: Array<{ value: NavLinkStyleOption; label: string; description: string }> = [
+        { value: 'link', label: 'Text link', description: 'Inline link that matches your theme.' },
+        { value: 'button', label: 'Button', description: 'Solid button with accent background.' },
+    ];
+    const fontOptions: Array<{ value: TextFontOption; label: string; sample: string }> = [
+        { value: 'system', label: 'System', sample: 'Aa' },
+        { value: 'serif', label: 'Serif', sample: 'Aa' },
+        { value: 'mono', label: 'Mono', sample: '{ }' },
+    ];
+    const alignmentOptions: Array<{ value: TextAlignOption; label: string; icon: React.ReactNode }> = [
+        { value: 'left', label: 'Left', icon: <AlignLeft size={14} /> },
+        { value: 'center', label: 'Center', icon: <AlignCenter size={14} /> },
+        { value: 'right', label: 'Right', icon: <AlignRight size={14} /> },
+    ];
+    const toColorInput = (value: string, fallback: string) => (HEX_COLOR_RE.test(value) ? value : fallback);
+    const linkColorSwatch = toColorInput(colorValue, '#2563eb');
+    const buttonTextColorSwatch = toColorInput(textColorValue || colorValue, '#ffffff');
+    const hasPages = pages.length > 0;
+    return (
+        <div className="space-y-4">
+            <SectionCard sectionKey="destination" title="Destination & label" icon={<LinkIcon size={14} />}>
+                <div>
+                    <label className="block text-[color:var(--fg-muted)] mb-1">Target page *</label>
+                    {hasPages ? (
+                        <select
+                            className="input w-full"
+                            value={targetPageValue}
+                            onChange={(e) => setFieldValue('targetPageId', e.target.value)}
+                            disabled={locked}
+                        >
+                            <option value="">Select page…</option>
+                            {pages.map((page) => (
+                                <option key={page.id} value={page.id}>{page.title}</option>
+                            ))}
+                        </select>
+                    ) : (
+                        <div className="px-3 py-2 rounded-lg border border-dashed border-[color:var(--border)] text-xs text-[color:var(--fg-muted)] bg-[color:var(--muted)]/30">
+                            No pages available. Create a page in the canvas sidebar first.
+                        </div>
+                    )}
+                    {errors.targetPageId && <div className="text-xs text-red-500 mt-1">{errors.targetPageId}</div>}
+                </div>
+                <div>
+                    <label className="block text-[color:var(--fg-muted)] mb-1">Label *</label>
+                    <input
+                        className="input w-full"
+                        value={labelValue}
+                        maxLength={labelCharLimit}
+                        onChange={(e) => setFieldValue('label', e.target.value)}
+                        onKeyDown={onCommitKeyDown}
+                        disabled={locked}
+                    />
+                    <div className="text-[10px] text-[color:var(--fg-muted)] flex justify-between mt-1">
+                        <span>{labelValue.length}/{labelCharLimit}</span>
+                        <span>Shown on the button/link</span>
+                    </div>
+                    {errors.label && <div className="text-xs text-red-500 mt-1">{errors.label}</div>}
+                </div>
+            </SectionCard>
+
+            <SectionCard sectionKey="style" title="Style & typography" icon={<Type size={14} />}>
+                <div className="space-y-2">
+                    <label className="block text-[color:var(--fg-muted)] mb-1">Style</label>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        {styleOptions.map((option) => (
+                            <button
+                                key={option.value}
+                                type="button"
+                                className={`text-left px-3 py-2 rounded border transition-colors duration-150 ${styleValue === option.value ? 'border-[color:var(--accent)] bg-[color:var(--accent)]/15 text-[color:var(--accent)] shadow-sm' : 'border-[color:var(--border)] text-[color:var(--fg-muted)] hover:border-[color:var(--accent)] hover:text-[color:var(--accent)]'}`}
+                                onClick={() => setFieldValue('style', option.value)}
+                                disabled={locked}
+                            >
+                                <div className="text-sm font-semibold">{option.label}</div>
+                                <div className="text-[11px] text-[color:var(--fg-muted)]/90">{option.description}</div>
+                            </button>
+                        ))}
+                    </div>
+                    {errors.style && <div className="text-xs text-red-500">{errors.style}</div>}
+                </div>
+
+                <div>
+                    <label className="block text-[color:var(--fg-muted)] mb-1">Alignment</label>
+                    <div className="flex flex-wrap gap-2">
+                        {alignmentOptions.map((option) => (
+                            <button
+                                key={option.value}
+                                type="button"
+                                className={`flex-1 min-w-[5rem] px-3 py-1.5 rounded border text-xs font-semibold transition-colors duration-150 ${alignValue === option.value ? 'bg-[color:var(--accent)]/25 border-[color:var(--accent)] text-[color:var(--accent)] shadow-sm' : 'border-[color:var(--border)] text-[color:var(--fg-muted)] bg-[color:var(--surface)]/70 hover:border-[color:var(--accent)] hover:text-[color:var(--accent)]'}`}
+                                onClick={() => setFieldValue('align', option.value)}
+                                disabled={locked}
+                                title={`${option.label} align`}
+                            >
+                                <div className="flex items-center justify-center gap-1">
+                                    {option.icon}
+                                    <span className="text-[11px]">{option.label}</span>
+                                </div>
+                            </button>
+                        ))}
+                    </div>
+                    {errors.align && <div className="text-xs text-red-500 mt-1">{errors.align}</div>}
+                </div>
+
+                <div>
+                    <label className="block text-[color:var(--fg-muted)] mb-1">Font</label>
+                    <div className="rounded-xl border border-[color:var(--accent)] bg-[color:var(--accent)]/12 p-3 shadow-sm">
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-white">
+                            {fontOptions.map((option) => (
+                                <button
+                                    key={option.value}
+                                    type="button"
+                                    className={`px-3 py-2 rounded-lg border text-left text-sm font-semibold transition-colors duration-150 ${fontValue === option.value ? 'bg-[color:var(--accent)] text-white border-[color:var(--accent)] shadow-md' : 'bg-white/5 border-white/30 text-white/80 hover:bg-[color:var(--accent)]/80 hover:text-white'}`}
+                                    onClick={() => setFieldValue('font', option.value)}
+                                    disabled={locked}
+                                >
+                                    <div className="flex items-center justify-between">
+                                        <span>{option.label}</span>
+                                        <span className="text-lg font-semibold">{option.sample}</span>
+                                    </div>
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                    {errors.font && <div className="text-xs text-red-500 mt-1">{errors.font}</div>}
+                </div>
+
+                <div>
+                    <label className="block text-[color:var(--fg-muted)] mb-1">Font size</label>
+                    <input
+                        type="range"
+                        className="w-full accent-[color:var(--accent)]"
+                        min={minFontSize}
+                        max={maxFontSize}
+                        step={fontSizeStep}
+                        value={sliderFontSize}
+                        onChange={(e) => setFieldValue('fontSize', Number(e.target.value))}
+                        disabled={locked}
+                    />
+                    <div className="flex flex-wrap items-center gap-2 mt-2">
+                        <input
+                            className="input w-24"
+                            type="number"
+                            min={minFontSize}
+                            max={maxFontSize}
+                            step={fontSizeStep}
+                            value={fontSizeInputValue}
+                            placeholder={`${minFontSize}-${maxFontSize}`}
+                            onChange={(e) => {
+                                const raw = e.target.value;
+                                setFieldValue('fontSize', raw === '' ? undefined : Number(raw));
+                            }}
+                            onKeyDown={onCommitKeyDown}
+                            disabled={locked}
+                        />
+                        <button
+                            type="button"
+                            className="px-3 py-1.5 rounded border border-[color:var(--border)] text-xs font-semibold transition-colors duration-150 hover:border-[color:var(--accent)] hover:text-[color:var(--accent)]"
+                            onClick={() => setFieldValue('fontSize', undefined)}
+                            disabled={locked || !customFontSize}
+                        >
+                            Auto
+                        </button>
+                        <div className="text-[11px] text-[color:var(--fg-muted)]">{customFontSize ? `${fontSizeInputValue}px` : `Defaults to ${defaultFontSize}px`}</div>
+                    </div>
+                    {errors.fontSize && <div className="text-xs text-red-500 mt-1">{errors.fontSize}</div>}
+                </div>
+
+                {styleValue === 'link' && (
+                    <div>
+                        <label className="block text-[color:var(--fg-muted)] mb-1">Underline</label>
+                        <button
+                            type="button"
+                            className={`w-full px-3 py-1.5 rounded border text-xs font-semibold transition-colors duration-150 ${underlineValue ? 'bg-[color:var(--accent)]/20 border-[color:var(--accent)] text-[color:var(--accent)] shadow-sm' : 'border-[color:var(--border)] text-[color:var(--fg-muted)] hover:border-[color:var(--accent)] hover:text-[color:var(--accent)]'}`}
+                            onClick={() => setFieldValue('underline', !underlineValue)}
+                            disabled={locked}
+                        >
+                            {underlineValue ? 'Underline enabled' : 'Underline disabled'}
+                        </button>
+                        {errors.underline && <div className="text-xs text-red-500 mt-1">{errors.underline}</div>}
+                    </div>
+                )}
+            </SectionCard>
+
+            <SectionCard sectionKey="colors" title="Colors" icon={<Palette size={14} />}>
+                <div>
+                    <label className="block text-[color:var(--fg-muted)] mb-1">{styleValue === 'button' ? 'Background color' : 'Link color'}</label>
+                    <div className="flex flex-wrap items-center gap-2">
+                        <input
+                            type="color"
+                            className="rounded border border-[color:var(--border)] bg-[color:var(--muted)]/40 h-8 w-12 cursor-pointer"
+                            value={linkColorSwatch}
+                            onChange={(e) => setFieldValue('color', e.target.value)}
+                            disabled={locked}
+                            aria-label="Primary color"
+                        />
+                        <input
+                            className="input flex-1 font-mono text-xs"
+                            value={colorValue}
+                            placeholder={styleValue === 'button' ? '#2563eb' : 'currentColor'}
+                            onChange={(e) => setFieldValue('color', e.target.value)}
+                            onKeyDown={onCommitKeyDown}
+                            disabled={locked}
+                        />
+                        <button
+                            type="button"
+                            className="px-2 py-1 rounded border border-[color:var(--border)] text-[10px] font-semibold transition-colors duration-150 hover:border-[color:var(--accent)] hover:text-[color:var(--accent)]"
+                            onClick={() => setFieldValue('color', undefined)}
+                            disabled={locked || !colorValue}
+                        >
+                            Reset
+                        </button>
+                    </div>
+                    {errors.color && <div className="text-xs text-red-500 mt-1">{errors.color}</div>}
+                </div>
+
+                {styleValue === 'button' && (
+                    <div>
+                        <label className="block text-[color:var(--fg-muted)] mb-1">Text color</label>
+                        <div className="flex flex-wrap items-center gap-2">
+                            <input
+                                type="color"
+                                className="rounded border border-[color:var(--border)] bg-[color:var(--muted)]/40 h-8 w-12 cursor-pointer"
+                                value={buttonTextColorSwatch}
+                                onChange={(e) => setFieldValue('textColor', e.target.value)}
+                                disabled={locked}
+                                aria-label="Button text color"
+                            />
+                            <input
+                                className="input flex-1 font-mono text-xs"
+                                value={textColorValue}
+                                placeholder="#ffffff"
+                                onChange={(e) => setFieldValue('textColor', e.target.value)}
+                                onKeyDown={onCommitKeyDown}
+                                disabled={locked}
+                            />
+                            <button
+                                type="button"
+                                className="px-2 py-1 rounded border border-[color:var(--border)] text-[10px] font-semibold transition-colors duration-150 hover:border-[color:var(--accent)] hover:text-[color:var(--accent)]"
+                                onClick={() => setFieldValue('textColor', undefined)}
+                                disabled={locked || !textColorValue}
+                            >
+                                Reset
+                            </button>
+                        </div>
+                        {errors.textColor && <div className="text-xs text-red-500 mt-1">{errors.textColor}</div>}
+                    </div>
+                )}
+            </SectionCard>
+
+            <SectionCard sectionKey="accessibility" title="Accessibility" icon={<Sparkles size={14} />}>
+                <div>
+                    <label className="block text-[color:var(--fg-muted)] mb-1">Aria label</label>
+                    <input
+                        className="input w-full"
+                        value={ariaLabelValue}
+                        onChange={(e) => setFieldValue('ariaLabel', e.target.value || undefined)}
+                        onKeyDown={onCommitKeyDown}
+                        placeholder="Optional label for screen readers"
+                        disabled={locked}
+                    />
+                    <div className="text-[10px] text-[color:var(--fg-muted)] mt-1">Overrides the spoken label when the visible text is ambiguous.</div>
+                    {errors.ariaLabel && <div className="text-xs text-red-500 mt-1">{errors.ariaLabel}</div>}
+                </div>
+            </SectionCard>
+        </div>
+    );
+}
+
 type SchemaAssetFieldProps = {
     value: string;
     placeholder: string;
@@ -1797,17 +2924,18 @@ type SchemaAssetFieldProps = {
 function SchemaAssetField({ value, placeholder, disabled, assets, assetKind, onChange, onKeyDown }: SchemaAssetFieldProps) {
     const filteredAssets = useMemo(() => {
         return assets.list.filter((asset) => {
-            if (assetKind === 'image') return asset.type?.startsWith('image/');
-            if (assetKind === 'video') return asset.type?.startsWith('video/');
+            if (!asset.type) return true;
+            if (assetKind === 'video') return asset.type.startsWith('video/');
+            if (assetKind === 'image') return asset.type.startsWith('image/');
             return true;
         });
     }, [assets.list, assetKind]);
     const assetHash = value.startsWith('asset://') ? value.slice('asset://'.length) : '';
-    const currentAsset = assetHash ? assets.list.find((a) => a.hash === assetHash) : null;
+    const currentAsset = assetHash ? assets.list.find((asset) => asset.hash === assetHash) : null;
     const accept = assetKind === 'image' ? 'image/*' : assetKind === 'video' ? 'video/*' : '*/*';
     return (
         <div className="space-y-2">
-            <div className={`flex flex-wrap items-center gap-2 text-xs`}>
+            <div className="flex flex-wrap items-center gap-2 text-xs">
                 <label className={`inline-flex items-center justify-center px-3 py-1.5 rounded border border-dashed border-[color:var(--border)] bg-[color:var(--muted)]/40 ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}>
                     <span className="font-semibold">Upload</span>
                     <input
@@ -1842,7 +2970,9 @@ function SchemaAssetField({ value, placeholder, disabled, assets, assetKind, onC
                 >
                     <option value="">Select asset…</option>
                     {filteredAssets.map((asset) => (
-                        <option key={asset.hash} value={asset.hash}>{asset.name}</option>
+                        <option key={asset.hash} value={asset.hash}>
+                            {asset.name}
+                        </option>
                     ))}
                 </select>
             )}
