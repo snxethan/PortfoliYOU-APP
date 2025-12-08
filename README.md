@@ -1,8 +1,8 @@
-# PortfoliYOU
+# Portfoli-YOU
 
 <div align="center">
 
-**Your Portfolio. Your Way. No Code Required.**
+**A Portfolio for you, by you.**
 
 A local-first desktop application that empowers anyone—regardless of coding experience—to design and deploy their own professional portfolio website using a drag-and-drop editor.
 
@@ -12,15 +12,15 @@ A local-first desktop application that empowers anyone—regardless of coding ex
 
 ---
 
-## ✨ Features
+## Features
 
-### 🎨 **Drag-and-Drop Visual Editor**
+### **Drag-and-Drop Visual Editor**
 - Intuitive grid-based canvas with 12-column responsive layout
 - Live preview of your portfolio as you build
 - Undo/redo support with comprehensive history management
 - Real-time visual feedback and instant updates
 
-### 🧩 **Rich Widget Library**
+### **Rich Widget Library**
 Build stunning portfolios with pre-built, customizable widgets:
 - **Text** - Rich text content with markdown support
 - **Image** - Image display with automatic asset management
@@ -30,26 +30,27 @@ Build stunning portfolios with pre-built, customizable widgets:
 - **Link & NavLink** - Interactive navigation elements
 - **Carousel** - Image galleries and slideshows
 - **GitHub Repos** - Display your GitHub repositories dynamically
+- And more coming soon!
 
-### 📦 **Smart Asset Management**
+### **Smart Asset Management**
 - Automatic image deduplication using SHA-256 hashing
 - Local IndexedDB storage for fast access
 - Optional cloud sync with Firebase Storage
 - Optimized asset delivery and caching
 
-### ☁️ **Optional Cloud Sync**
+### **Optional Cloud Sync**
 - Sign in with Firebase Authentication
 - Sync portfolios across multiple devices
 - Cloud storage with quota management
 - Work offline, sync when ready
 
-### 🚀 **One-Click Deployment**
+### **One-Click Deployment**
 - Export static HTML/CSS/JavaScript bundle
 - Built-in preview server for testing
 - Ready to deploy to any static hosting service
 - Self-contained with all assets embedded
 
-### 🎯 **Local-First Architecture**
+### **Local-First Architecture**
 - Full functionality without internet connection
 - Your data stays on your machine by default
 - Privacy-focused design
@@ -57,7 +58,7 @@ Build stunning portfolios with pre-built, customizable widgets:
 
 ---
 
-## 🖼️ Screenshots
+## Screenshots
 
 > **Note**: Screenshots coming soon! The app features a modern, clean interface with:
 > - A projects dashboard for managing multiple portfolios
@@ -67,7 +68,7 @@ Build stunning portfolios with pre-built, customizable widgets:
 
 ---
 
-## 🛠️ Technology Stack
+## Technology Stack
 
 ### Frontend
 - **React 19** - UI framework
@@ -96,7 +97,7 @@ Build stunning portfolios with pre-built, customizable widgets:
 
 ---
 
-## 🚀 Getting Started
+## Getting Started
 
 ### Prerequisites
 
@@ -144,7 +145,7 @@ npm run dev:renderer
 
 ---
 
-## 🏗️ Building & Distribution
+## Building & Distribution
 
 ### Build for Testing
 Build the application without creating installers:
@@ -170,7 +171,7 @@ Installers are output to the `dist/` directory.
 
 ---
 
-## 🧪 Testing
+## Testing
 
 ### Unit Tests
 Run Vitest unit tests:
@@ -202,7 +203,7 @@ Test files are in `tests/` directory.
 
 ---
 
-## 📁 Project Structure
+## Project Structure
 
 ```
 PortfoliYOU-APP/
@@ -243,7 +244,7 @@ PortfoliYOU-APP/
 
 ---
 
-## 📚 Documentation
+## Documentation
 
 Detailed documentation is available in the `docs/` directory:
 
@@ -272,7 +273,7 @@ Detailed documentation is available in the `docs/` directory:
 
 ---
 
-## 🤝 Contributing
+## Contributing
 
 Contributions are welcome! Here's how you can help:
 
@@ -293,7 +294,7 @@ Contributions are welcome! Here's how you can help:
 
 ---
 
-## 🐛 Troubleshooting
+## Troubleshooting
 
 ### Common Issues
 
@@ -312,13 +313,13 @@ Contributions are welcome! Here's how you can help:
 
 ---
 
-## 📄 License
+## License
 
 This project is currently under development. License information will be added soon.
 
 ---
 
-## 🙏 Acknowledgments
+## Acknowledgments
 
 - Built with ❤️ using modern web technologies
 - Icons by [Lucide](https://lucide.dev/)
@@ -326,7 +327,7 @@ This project is currently under development. License information will be added s
 
 ---
 
-## 🔗 Links
+## Links
 
 - **Website**: [https://portfoliyou.snxethan.dev](https://portfoliyou.snxethan.dev)
 - **Website Repository**: [https://github.com/snxethan/PortfoliYOU-WEBSITE](https://github.com/snxethan/PortfoliYOU-WEBSITE)
@@ -334,8 +335,13 @@ This project is currently under development. License information will be added s
 
 ---
 
+## Author(s)
+
+- [**Ethan Townsend (snxethan)**](https://www.ethantownsend.dev)
+
 <div align="center">
 
-**Made with PortfoliYOU** 🚀
+**A Portfolio for you, by you.**
+Portfoli-YOU
 
 </div>
