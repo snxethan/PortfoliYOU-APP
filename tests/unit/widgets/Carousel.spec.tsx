@@ -8,7 +8,7 @@ vi.mock('../../../app/renderer/src/providers/AssetsProvider', () => ({
     }),
 }));
 
-import CarouselDef from '../../../app/renderer/src/widgets/defs/Carousel';
+import CarouselDef, { type CarouselItem } from '../../../app/renderer/src/widgets/defs/Carousel';
 
 function renderCarousel(props: Parameters<typeof CarouselDef.render>[0]) {
     const Component = CarouselDef.render as React.ComponentType<typeof props>;
@@ -72,7 +72,7 @@ describe('Carousel widget', () => {
     });
 
     it('virtualizes navigation dots when slides exceed threshold', () => {
-        const items = Array.from({ length: 12 }, (_, idx) => ({
+        const items: CarouselItem[] = Array.from({ length: 12 }, (_, idx) => ({
             mediaType: 'image',
             src: `https://example.com/${idx}.jpg`,
             alt: `Slide ${idx}`,

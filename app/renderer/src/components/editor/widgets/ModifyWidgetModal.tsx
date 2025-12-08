@@ -3,25 +3,101 @@ import { Pin, PinOff, Lock, Unlock, ChevronsUp, ChevronsDown, ChevronUp, Chevron
 import { z } from "zod";
 
 import { useAssets } from "../../../providers/AssetsProvider";
-import type { AssetsCtx } from "../../../providers/AssetsProvider";
 import { useNotifications } from "../../../providers/NotificationsProvider";
 import { useProjects } from "../../../providers/ProjectsProvider";
 import { WidgetsRegistry } from "../../../widgets/registry";
 import type { CarouselItem } from "../../../widgets/defs/Carousel";
 import { ALLOWED_HTTP_SCHEME_LABEL } from "../../../../../shared/widgets/linkUrl";
 import type { GridItem } from "../canvas/DraggableItem";
-
-import LinkPreviewPanel from "./LinkPreviewPanel";
 import { useScrollLock } from "../../../hooks/useScrollLock";
+import { SchemaAssetField, SchemaNumberField, SchemaUrlField, type AssetKind } from "../../../widgets/settings/SchemaFields";
+import { ContactWidgetSettings } from "../../../widgets/settings/ContactWidgetSettings";
+import { ImageWidgetSettings } from "../../../widgets/settings/ImageWidgetSettings";
+import { TextWidgetSettings } from "../../../widgets/settings/TextWidgetSettings";
+import { LinkWidgetSettings } from "../../../widgets/settings/LinkWidgetSettings";
+import { NavLinkWidgetSettings } from "../../../widgets/settings/NavLinkWidgetSettings";
+import { VideoWidgetSettings } from "../../../widgets/settings/VideoWidgetSettings";
+import { CarouselWidgetSettings, type CarouselEditorItem } from "../../../widgets/settings/CarouselWidgetSettings";
+import { ProjectWidgetSettings } from "../../../widgets/settings/ProjectWidgetSettings";
+import { GitHubReposWidgetSettings } from "../../../widgets/settings/GitHubReposWidgetSettings";
+import {
+    CAROUSEL_WIDGET_FIELD_KEYS,
+    IMAGE_WIDGET_FIELD_KEYS,
+    LINK_WIDGET_FIELD_KEYS,
+    NAV_LINK_WIDGET_FIELD_KEYS,
+    PROJECT_WIDGET_FIELD_KEYS,
+    CONTACT_WIDGET_FIELD_KEYS,
+    GITHUB_WIDGET_FIELD_KEYS,
+    TEXT_WIDGET_FIELD_KEYS,
+    VIDEO_WIDGET_FIELD_KEYS,
+    deriveNumberBounds,
+} from "../../../widgets/settings/shared";
 
-type CarouselEditorItem = {
-    id: string;
-    mediaType: 'image' | 'video';
-    source: string;
-    alt: string;
-    caption: string;
-    poster?: string;
+const ENTER_SUBMIT_BLOCKED_TYPES = new Set(['checkbox', 'radio', 'range', 'color', 'date', 'datetime-local', 'month', 'week', 'time', 'file']);
+
+const APPEARANCE_FIELDS_BY_WIDGET: Record<string, ReadonlySet<string>> = {
+    image: new Set(['fit', 'radius', 'scale', 'shape', 'borderWidth', 'borderColor', 'borderStyle']),
+    text: new Set(['variant', 'align', 'font', 'color', 'fontSize', 'weight', 'italic']),
+    link: new Set(['variant', 'font', 'fontSize', 'weight', 'italic']),
+    'nav-link': new Set(['style', 'align', 'color', 'textColor', 'underline', 'font', 'fontSize']),
+    project: new Set(['headingLevel', 'font', 'fontSize']),
+    contact: new Set(['font', 'fontSize']),
+    carousel: new Set(['backgroundColor', 'shape', 'radius', 'borderWidth', 'borderColor', 'borderStyle']),
+    'github-repos': new Set(['layout', 'containerBackgroundColor', 'cardBackgroundColor', 'cardBorderColor', 'cardTextColor', 'cardMutedColor']),
 };
+
+const URL_FIELD_HINTS = ['url', 'link', 'href', 'website'];
+const TEXTAREA_FIELD_HINTS = ['description', 'content', 'body', 'text', 'bio', 'summary'];
+const IMAGE_FIELD_HINTS = ['image', 'img', 'photo', 'poster', 'thumb', 'thumbnail', 'cover', 'logo', 'avatar'];
+const VIDEO_FIELD_HINTS = ['video', 'clip', 'movie', 'reel', 'media'];
+const GENERIC_ASSET_HINTS = ['asset', 'src', 'source', 'file'];
+
+function hasAppearanceKeyword(key: string) {
+    const normalized = key.toLowerCase();
+    if (normalized.includes('color') || normalized.includes('background')) return true;
+    if (normalized.includes('border') || normalized.includes('radius')) return true;
+    if (normalized.includes('shape')) return true;
+    if (normalized.includes('font')) return true;
+    if (normalized === 'align' || normalized === 'layout' || normalized === 'weight' || normalized === 'italic') return true;
+    if (normalized === 'style' || normalized === 'variant' || normalized === 'underline') return true;
+    if (normalized === 'headinglevel' || normalized === 'fit') return true;
+    return false;
+}
+
+function isAppearanceField(defType: string | null, key: string) {
+    if (!key) return false;
+    const overrides = defType ? APPEARANCE_FIELDS_BY_WIDGET[defType] : undefined;
+    if (overrides?.has(key)) return true;
+    return hasAppearanceKeyword(key);
+}
+
+function hasUrlValidation(field: z.ZodTypeAny) {
+    const def: any = (field as unknown as { _def?: unknown })._def;
+    const checks: Array<{ kind?: string }> = def?.checks ?? [];
+    return checks.some(check => check.kind === 'url');
+}
+
+function isLikelyUrlField(key: string, field: z.ZodTypeAny) {
+    const lower = key.toLowerCase();
+    if (!(field instanceof z.ZodString)) return false;
+    if (hasUrlValidation(field)) return true;
+    return URL_FIELD_HINTS.some(hint => lower.includes(hint));
+}
+
+function inferAssetKind(defType: string | null, key: string): AssetKind | null {
+    const lower = key.toLowerCase();
+    const matches = (hint: string) => lower === hint || lower.endsWith(hint) || lower.includes(`${hint}url`) || lower.includes(`${hint}src`);
+    if (IMAGE_FIELD_HINTS.some(matches)) return 'image';
+    if (VIDEO_FIELD_HINTS.some(matches)) return 'video';
+    if (GENERIC_ASSET_HINTS.some(matches)) return 'media';
+    if (lower === 'poster' || lower.endsWith('poster')) return 'image';
+    if (lower === 'thumbnail' || lower.endsWith('thumbnail')) return 'image';
+    if (lower === 'src') {
+        if (defType === 'image' || defType === 'project' || defType === 'carousel') return 'image';
+        if (defType === 'video') return 'video';
+    }
+    return null;
+}
 
 function makeCarouselId(seed?: number) {
     if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') return crypto.randomUUID();
@@ -72,99 +148,9 @@ function serializeCarouselEditorItems(items: CarouselEditorItem[]): CarouselItem
         .filter((item) => !!item.src);
 }
 
-const ENTER_SUBMIT_BLOCKED_TYPES = new Set(['checkbox', 'radio', 'range', 'color', 'date', 'datetime-local', 'month', 'week', 'time', 'file']);
-const VIDEO_APPEARANCE_FIELDS = new Set(['shape', 'borderWidth', 'borderRadius', 'borderColor', 'borderStyle', 'backgroundColor']);
-const APPEARANCE_FIELDS_BY_WIDGET: Record<string, ReadonlySet<string>> = {
-    image: new Set(['fit', 'radius', 'scale', 'shape', 'borderWidth', 'borderColor', 'borderStyle']),
-    text: new Set(['variant', 'align', 'font', 'color', 'fontSize', 'weight', 'italic']),
-    link: new Set(['variant', 'font', 'fontSize', 'weight', 'italic']),
-    'nav-link': new Set(['style', 'align', 'color', 'textColor', 'underline', 'font', 'fontSize']),
-    project: new Set(['headingLevel', 'font', 'fontSize']),
-    contact: new Set(['font', 'fontSize']),
-    carousel: new Set(['backgroundColor', 'shape', 'radius', 'borderWidth', 'borderColor', 'borderStyle']),
-    'github-repos': new Set(['layout']),
-};
-const HEX_COLOR_RE = /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/;
-
-function hasAppearanceKeyword(key: string) {
-    const normalized = key.toLowerCase();
-    if (normalized.includes('color') || normalized.includes('background')) return true;
-    if (normalized.includes('border') || normalized.includes('radius')) return true;
-    if (normalized.includes('shape')) return true;
-    if (normalized.includes('font')) return true;
-    if (normalized === 'align' || normalized === 'layout' || normalized === 'weight' || normalized === 'italic') return true;
-    if (normalized === 'style' || normalized === 'variant' || normalized === 'underline') return true;
-    if (normalized === 'headinglevel' || normalized === 'fit') return true;
-    return false;
-}
-
-function isAppearanceField(defType: string | null, key: string) {
-    if (!key) return false;
-    const overrides = defType ? APPEARANCE_FIELDS_BY_WIDGET[defType] : undefined;
-    if (overrides?.has(key)) return true;
-    return hasAppearanceKeyword(key);
-}
-const URL_FIELD_HINTS = ['url', 'link', 'href', 'website'];
-const TEXTAREA_FIELD_HINTS = ['description', 'content', 'body', 'text', 'bio', 'summary'];
-const IMAGE_FIELD_HINTS = ['image', 'img', 'photo', 'poster', 'thumb', 'thumbnail', 'cover', 'logo', 'avatar'];
-const VIDEO_FIELD_HINTS = ['video', 'clip', 'movie', 'reel', 'media'];
-const GENERIC_ASSET_HINTS = ['asset', 'src', 'source', 'file'];
-const URL_PROTOCOL_SUGGESTIONS = ['https://', 'http://', 'mailto:', 'tel:'] as const;
-
-type AssetKind = 'image' | 'video' | 'media';
-
-function hasUrlValidation(field: z.ZodTypeAny) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const def: any = (field as unknown as { _def?: unknown })._def;
-    const checks: Array<{ kind?: string }> = def?.checks ?? [];
-    return checks.some(check => check.kind === 'url');
-}
-
-function isLikelyUrlField(key: string, field: z.ZodTypeAny) {
-    const lower = key.toLowerCase();
-    if (!(field instanceof z.ZodString)) return false;
-    if (hasUrlValidation(field)) return true;
-    return URL_FIELD_HINTS.some(hint => lower.includes(hint));
-}
-
-function inferAssetKind(defType: string | null, key: string): AssetKind | null {
-    const lower = key.toLowerCase();
-    const matches = (hint: string) => lower === hint || lower.endsWith(hint) || lower.includes(`${hint}url`) || lower.includes(`${hint}src`);
-    if (IMAGE_FIELD_HINTS.some(matches)) return 'image';
-    if (VIDEO_FIELD_HINTS.some(matches)) return 'video';
-    if (GENERIC_ASSET_HINTS.some(matches)) return 'media';
-    if (lower === 'poster' || lower.endsWith('poster')) return 'image';
-    if (lower === 'thumbnail' || lower.endsWith('thumbnail')) return 'image';
-    if (lower === 'src') {
-        if (defType === 'image' || defType === 'project' || defType === 'carousel') return 'image';
-        if (defType === 'video') return 'video';
-    }
-    return null;
-}
-
-function deriveNumberBounds(field: z.ZodNumber) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const def: any = (field as unknown as { _def?: unknown })._def;
-    const checks: Array<{ kind: string; value?: number }> = def?.checks ?? [];
-    let min: number | undefined;
-    let max: number | undefined;
-    let step: number | undefined;
-    let isInt = false;
-    for (const check of checks) {
-        if (check.kind === 'min' && typeof check.value === 'number') min = check.value;
-        if (check.kind === 'max' && typeof check.value === 'number') max = check.value;
-        if (check.kind === 'int') isInt = true;
-    }
-    if (isInt) step = 1;
-    return { min, max, step };
-}
-
 function shouldUseTextareaField(defType: string | null, key: string) {
     const lower = key.toLowerCase();
-    // If the key looks like a color (e.g. textColor) don't treat it as a textarea.
     if (lower.includes('color')) return false;
-    // Match textarea hints as whole words or separated by non-alphanumerics to avoid
-    // matching 'textColor' (which contains 'text' but is not a multiline field).
     for (const hint of TEXTAREA_FIELD_HINTS) {
         const re = new RegExp(`(^|[^a-z0-9])${hint}($|[^a-z0-9])`);
         if (re.test(lower)) return true;
@@ -175,13 +161,26 @@ function shouldUseTextareaField(defType: string | null, key: string) {
 
 function inferStringInputType(field: z.ZodTypeAny): 'text' | 'email' | 'url' {
     if (!(field instanceof z.ZodString)) return 'text';
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const def: any = (field as unknown as { _def?: unknown })._def;
     const checks: Array<{ kind?: string }> = def?.checks ?? [];
     if (checks.some(check => check.kind === 'email')) return 'email';
     if (checks.some(check => check.kind === 'url')) return 'url';
     return 'text';
 }
+
+type ModifyWidgetModalProps = {
+    item: GridItem;
+    onClose: () => void;
+    onDelete?: () => void;
+    onRename: (title: string) => void;
+    onBringToFront: () => void;
+    onSendToBack: () => void;
+    onBringForward: () => void;
+    onSendBackward: () => void;
+    onTogglePin: () => void;
+    onToggleLock: () => void;
+    onApplyProps: (props: Record<string, unknown>) => void;
+};
 
 export default function ModifyWidgetModal({
     item,
@@ -195,20 +194,7 @@ export default function ModifyWidgetModal({
     onTogglePin,
     onToggleLock,
     onApplyProps,
-}: {
-    item: GridItem;
-    onClose: () => void;
-    onDelete?: () => void;
-    onRename: (title: string) => void;
-    onBringToFront: () => void;
-    onSendToBack: () => void;
-    onBringForward: () => void;
-    onSendBackward: () => void;
-    onTogglePin: () => void;
-    onToggleLock: () => void;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    onApplyProps: (props: any) => void;
-}) {
+}: ModifyWidgetModalProps) {
     useScrollLock(true);
     const { selectedProject } = useProjects();
     const { add: notify } = useNotifications();
@@ -221,10 +207,8 @@ export default function ModifyWidgetModal({
     const [zodSchema, setZodSchema] = useState<z.ZodObject<z.ZodRawShape> | null>(null);
     const [formValues, setFormValues] = useState<Record<string, unknown>>({});
     const [formErrors, setFormErrors] = useState<Record<string, string>>({});
+    const [widgetDefaults, setWidgetDefaults] = useState<Record<string, unknown> | null>(null);
     const [defType, setDefType] = useState<string | null>(null);
-    const [imageFileName, setImageFileName] = useState<string>("");
-    const [videoFileName, setVideoFileName] = useState<string>("");
-    const [posterFileName, setPosterFileName] = useState<string>("");
     const [carouselItems, setCarouselItems] = useState<CarouselEditorItem[]>([]);
     const [carouselError, setCarouselError] = useState<string | null>(null);
     const assets = useAssets();
@@ -237,27 +221,9 @@ export default function ModifyWidgetModal({
     const resolvedDefType = defType || item.type || null;
     const isCarousel = resolvedDefType === 'carousel';
     const isVideo = resolvedDefType === 'video';
-    const videoShapeValue = ((typeof formValues.shape === 'string' ? formValues.shape : null) || 'rectangle') as 'rectangle' | 'rounded' | 'circle';
-    const rawBorderWidth = formValues.borderWidth;
-    const rawBorderRadius = formValues.borderRadius;
-    const videoBorderWidthValue = typeof rawBorderWidth === 'number' && Number.isFinite(rawBorderWidth) ? rawBorderWidth : '';
-    const videoBorderRadiusValue = typeof rawBorderRadius === 'number' && Number.isFinite(rawBorderRadius) ? rawBorderRadius : '';
-    const videoBorderColorValue = (typeof formValues.borderColor === 'string' && /^#([0-9a-fA-F]{3}){1,2}$/.test(formValues.borderColor)) ? formValues.borderColor : '#e5e7eb';
-    const videoBorderStyleValue = (typeof formValues.borderStyle === 'string' ? formValues.borderStyle : 'solid') as 'solid' | 'dashed' | 'dotted';
-    // Carousel uses `radius` instead of `borderRadius` in its schema
-    const carouselShapeValue = videoShapeValue;
-    const rawCarouselRadius = formValues.radius;
-    const carouselRadiusValue = typeof rawCarouselRadius === 'number' && Number.isFinite(rawCarouselRadius) ? rawCarouselRadius : '';
-    // Derive navStyle from the current form values first, then fall back to the
-    // original item props (in case the form hasn't been populated yet). This
-    // ensures the UI shows the proper controls (e.g. textColor color picker)
-    // when editing nav-link widgets.
     const navStyle = (defType === 'nav-link')
         ? String((formValues['style'] as string) ?? ((item.props as unknown as Record<string, unknown>)?.style as string) ?? 'link')
         : undefined;
-    const videoBackgroundColorValue = typeof formValues.backgroundColor === 'string' ? formValues.backgroundColor : '';
-    const videoBackgroundColorSwatch = HEX_COLOR_RE.test(videoBackgroundColorValue) ? videoBackgroundColorValue : '#ffffff';
-    // Collapsible sections (persist across openings)
     const [compOpen, setCompOpen] = useState<boolean>(() => {
         try { return localStorage.getItem('py_comp_props_open') === '1'; } catch { return false; }
     });
@@ -277,15 +243,6 @@ export default function ModifyWidgetModal({
             return next;
         });
     }
-    const [imageToolsOpen, setImageToolsOpen] = useState<boolean>(() => {
-        try { return localStorage.getItem('py_image_tools_open') !== '0'; } catch { return true; }
-    });
-    const [videoToolsOpen, setVideoToolsOpen] = useState<boolean>(() => {
-        try { return localStorage.getItem('py_video_tools_open') !== '0'; } catch { return true; }
-    });
-    const [carouselToolsOpen, setCarouselToolsOpen] = useState<boolean>(() => {
-        try { return localStorage.getItem('py_carousel_tools_open') !== '0'; } catch { return true; }
-    });
     const [protectionOpen, setProtectionOpen] = useState<boolean>(() => {
         try { return localStorage.getItem('py_widget_protection_open') !== '0'; } catch { return true; }
     });
@@ -294,13 +251,14 @@ export default function ModifyWidgetModal({
     });
 
     // Keyboard helpers
-    function handleEnterSubmitComp(e: React.KeyboardEvent) {
+    function handleEnterSubmitComp(e: React.KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) {
         if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey && !locked) {
             e.preventDefault();
             applyForm();
         }
     }
-    function handleEnterSubmitAnywhere(e: React.KeyboardEvent) {
+
+    function handleEnterSubmitAnywhere(e: React.KeyboardEvent<HTMLElement>) {
         if (locked || e.defaultPrevented) return;
         if (e.key !== 'Enter' || e.shiftKey || e.ctrlKey || e.metaKey) return;
         const target = e.target as HTMLElement | null;
@@ -308,13 +266,13 @@ export default function ModifyWidgetModal({
         if (target instanceof HTMLTextAreaElement) return;
         if (target instanceof HTMLInputElement) {
             const type = target.type?.toLowerCase();
-            if (!type || !ENTER_SUBMIT_BLOCKED_TYPES.has(type)) {
-                e.preventDefault();
-                applyForm();
-            }
+            if (type && ENTER_SUBMIT_BLOCKED_TYPES.has(type)) return;
         }
+        e.preventDefault();
+        applyForm();
     }
-    function handleCtrlEnterApplyJson(e: React.KeyboardEvent) {
+
+    function handleCtrlEnterApplyJson(e: React.KeyboardEvent<HTMLTextAreaElement>) {
         if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && !locked) {
             e.preventDefault();
             applyProps();
@@ -375,22 +333,33 @@ export default function ModifyWidgetModal({
             .then((def) => {
                 if (!mounted) return;
                 try { setDefType((def as unknown as { type?: string }).type || item.type || null); } catch { setDefType(item.type || null); }
+                const defaults = (def as unknown as { defaultProps?: Record<string, unknown> }).defaultProps;
+                setWidgetDefaults(defaults ? { ...defaults } : null);
                 const schema = (def as unknown as { zodSchema?: z.ZodObject<z.ZodRawShape> }).zodSchema;
                 setZodSchema(schema ?? null);
+                const currentProps = (item.props as Record<string, unknown>) ?? {};
                 if (schema) {
                     // Initialize form values from current props with defaults for missing keys
                     const shape = schema.shape;
+                    const defaultsObj = (defaults && typeof defaults === 'object') ? defaults : undefined;
                     const initial: Record<string, unknown> = {};
                     for (const key of Object.keys(shape)) {
-                        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                        const current = (item.props as any)?.[key];
-                        initial[key] = current !== undefined ? current : undefined;
+                        if (currentProps[key] !== undefined) {
+                            initial[key] = currentProps[key];
+                        } else if (defaultsObj && defaultsObj[key] !== undefined) {
+                            initial[key] = defaultsObj[key];
+                        } else {
+                            initial[key] = undefined;
+                        }
                     }
-                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                    setFormValues({ ...initial, ...(item.props as any) });
+                    const merged = {
+                        ...(defaultsObj ?? {}),
+                        ...initial,
+                        ...currentProps,
+                    };
+                    setFormValues(merged);
                     // Validate once to populate errors
-                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                    const res = schema.safeParse({ ...initial, ...(item.props as any) });
+                    const res = schema.safeParse(merged);
                     if (!res.success) {
                         const errs: Record<string, string> = {};
                         for (const issue of res.error.issues) {
@@ -403,53 +372,16 @@ export default function ModifyWidgetModal({
                         setFormErrors({});
                     }
                 } else {
-                    setFormValues({});
+                    const withDefaults = defaults && typeof defaults === 'object'
+                        ? { ...defaults, ...currentProps }
+                        : currentProps;
+                    setFormValues(withDefaults);
                     setFormErrors({});
                 }
             })
             .finally(() => { });
         return () => { mounted = false; };
     }, [item]);
-
-    // Initialize/refresh chosen file label from current src when editing an image widget
-    useEffect(() => {
-        let alive = true;
-        async function go() {
-            if (defType !== 'image') return;
-            const src = formValues.src;
-            if (typeof src === 'string' && src.startsWith('asset://')) {
-                const hash = src.slice('asset://'.length);
-                try { const meta = await assets.get(hash); if (alive) setImageFileName(meta?.name || ''); } catch { /* ignore */ }
-            } else {
-                if (alive) setImageFileName('');
-            }
-        }
-        void go();
-        return () => { alive = false; };
-    }, [defType, formValues, assets]);
-
-    useEffect(() => {
-        let alive = true;
-        async function go() {
-            if (defType !== 'video') return;
-            const src = formValues.src;
-            if (typeof src === 'string' && src.startsWith('asset://')) {
-                const hash = src.slice('asset://'.length);
-                try { const meta = await assets.get(hash); if (alive) setVideoFileName(meta?.name || ''); } catch { /* ignore */ }
-            } else {
-                if (alive) setVideoFileName('');
-            }
-            const poster = formValues.poster;
-            if (typeof poster === 'string' && poster.startsWith('asset://')) {
-                const hash = poster.slice('asset://'.length);
-                try { const meta = await assets.get(hash); if (alive) setPosterFileName(meta?.name || ''); } catch { /* ignore */ }
-            } else {
-                if (alive) setPosterFileName('');
-            }
-        }
-        void go();
-        return () => { alive = false; };
-    }, [defType, formValues, assets]);
 
     const locked = !!item.locked;
     const pinned = !!item.pinned;
@@ -478,13 +410,62 @@ export default function ModifyWidgetModal({
         validateField(key, value);
     }
 
+    const isTextWidget = resolvedDefType === 'text';
+    const isLinkWidget = resolvedDefType === 'link';
+    const isImageWidget = resolvedDefType === 'image';
+    const isNavLinkWidget = resolvedDefType === 'nav-link';
+    const isProjectWidget = resolvedDefType === 'project';
+    const isContactWidget = resolvedDefType === 'contact';
+    const isGitHubWidget = resolvedDefType === 'github-repos';
+    const videoSchemaFields = new Map<string, z.ZodTypeAny>();
+    const carouselSchemaFields = new Map<string, z.ZodTypeAny>();
+    const imageSchemaFields = new Map<string, z.ZodTypeAny>();
+    const textSchemaFields = new Map<string, z.ZodTypeAny>();
+    const linkSchemaFields = new Map<string, z.ZodTypeAny>();
+    const navLinkSchemaFields = new Map<string, z.ZodTypeAny>();
+    const projectSchemaFields = new Map<string, z.ZodTypeAny>();
+    const contactSchemaFields = new Map<string, z.ZodTypeAny>();
+    const githubSchemaFields = new Map<string, z.ZodTypeAny>();
     const schemaFieldBuckets = {
         default: [] as Array<[string, z.ZodTypeAny]>,
         appearance: [] as Array<[string, z.ZodTypeAny]>,
     };
     if (zodSchema) {
         for (const [key, schema] of Object.entries(zodSchema.shape)) {
-            if (isVideo && (key === 'src' || key === 'poster' || VIDEO_APPEARANCE_FIELDS.has(key))) {
+            if (isImageWidget && IMAGE_WIDGET_FIELD_KEYS.has(key)) {
+                imageSchemaFields.set(key, schema as z.ZodTypeAny);
+                continue;
+            }
+            if (isTextWidget && TEXT_WIDGET_FIELD_KEYS.has(key)) {
+                textSchemaFields.set(key, schema as z.ZodTypeAny);
+                continue;
+            }
+            if (isLinkWidget && LINK_WIDGET_FIELD_KEYS.has(key)) {
+                linkSchemaFields.set(key, schema as z.ZodTypeAny);
+                continue;
+            }
+            if (isNavLinkWidget && NAV_LINK_WIDGET_FIELD_KEYS.has(key)) {
+                navLinkSchemaFields.set(key, schema as z.ZodTypeAny);
+                continue;
+            }
+            if (isVideo && VIDEO_WIDGET_FIELD_KEYS.has(key)) {
+                videoSchemaFields.set(key, schema as z.ZodTypeAny);
+                continue;
+            }
+            if (isCarousel && CAROUSEL_WIDGET_FIELD_KEYS.has(key)) {
+                carouselSchemaFields.set(key, schema as z.ZodTypeAny);
+                continue;
+            }
+            if (isProjectWidget && PROJECT_WIDGET_FIELD_KEYS.has(key)) {
+                projectSchemaFields.set(key, schema as z.ZodTypeAny);
+                continue;
+            }
+            if (isContactWidget && CONTACT_WIDGET_FIELD_KEYS.has(key)) {
+                contactSchemaFields.set(key, schema as z.ZodTypeAny);
+                continue;
+            }
+            if (isGitHubWidget && GITHUB_WIDGET_FIELD_KEYS.has(key)) {
+                githubSchemaFields.set(key, schema as z.ZodTypeAny);
                 continue;
             }
             const bucket = isAppearanceField(defType, key) ? schemaFieldBuckets.appearance : schemaFieldBuckets.default;
@@ -492,18 +473,22 @@ export default function ModifyWidgetModal({
         }
     }
 
+    const navPages = useMemo(() => {
+        const project = selectedProject;
+        if (!project) return [] as Array<{ id: string; title: string }>;
+        const order = project.pageOrder || [];
+        return order.map((id) => ({ id, title: project.pages?.[id]?.title || id }));
+    }, [selectedProject]);
+
     const renderSchemaField = (key: string, schema: z.ZodTypeAny): React.ReactElement | null => {
         if (!zodSchema) return null;
         const field = schema as z.ZodTypeAny;
         const isOptional = field instanceof z.ZodOptional;
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         let baseField: z.ZodTypeAny = isOptional ? (field._def as any).innerType as z.ZodTypeAny : field;
         if (baseField instanceof z.ZodDefault) {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
             baseField = (baseField._def as any).innerType as z.ZodTypeAny;
         }
         if (baseField instanceof z.ZodNullable) {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
             baseField = (baseField._def as any).innerType as z.ZodTypeAny;
         }
         const rawValue = formValues[key];
@@ -541,8 +526,6 @@ export default function ModifyWidgetModal({
         }
         const disabled = locked;
         const isTargetPage = (defType === 'nav-link') && key === 'targetPageId' && (baseField instanceof z.ZodString);
-        const isCarouselIntervalField = isCarousel && key === 'interval';
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const anyZ: any = z;
         const isEnum = baseField instanceof anyZ.ZodEnum;
         const isNativeEnum = baseField instanceof anyZ.ZodNativeEnum;
@@ -557,44 +540,6 @@ export default function ModifyWidgetModal({
             : assetKind === 'video'
                 ? 'asset://hash or https://example.com/video.mp4'
                 : 'asset://hash or https://example.com/resource';
-        if (isCarouselIntervalField) {
-            const secondsValue = typeof rawValue === 'number' && Number.isFinite(rawValue) ? (rawValue / 1000) : '';
-            const adjustSeconds = (delta: number) => {
-                const current = typeof secondsValue === 'number' ? secondsValue : 0;
-                const next = Math.min(60, Math.max(0.5, Number((current + delta).toFixed(2))));
-                const ms = Math.round(next * 1000);
-                setFieldValue(key, ms);
-            };
-            return (
-                <div key={key}>
-                    <label className="block text-[color:var(--fg-muted)] mb-1">Slide interval (seconds)</label>
-                    <div className="flex gap-2">
-                        <input
-                            className="input w-full"
-                            type="number"
-                            min={0.5}
-                            max={60}
-                            step={0.5}
-                            value={secondsValue === '' ? '' : secondsValue}
-                            onChange={(e) => {
-                                const raw = e.target.value;
-                                const num = raw === '' ? undefined : Number(raw);
-                                const ms = typeof num === 'number' && !Number.isNaN(num) ? Math.round(num * 1000) : undefined;
-                                setFieldValue(key, ms);
-                            }}
-                            onKeyDown={handleEnterSubmitComp}
-                            disabled={disabled}
-                        />
-                        <div className="flex flex-col gap-1">
-                            <button className="px-2 py-1 rounded border border-[color:var(--border)] text-[10px] font-semibold" type="button" onClick={() => adjustSeconds(0.5)} disabled={disabled}>+0.5s</button>
-                            <button className="px-2 py-1 rounded border border-[color:var(--border)] text-[10px] font-semibold" type="button" onClick={() => adjustSeconds(-0.5)} disabled={disabled}>-0.5s</button>
-                        </div>
-                    </div>
-                    <div className="text-[10px] text-[color:var(--fg-muted)] mt-1">0.5s – 60s, half-second steps.</div>
-                    {error && <div className="text-red-500 text-xs mt-1">{error}</div>}
-                </div>
-            );
-        }
         return (
             <div key={key}>
                 <label className="block text-[color:var(--fg-muted)] mb-1">{label}{!isOptional ? ' *' : ''}</label>
@@ -667,7 +612,6 @@ export default function ModifyWidgetModal({
                         <option value="" disabled>Select…</option>
                         {(() => {
                             // derive options for enum types
-                            // eslint-disable-next-line @typescript-eslint/no-explicit-any
                             const def: any = (baseField as any)._def;
                             let opts: string[] = [];
                             if (isEnum && Array.isArray(def?.values)) opts = def.values as string[];
@@ -729,6 +673,117 @@ export default function ModifyWidgetModal({
 
     const defaultFieldNodes = schemaFieldBuckets.default.map(([key, schema]) => renderSchemaField(key, schema)).filter((node): node is React.ReactElement => Boolean(node));
     const appearanceFieldNodes = schemaFieldBuckets.appearance.map(([key, schema]) => renderSchemaField(key, schema)).filter((node): node is React.ReactElement => Boolean(node));
+    const imageWidgetSettingsNode = isImageWidget ? (
+        <ImageWidgetSettings
+            values={formValues}
+            errors={formErrors}
+            locked={locked}
+            setFieldValue={setFieldValue}
+            schemaFields={imageSchemaFields}
+            onCommitKeyDown={handleEnterSubmitComp}
+            widgetDefaults={widgetDefaults}
+        />
+    ) : null;
+    const textWidgetSettingsNode = isTextWidget ? (
+        <TextWidgetSettings
+            values={formValues}
+            errors={formErrors}
+            locked={locked}
+            setFieldValue={setFieldValue}
+            schemaFields={textSchemaFields}
+            onCommitKeyDown={handleEnterSubmitComp}
+            widgetDefaults={widgetDefaults}
+        />
+    ) : null;
+    const linkWidgetSettingsNode = isLinkWidget ? (
+        <LinkWidgetSettings
+            values={formValues}
+            errors={formErrors}
+            locked={locked}
+            setFieldValue={setFieldValue}
+            schemaFields={linkSchemaFields}
+            onCommitKeyDown={handleEnterSubmitComp}
+            widgetDefaults={widgetDefaults}
+            rawUrl={linkRawUrl}
+            fieldError={linkFieldError}
+        />
+    ) : null;
+    const navWidgetSettingsNode = isNavLinkWidget ? (
+        <NavLinkWidgetSettings
+            values={formValues}
+            errors={formErrors}
+            locked={locked}
+            setFieldValue={setFieldValue}
+            schemaFields={navLinkSchemaFields}
+            onCommitKeyDown={handleEnterSubmitComp}
+            widgetDefaults={widgetDefaults}
+            pages={navPages}
+        />
+    ) : null;
+    const projectWidgetSettingsNode = isProjectWidget ? (
+        <ProjectWidgetSettings
+            values={formValues}
+            errors={formErrors}
+            locked={locked}
+            setFieldValue={setFieldValue}
+            schemaFields={projectSchemaFields}
+            onCommitKeyDown={handleEnterSubmitComp}
+            widgetDefaults={widgetDefaults}
+        />
+    ) : null;
+    const videoWidgetSettingsNode = isVideo ? (
+        <VideoWidgetSettings
+            values={formValues}
+            errors={formErrors}
+            locked={locked}
+            setFieldValue={setFieldValue}
+            schemaFields={videoSchemaFields}
+            onCommitKeyDown={handleEnterSubmitComp}
+            widgetDefaults={widgetDefaults}
+        />
+    ) : null;
+    const carouselWidgetSettingsNode = isCarousel ? (
+        <CarouselWidgetSettings
+            values={formValues}
+            errors={formErrors}
+            locked={locked}
+            setFieldValue={setFieldValue}
+            schemaFields={carouselSchemaFields}
+            onCommitKeyDown={handleEnterSubmitComp}
+            widgetDefaults={widgetDefaults}
+            items={carouselItems}
+            assets={assets}
+            imageAssets={imageAssetOptions}
+            videoAssets={videoAssetOptions}
+            onAddSlide={addCarouselItem}
+            onRemoveSlide={removeCarouselItem}
+            onMoveSlide={moveCarouselItem}
+            onUpdateSlide={updateCarouselItem}
+            carouselError={carouselError}
+        />
+    ) : null;
+    const contactWidgetSettingsNode = isContactWidget ? (
+        <ContactWidgetSettings
+            values={formValues}
+            errors={formErrors}
+            locked={locked}
+            setFieldValue={setFieldValue}
+            schemaFields={contactSchemaFields}
+            onCommitKeyDown={handleEnterSubmitComp}
+            widgetDefaults={widgetDefaults}
+        />
+    ) : null;
+    const githubWidgetSettingsNode = isGitHubWidget ? (
+        <GitHubReposWidgetSettings
+            values={formValues}
+            errors={formErrors}
+            locked={locked}
+            setFieldValue={setFieldValue}
+            schemaFields={githubSchemaFields}
+            onCommitKeyDown={handleEnterSubmitComp}
+            widgetDefaults={widgetDefaults}
+        />
+    ) : null;
 
     function applyProps() {
         if (locked) return;
@@ -809,6 +864,7 @@ export default function ModifyWidgetModal({
         >
             <div
                 className="surface w-full max-w-4xl border border-[color:var(--border)] rounded-2xl max-h-[85vh] overflow-hidden flex flex-col"
+                style={{ animation: 'py-pop 0.25s ease-out' }}
                 onClick={(e) => e.stopPropagation()}
                 onKeyDown={handleEnterSubmitAnywhere}
             >
@@ -834,782 +890,18 @@ export default function ModifyWidgetModal({
                         </button>
                         {compOpen && (
                             <div className="p-4 space-y-4">
-                                {/* Image quick upload (when editing Image widget) */}
-                                {defType === 'image' && (
-                                    <div className="rounded-xl border border-[color:var(--border)] bg-[color:var(--surface)]/80">
-                                        <button className="w-full flex items-center justify-between gap-2 px-3 py-2 text-xs font-semibold text-[color:var(--fg-muted)]" onClick={() => persistedToggle('py_image_tools_open', setImageToolsOpen)}>
-                                            <div className="flex items-center gap-2">
-                                                {imageToolsOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-                                                <span>Image</span>
-                                            </div>
-                                            <div />
-                                        </button>
-                                        {imageToolsOpen && (
-                                            <div className="p-3 pt-0 space-y-3">
-                                                <div className="flex items-center gap-3 text-xs">
-                                                    <label className={`inline-flex items-center justify-center px-3 py-2 rounded border border-dashed border-[color:var(--border)] bg-[color:var(--muted)]/40 cursor-pointer ${locked ? 'opacity-50 cursor-not-allowed' : ''}`}>
-                                                        <span className="font-medium">Choose image</span>
-                                                        <input
-                                                            type="file"
-                                                            accept="image/*"
-                                                            className="sr-only"
-                                                            disabled={locked}
-                                                            onChange={async (e) => {
-                                                                const f = e.target.files?.[0];
-                                                                if (!f) { setImageFileName(""); return; }
-                                                                setImageFileName(f.name);
-                                                                try {
-                                                                    const metas = await assets.addFiles([f]);
-                                                                    const m = metas[0];
-                                                                    if (m?.hash) {
-                                                                        setFieldValue('src', `asset://${m.hash}`);
-                                                                    }
-                                                                } catch (err) {
-                                                                    console.error('Image upload failed', err);
-                                                                    try { notify({ type: 'error', message: `Failed to upload ${f.name}`, title: selectedProject?.name || 'Editor', persistent: false }); } catch { /* noop */ }
-                                                                    setImageFileName('');
-                                                                }
-                                                            }}
-                                                        />
-                                                    </label>
-                                                    <span className={`px-2 py-1 rounded border border-[color:var(--border)] bg-[color:var(--muted)]/20 ${imageFileName ? '' : 'text-[color:var(--fg-muted)]/70'}`}>
-                                                        {imageFileName || 'No file chosen'}
-                                                    </span>
-                                                </div>
-                                                <div className="mt-3 text-xs flex items-center gap-2">
-                                                    <span className="text-[color:var(--fg-muted)]">Or pick from assets:</span>
-                                                    <select
-                                                        className="input"
-                                                        disabled={locked}
-                                                        value={(() => {
-                                                            const src = formValues.src;
-                                                            if (typeof src === 'string' && src.startsWith('asset://')) return src.slice('asset://'.length);
-                                                            return '';
-                                                        })()}
-                                                        onChange={async (e) => {
-                                                            const hash = e.target.value;
-                                                            if (!hash) return;
-                                                            setFieldValue('src', `asset://${hash}`);
-                                                            try { const meta = await assets.get(hash); setImageFileName(meta?.name || ''); } catch { /* noop */ }
-                                                        }}
-                                                    >
-                                                        <option value="">Select an asset…</option>
-                                                        {imageAssetOptions.map((a) => (
-                                                            <option key={a.hash} value={a.hash}>{a.name}</option>
-                                                        ))}
-                                                    </select>
-                                                </div>
-                                                <div className="pt-3 border-t border-[color:var(--border)] space-y-2">
-                                                    <div className="text-[color:var(--fg-muted)] font-medium">Appearance</div>
-                                                    <div>
-                                                        <label className="block text-[color:var(--fg-muted)] text-xs mb-1">Shape</label>
-                                                        <div className="flex flex-wrap gap-2">
-                                                            {(['rectangle', 'rounded', 'circle'] as const).map((shape) => (
-                                                                <button
-                                                                    key={shape}
-                                                                    type="button"
-                                                                    className={`px-3 py-1.5 rounded border text-xs font-semibold transition ${videoShapeValue === shape ? 'bg-[color:var(--accent)]/20 border-[color:var(--accent)] text-[color:var(--accent)]' : 'border-[color:var(--border)] text-[color:var(--fg-muted)] bg-[color:var(--surface)]'}`}
-                                                                    onClick={() => setFieldValue('shape', shape)}
-                                                                    disabled={locked}
-                                                                >
-                                                                    {shape.charAt(0).toUpperCase() + shape.slice(1)}
-                                                                </button>
-                                                            ))}
-                                                        </div>
-                                                        {formErrors.shape && <div className="text-red-500 text-xs mt-1">{formErrors.shape}</div>}
-                                                    </div>
-                                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                                                        <div>
-                                                            <label className="block text-[color:var(--fg-muted)] text-xs mb-1">Border width (px)</label>
-                                                            <input
-                                                                className="input w-full"
-                                                                type="number"
-                                                                min={0}
-                                                                max={48}
-                                                                step={1}
-                                                                value={videoBorderWidthValue === '' ? '' : videoBorderWidthValue}
-                                                                onChange={(e) => {
-                                                                    const raw = e.target.value;
-                                                                    setFieldValue('borderWidth', raw === '' ? undefined : Number(raw));
-                                                                }}
-                                                                onKeyDown={handleEnterSubmitComp}
-                                                                disabled={locked}
-                                                            />
-                                                            {formErrors.borderWidth && <div className="text-red-500 text-xs mt-1">{formErrors.borderWidth}</div>}
-                                                        </div>
-                                                        <div>
-                                                            <label className="block text-[color:var(--fg-muted)] text-xs mb-1">Border radius (px)</label>
-                                                            <input
-                                                                className="input w-full"
-                                                                type="number"
-                                                                min={0}
-                                                                max={240}
-                                                                step={1}
-                                                                value={videoBorderRadiusValue === '' ? '' : videoBorderRadiusValue}
-                                                                onChange={(e) => {
-                                                                    const raw = e.target.value;
-                                                                    setFieldValue('borderRadius', raw === '' ? undefined : Number(raw));
-                                                                }}
-                                                                onKeyDown={handleEnterSubmitComp}
-                                                                disabled={locked}
-                                                            />
-                                                            {formErrors.borderRadius && <div className="text-red-500 text-xs mt-1">{formErrors.borderRadius}</div>}
-                                                        </div>
-                                                    </div>
-                                                    <div>
-                                                        <label className="block text-[color:var(--fg-muted)] text-xs mb-1">Border style</label>
-                                                        <select
-                                                            className="input w-full"
-                                                            value={videoBorderStyleValue}
-                                                            onChange={(e) => setFieldValue('borderStyle', e.target.value)}
-                                                            disabled={locked}
-                                                        >
-                                                            <option value="solid">Solid</option>
-                                                            <option value="dashed">Dashed</option>
-                                                            <option value="dotted">Dotted</option>
-                                                        </select>
-                                                        {formErrors.borderStyle && <div className="text-red-500 text-xs mt-1">{formErrors.borderStyle}</div>}
-                                                    </div>
-                                                    <div>
-                                                        <label className="block text-[color:var(--fg-muted)] text-xs mb-1">Border color</label>
-                                                        <div className="flex items-center gap-2">
-                                                            <input
-                                                                type="color"
-                                                                className="rounded border border-[color:var(--border)] bg-[color:var(--muted)]/40 h-8 w-12 cursor-pointer"
-                                                                value={videoBorderColorValue}
-                                                                onChange={(e) => setFieldValue('borderColor', e.target.value)}
-                                                                disabled={locked}
-                                                                aria-label="Border color"
-                                                            />
-                                                            <input
-                                                                className="input flex-1 font-mono text-xs"
-                                                                value={typeof formValues.borderColor === 'string' ? formValues.borderColor : ''}
-                                                                onChange={(e) => setFieldValue('borderColor', e.target.value)}
-                                                                onKeyDown={handleEnterSubmitComp}
-                                                                placeholder="#e5e7eb"
-                                                                disabled={locked}
-                                                            />
-                                                        </div>
-                                                        {formErrors.borderColor && <div className="text-red-500 text-xs mt-1">{formErrors.borderColor}</div>}
-                                                    </div>
-                                                </div>
-                                            </div>
-
-                                        )}
-                                    </div>
-                                )}
-
-                                {isVideo && (
-                                    <div className="rounded-xl border border-[color:var(--border)] bg-[color:var(--surface)]/80">
-                                        <button className="w-full flex items-center justify-between gap-2 px-3 py-2 text-xs font-semibold text-[color:var(--fg-muted)]" onClick={() => persistedToggle('py_video_tools_open', setVideoToolsOpen)}>
-                                            <div className="flex items-center gap-2">
-                                                {videoToolsOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-                                                <span>Video settings</span>
-                                            </div>
-                                            <div />
-                                        </button>
-                                        {videoToolsOpen && (
-                                            <div className="p-3 space-y-3">
-                                                <div>
-                                                    <div className="text-[color:var(--fg-muted)] font-medium mb-1">Video source</div>
-                                                    <p className="text-xs text-[color:var(--fg-muted)]/90">Upload a file, pick an uploaded asset, or paste a link (YouTube, MP4, etc.).</p>
-                                                </div>
-                                                <div className="flex items-center gap-3 text-xs">
-                                                    <label className={`inline-flex items-center justify-center px-3 py-2 rounded border border-dashed border-[color:var(--border)] bg-[color:var(--muted)]/40 cursor-pointer ${locked ? 'opacity-50 cursor-not-allowed' : ''}`}>
-                                                        <span className="font-medium">Choose video</span>
-                                                        <input
-                                                            type="file"
-                                                            accept="video/*"
-                                                            className="sr-only"
-                                                            disabled={locked}
-                                                            onChange={async (e) => {
-                                                                const f = e.target.files?.[0];
-                                                                if (!f) { setVideoFileName(''); return; }
-                                                                setVideoFileName(f.name);
-                                                                try {
-                                                                    const metas = await assets.addFiles([f]);
-                                                                    const m = metas[0];
-                                                                    if (m?.hash) {
-                                                                        setFieldValue('src', `asset://${m.hash}`);
-                                                                    }
-                                                                } catch { /* ignore */ }
-                                                            }}
-                                                        />
-                                                    </label>
-                                                    <span className={`px-2 py-1 rounded border border-[color:var(--border)] bg-[color:var(--muted)]/20 ${videoFileName ? '' : 'text-[color:var(--fg-muted)]/70'}`}>
-                                                        {videoFileName || 'No file chosen'}
-                                                    </span>
-                                                </div>
-                                                {videoAssetOptions.length > 0 && (
-                                                    <div>
-                                                        <label className="block text-[color:var(--fg-muted)] text-xs mb-1">Pick from assets</label>
-                                                        <select
-                                                            className="input"
-                                                            disabled={locked}
-                                                            value={(() => {
-                                                                const src = formValues.src;
-                                                                if (typeof src === 'string' && src.startsWith('asset://')) return src.slice('asset://'.length);
-                                                                return '';
-                                                            })()}
-                                                            onChange={async (e) => {
-                                                                const hash = e.target.value;
-                                                                if (!hash) return;
-                                                                setFieldValue('src', `asset://${hash}`);
-                                                                try { const meta = await assets.get(hash); setVideoFileName(meta?.name || ''); } catch { /* noop */ }
-                                                            }}
-                                                        >
-                                                            <option value="">Select a video asset…</option>
-                                                            {videoAssetOptions.map((asset) => (
-                                                                <option key={asset.hash} value={asset.hash}>{asset.name}</option>
-                                                            ))}
-                                                        </select>
-                                                    </div>
-                                                )}
-                                                <div>
-                                                    <label className="block text-[color:var(--fg-muted)] text-xs mb-1">Paste video link</label>
-                                                    <input
-                                                        className="input w-full"
-                                                        type="url"
-                                                        placeholder="https://www.youtube.com/watch?v=..."
-                                                        value={typeof formValues.src === 'string' ? formValues.src : ''}
-                                                        onChange={(e) => setFieldValue('src', e.target.value)}
-                                                        onKeyDown={handleEnterSubmitComp}
-                                                        disabled={locked}
-                                                    />
-                                                    {formErrors.src && <div className="text-red-500 text-xs mt-1">{formErrors.src}</div>}
-                                                </div>
-                                                <div className="pt-3 border-t border-[color:var(--border)] space-y-2">
-                                                    <div className="text-[color:var(--fg-muted)] font-medium">Poster image (optional)</div>
-                                                    <div className="flex items-center gap-3 text-xs">
-                                                        <label className={`inline-flex items-center justify-center px-3 py-2 rounded border border-dashed border-[color:var(--border)] bg-[color:var(--muted)]/40 cursor-pointer ${locked ? 'opacity-50 cursor-not-allowed' : ''}`}>
-                                                            <span className="font-medium">Choose image</span>
-                                                            <input
-                                                                type="file"
-                                                                accept="image/*"
-                                                                className="sr-only"
-                                                                disabled={locked}
-                                                                onChange={async (e) => {
-                                                                    const f = e.target.files?.[0];
-                                                                    if (!f) { setPosterFileName(''); return; }
-                                                                    setPosterFileName(f.name);
-                                                                    try {
-                                                                        const metas = await assets.addFiles([f]);
-                                                                        const m = metas[0];
-                                                                        if (m?.hash) {
-                                                                            setFieldValue('poster', `asset://${m.hash}`);
-                                                                        }
-                                                                    } catch (err) {
-                                                                        console.error('Poster upload failed', err);
-                                                                        try { notify({ type: 'error', message: `Failed to upload ${f.name}`, title: selectedProject?.name || 'Editor', persistent: false }); } catch { /* noop */ }
-                                                                        setPosterFileName('');
-                                                                    }
-                                                                }}
-                                                            />
-                                                        </label>
-                                                        <span className={`px-2 py-1 rounded border border-[color:var(--border)] bg-[color:var(--muted)]/20 ${posterFileName ? '' : 'text-[color:var(--fg-muted)]/70'}`}>
-                                                            {posterFileName || 'No file chosen'}
-                                                        </span>
-                                                    </div>
-                                                    {imageAssetOptions.length > 0 && (
-                                                        <div>
-                                                            <label className="block text-[color:var(--fg-muted)] text-xs mb-1">Pick from assets</label>
-                                                            <select
-                                                                className="input"
-                                                                disabled={locked}
-                                                                value={(() => {
-                                                                    const poster = formValues.poster;
-                                                                    if (typeof poster === 'string' && poster.startsWith('asset://')) return poster.slice('asset://'.length);
-                                                                    return '';
-                                                                })()}
-                                                                onChange={async (e) => {
-                                                                    const hash = e.target.value;
-                                                                    if (!hash) return;
-                                                                    setFieldValue('poster', `asset://${hash}`);
-                                                                    try { const meta = await assets.get(hash); setPosterFileName(meta?.name || ''); } catch { /* noop */ }
-                                                                }}
-                                                            >
-                                                                <option value="">Select an image asset…</option>
-                                                                {imageAssetOptions.map((asset) => (
-                                                                    <option key={asset.hash} value={asset.hash}>{asset.name}</option>
-                                                                ))}
-                                                            </select>
-                                                        </div>
-                                                    )}
-                                                    <div>
-                                                        <label className="block text-[color:var(--fg-muted)] text-xs mb-1">Paste poster link</label>
-                                                        <input
-                                                            className="input w-full"
-                                                            type="url"
-                                                            placeholder="https://example.com/poster.jpg"
-                                                            value={typeof formValues.poster === 'string' ? formValues.poster : ''}
-                                                            onChange={(e) => setFieldValue('poster', e.target.value)}
-                                                            onKeyDown={handleEnterSubmitComp}
-                                                            disabled={locked}
-                                                        />
-                                                    </div>
-                                                    {formErrors.poster && <div className="text-red-500 text-xs">{formErrors.poster}</div>}
-                                                    <div className="text-[10px] text-[color:var(--fg-muted)]">Shown while the player loads.</div>
-                                                </div>
-                                                <div className="pt-3 border-t border-[color:var(--border)] space-y-3">
-                                                    <div className="text-[color:var(--fg-muted)] font-medium">Appearance</div>
-                                                    <div>
-                                                        <label className="block text-[color:var(--fg-muted)] text-xs mb-1">Background color</label>
-                                                        <div className="flex items-center gap-2">
-                                                            <input
-                                                                type="color"
-                                                                className="rounded border border-[color:var(--border)] bg-[color:var(--muted)]/40 h-8 w-12 cursor-pointer"
-                                                                value={videoBackgroundColorSwatch}
-                                                                onChange={(e) => setFieldValue('backgroundColor', e.target.value)}
-                                                                disabled={locked}
-                                                                aria-label="Background color"
-                                                            />
-                                                            <input
-                                                                className="input flex-1 font-mono text-xs"
-                                                                value={videoBackgroundColorValue}
-                                                                onChange={(e) => setFieldValue('backgroundColor', e.target.value)}
-                                                                onKeyDown={handleEnterSubmitComp}
-                                                                placeholder="var(--surface)"
-                                                                disabled={locked}
-                                                            />
-                                                        </div>
-                                                        {formErrors.backgroundColor && <div className="text-red-500 text-xs mt-1">{formErrors.backgroundColor}</div>}
-                                                        <div className="text-[10px] text-[color:var(--fg-muted)] mt-1">Use hex colors or CSS vars like var(--surface).</div>
-                                                    </div>
-                                                    <div>
-                                                        <label className="block text-[color:var(--fg-muted)] text-xs mb-1">Shape</label>
-                                                        <div className="flex flex-wrap gap-2">
-                                                            {(['rectangle', 'rounded', 'circle'] as const).map((shape) => (
-                                                                <button
-                                                                    key={shape}
-                                                                    type="button"
-                                                                    className={`px-3 py-1.5 rounded border text-xs font-semibold transition ${videoShapeValue === shape ? 'bg-[color:var(--accent)]/20 border-[color:var(--accent)] text-[color:var(--accent)]' : 'border-[color:var(--border)] text-[color:var(--fg-muted)] bg-[color:var(--surface)]'}`}
-                                                                    onClick={() => setFieldValue('shape', shape)}
-                                                                    disabled={locked}
-                                                                >
-                                                                    {shape.charAt(0).toUpperCase() + shape.slice(1)}
-                                                                </button>
-                                                            ))}
-                                                        </div>
-                                                        {formErrors.shape && <div className="text-red-500 text-xs mt-1">{formErrors.shape}</div>}
-                                                    </div>
-                                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                                                        <div>
-                                                            <label className="block text-[color:var(--fg-muted)] text-xs mb-1">Border width (px)</label>
-                                                            <input
-                                                                className="input w-full"
-                                                                type="number"
-                                                                min={0}
-                                                                max={48}
-                                                                step={1}
-                                                                value={videoBorderWidthValue === '' ? '' : videoBorderWidthValue}
-                                                                onChange={(e) => {
-                                                                    const raw = e.target.value;
-                                                                    setFieldValue('borderWidth', raw === '' ? undefined : Number(raw));
-                                                                }}
-                                                                onKeyDown={handleEnterSubmitComp}
-                                                                disabled={locked}
-                                                            />
-                                                            {formErrors.borderWidth && <div className="text-red-500 text-xs mt-1">{formErrors.borderWidth}</div>}
-                                                        </div>
-                                                        <div>
-                                                            <label className="block text-[color:var(--fg-muted)] text-xs mb-1">Border radius (px)</label>
-                                                            <input
-                                                                className="input w-full"
-                                                                type="number"
-                                                                min={0}
-                                                                max={240}
-                                                                step={1}
-                                                                value={videoBorderRadiusValue === '' ? '' : videoBorderRadiusValue}
-                                                                onChange={(e) => {
-                                                                    const raw = e.target.value;
-                                                                    setFieldValue('borderRadius', raw === '' ? undefined : Number(raw));
-                                                                }}
-                                                                onKeyDown={handleEnterSubmitComp}
-                                                                disabled={locked}
-                                                            />
-                                                            {formErrors.borderRadius && <div className="text-red-500 text-xs mt-1">{formErrors.borderRadius}</div>}
-                                                        </div>
-                                                    </div>
-                                                    <div>
-                                                        <label className="block text-[color:var(--fg-muted)] text-xs mb-1">Border style</label>
-                                                        <select
-                                                            className="input w-full"
-                                                            value={videoBorderStyleValue}
-                                                            onChange={(e) => setFieldValue('borderStyle', e.target.value)}
-                                                            disabled={locked}
-                                                        >
-                                                            <option value="solid">Solid</option>
-                                                            <option value="dashed">Dashed</option>
-                                                            <option value="dotted">Dotted</option>
-                                                        </select>
-                                                        {formErrors.borderStyle && <div className="text-red-500 text-xs mt-1">{formErrors.borderStyle}</div>}
-                                                    </div>
-                                                    <div>
-                                                        <label className="block text-[color:var(--fg-muted)] text-xs mb-1">Border color</label>
-                                                        <div className="flex items-center gap-2">
-                                                            <input
-                                                                type="color"
-                                                                className="rounded border border-[color:var(--border)] bg-[color:var(--muted)]/40 h-8 w-12 cursor-pointer"
-                                                                value={videoBorderColorValue}
-                                                                onChange={(e) => setFieldValue('borderColor', e.target.value)}
-                                                                disabled={locked}
-                                                                aria-label="Border color"
-                                                            />
-                                                            <input
-                                                                className="input flex-1 font-mono text-xs"
-                                                                value={typeof formValues.borderColor === 'string' ? formValues.borderColor : ''}
-                                                                onChange={(e) => setFieldValue('borderColor', e.target.value)}
-                                                                onKeyDown={handleEnterSubmitComp}
-                                                                placeholder="#e5e7eb"
-                                                                disabled={locked}
-                                                            />
-                                                        </div>
-                                                        {formErrors.borderColor && <div className="text-red-500 text-xs mt-1">{formErrors.borderColor}</div>}
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        )}
-                                    </div>
-                                )}
-
-                                {isCarousel && (
-                                    <div className="rounded-xl border border-[color:var(--border)] bg-[color:var(--surface)]/80">
-                                        <button className="w-full flex items-center justify-between gap-2 px-3 py-2 text-xs font-semibold text-[color:var(--fg-muted)]" onClick={() => persistedToggle('py_carousel_tools_open', setCarouselToolsOpen)}>
-                                            <div className="flex items-center gap-2">
-                                                {carouselToolsOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-                                                <span>Carousel slides</span>
-                                            </div>
-                                            <div />
-                                        </button>
-                                        {carouselToolsOpen && (
-                                            <div className="p-3 space-y-3">
-                                                <div className="flex items-center justify-between">
-                                                    <div className="text-[color:var(--fg-muted)] font-medium">Slides</div>
-                                                    <button className="btn btn-ghost btn-xs" type="button" onClick={addCarouselItem} disabled={locked}>Add slide</button>
-                                                </div>
-                                                <div className="space-y-3">
-                                                    {carouselItems.map((slide, idx) => {
-                                                        const assetHashForSlide = (typeof slide.source === 'string' && slide.source.startsWith('asset://')) ? slide.source.slice('asset://'.length) : '';
-                                                        const currentAsset = assetHashForSlide ? assets.list.find(a => a.hash === assetHashForSlide) : null;
-                                                        return (
-                                                            <div key={slide.id} className="border border-[color:var(--border)] rounded-md p-3 bg-[color:var(--surface)] shadow-sm space-y-2">
-                                                                <div className="flex items-center justify-between text-xs font-medium">
-                                                                    <span>Slide {idx + 1}</span>
-                                                                    <div className="flex items-center gap-1">
-                                                                        <button className="btn btn-ghost btn-xs text-[color:var(--fg)] bg-[color:var(--muted)]/40 border border-[color:var(--border)] hover:bg-[color:var(--muted)]/60" type="button" onClick={() => moveCarouselItem(slide.id, -1)} disabled={locked || idx === 0} title="Move up">
-                                                                            <ChevronUp size={12} />
-                                                                        </button>
-                                                                        <button className="btn btn-ghost btn-xs text-[color:var(--fg)] bg-[color:var(--muted)]/40 border border-[color:var(--border)] hover:bg-[color:var(--muted)]/60" type="button" onClick={() => moveCarouselItem(slide.id, 1)} disabled={locked || idx === carouselItems.length - 1} title="Move down">
-                                                                            <ChevronDown size={12} />
-                                                                        </button>
-                                                                        <button className="btn btn-ghost btn-xs text-red-500 border border-red-500/30 bg-red-500/10 hover:bg-red-500/20" type="button" onClick={() => removeCarouselItem(slide.id)} disabled={locked} title="Remove slide">
-                                                                            <Trash2 size={12} />
-                                                                        </button>
-                                                                    </div>
-                                                                </div>
-                                                                <div>
-                                                                    <label className="block text-[color:var(--fg-muted)] text-xs mb-1">Media type</label>
-                                                                    <select className="input w-full" value={slide.mediaType} onChange={(e) => updateCarouselItem(slide.id, { mediaType: e.target.value as 'image' | 'video' })} disabled={locked}>
-                                                                        <option value="image">Image</option>
-                                                                        <option value="video">Video</option>
-                                                                    </select>
-                                                                </div>
-                                                                <div>
-                                                                    <label className="block text-[color:var(--fg-muted)] text-xs mb-1">Source (asset:// or URL)</label>
-                                                                    <input
-                                                                        className="input w-full"
-                                                                        value={slide.source}
-                                                                        onChange={(e) => updateCarouselItem(slide.id, { source: e.target.value })}
-                                                                        placeholder="asset://hash or https://example.com/media"
-                                                                        disabled={locked}
-                                                                    />
-                                                                </div>
-                                                                <div>
-                                                                    {/** always allow uploading a file for a slide (image or video) */}
-                                                                    <div className="flex items-center gap-2 mb-2">
-                                                                        <label className={`inline-flex items-center justify-center px-3 py-1.5 rounded border border-dashed border-[color:var(--border)] bg-[color:var(--muted)]/40 ${locked ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}>
-                                                                            <span className="font-semibold">Upload</span>
-                                                                            <input
-                                                                                type="file"
-                                                                                accept={slide.mediaType === 'video' ? 'video/*' : 'image/*'}
-                                                                                className="sr-only"
-                                                                                disabled={locked}
-                                                                                onChange={async (e) => {
-                                                                                    const file = e.target.files?.[0];
-                                                                                    e.currentTarget.value = '';
-                                                                                    if (!file) return;
-                                                                                    try {
-                                                                                        const metas = await assets.addFiles([file]);
-                                                                                        const meta = metas[0];
-                                                                                        if (meta?.hash) updateCarouselItem(slide.id, { source: `asset://${meta.hash}` });
-                                                                                    } catch (err) {
-                                                                                        console.error('Slide upload failed', err);
-                                                                                    }
-                                                                                }}
-                                                                            />
-                                                                        </label>
-                                                                        <span className="px-2 py-1 rounded border border-[color:var(--border)] bg-[color:var(--muted)]/20 text-[color:var(--fg-muted)]">{currentAsset?.name ?? ((typeof slide.source === 'string' && slide.source.startsWith('asset://')) ? `asset://${assetHashForSlide}` : (slide.source || 'No file chosen'))}</span>
-                                                                    </div>
-                                                                    {slide.mediaType === 'image' && imageAssetOptions.length > 0 && (
-                                                                        <div>
-                                                                            <label className="block text-[color:var(--fg-muted)] text-xs mb-1">Pick from image assets</label>
-                                                                            <select
-                                                                                className="input w-full"
-                                                                                value={assetHashForSlide}
-                                                                                onChange={(e) => {
-                                                                                    const hash = e.target.value;
-                                                                                    if (!hash) return;
-                                                                                    updateCarouselItem(slide.id, { source: `asset://${hash}` });
-                                                                                }}
-                                                                                disabled={locked}
-                                                                            >
-                                                                                <option value="">Select an image asset…</option>
-                                                                                {imageAssetOptions.map((asset) => (
-                                                                                    <option key={asset.hash} value={asset.hash}>{asset.name}</option>
-                                                                                ))}
-                                                                            </select>
-                                                                        </div>
-                                                                    )}
-                                                                    {slide.mediaType === 'image' && (
-                                                                        <div className="mt-2">
-                                                                            <label className="block text-[color:var(--fg-muted)] text-xs mb-1">Paste image link</label>
-                                                                            <input
-                                                                                className="input w-full"
-                                                                                type="url"
-                                                                                placeholder="https://example.com/image.jpg"
-                                                                                value={typeof slide.source === 'string' && !slide.source.startsWith('asset://') ? slide.source : ''}
-                                                                                onChange={(e) => updateCarouselItem(slide.id, { source: e.target.value })}
-                                                                                disabled={locked}
-                                                                            />
-                                                                        </div>
-                                                                    )}
-                                                                    {slide.mediaType === 'video' && videoAssetOptions.length > 0 && (
-                                                                        <div className="mt-2">
-                                                                            <label className="block text-[color:var(--fg-muted)] text-xs mb-1">Pick from video assets</label>
-                                                                            <select
-                                                                                className="input w-full"
-                                                                                value={assetHashForSlide}
-                                                                                onChange={(e) => {
-                                                                                    const hash = e.target.value;
-                                                                                    if (!hash) return;
-                                                                                    updateCarouselItem(slide.id, { source: `asset://${hash}` });
-                                                                                }}
-                                                                                disabled={locked}
-                                                                            >
-                                                                                <option value="">Select a video asset…</option>
-                                                                                {videoAssetOptions.map((asset) => (
-                                                                                    <option key={asset.hash} value={asset.hash}>{asset.name}</option>
-                                                                                ))}
-                                                                            </select>
-                                                                        </div>
-                                                                    )}
-                                                                    {slide.mediaType === 'video' && (
-                                                                        <div className="mt-2">
-                                                                            <label className="block text-[color:var(--fg-muted)] text-xs mb-1">Paste video link</label>
-                                                                            <input
-                                                                                className="input w-full"
-                                                                                type="url"
-                                                                                placeholder="https://example.com/video.mp4"
-                                                                                value={(typeof slide.source === 'string' && !slide.source.startsWith('asset://')) ? slide.source : ''}
-                                                                                onChange={(e) => updateCarouselItem(slide.id, { source: e.target.value })}
-                                                                                disabled={locked}
-                                                                            />
-                                                                        </div>
-                                                                    )}
-                                                                </div>
-                                                                {slide.mediaType === 'image' && (
-                                                                    <div>
-                                                                        <label className="block text-[color:var(--fg-muted)] text-xs mb-1">Alt text</label>
-                                                                        <input className="input w-full" value={slide.alt} onChange={(e) => updateCarouselItem(slide.id, { alt: e.target.value })} disabled={locked} />
-                                                                    </div>
-                                                                )}
-                                                                {slide.mediaType === 'video' && (
-                                                                    <div>
-                                                                        <label className="block text-[color:var(--fg-muted)] text-xs mb-1">Poster image (optional)</label>
-                                                                        <div className="flex items-center gap-2 mb-2">
-                                                                            <label className={`inline-flex items-center justify-center px-3 py-1.5 rounded border border-dashed border-[color:var(--border)] bg-[color:var(--muted)]/40 ${locked ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}>
-                                                                                <span className="font-semibold">Upload</span>
-                                                                                <input
-                                                                                    type="file"
-                                                                                    accept="image/*"
-                                                                                    className="sr-only"
-                                                                                    disabled={locked}
-                                                                                    onChange={async (e) => {
-                                                                                        const file = e.target.files?.[0];
-                                                                                        e.currentTarget.value = '';
-                                                                                        if (!file) return;
-                                                                                        try {
-                                                                                            const metas = await assets.addFiles([file]);
-                                                                                            const meta = metas[0];
-                                                                                            if (meta?.hash) updateCarouselItem(slide.id, { poster: `asset://${meta.hash}` });
-                                                                                        } catch (err) {
-                                                                                            console.error('Poster upload failed', err);
-                                                                                        }
-                                                                                    }}
-                                                                                />
-                                                                            </label>
-                                                                            <span className="px-2 py-1 rounded border border-[color:var(--border)] bg-[color:var(--muted)]/20 text-[color:var(--fg-muted)]">{(typeof slide.poster === 'string' && slide.poster.startsWith('asset://')) ? slide.poster.slice('asset://'.length) : (slide.poster || 'No poster')}</span>
-                                                                        </div>
-                                                                        {imageAssetOptions.length > 0 && (
-                                                                            <div>
-                                                                                <label className="block text-[color:var(--fg-muted)] text-xs mb-1">Pick from assets</label>
-                                                                                <select
-                                                                                    className="input w-full"
-                                                                                    value={(() => {
-                                                                                        const p = slide.poster;
-                                                                                        if (typeof p === 'string' && p.startsWith('asset://')) return p.slice('asset://'.length);
-                                                                                        return '';
-                                                                                    })()}
-                                                                                    disabled={locked}
-                                                                                    onChange={(e) => {
-                                                                                        const hash = e.target.value;
-                                                                                        if (!hash) return;
-                                                                                        updateCarouselItem(slide.id, { poster: `asset://${hash}` });
-                                                                                    }}
-                                                                                >
-                                                                                    <option value="">Select an image asset…</option>
-                                                                                    {imageAssetOptions.map((asset) => (
-                                                                                        <option key={asset.hash} value={asset.hash}>{asset.name}</option>
-                                                                                    ))}
-                                                                                </select>
-                                                                            </div>
-                                                                        )}
-                                                                        <input className="input w-full mt-2" value={slide.poster || ''} onChange={(e) => updateCarouselItem(slide.id, { poster: e.target.value })} placeholder="asset://hash or URL" disabled={locked} />
-                                                                    </div>
-                                                                )}
-                                                                <div>
-                                                                    <label className="block text-[color:var(--fg-muted)] text-xs mb-1">Caption</label>
-                                                                    <input className="input w-full" value={slide.caption} onChange={(e) => updateCarouselItem(slide.id, { caption: e.target.value })} disabled={locked} />
-                                                                </div>
-                                                            </div>
-                                                        );
-                                                    })}
-                                                </div>
-                                                <div className="pt-3 border-t border-[color:var(--border)] space-y-2">
-                                                    <div className="text-[color:var(--fg-muted)] font-medium">Appearance</div>
-                                                    <div>
-                                                        <label className="block text-[color:var(--fg-muted)] text-xs mb-1">Background color</label>
-                                                        <div className="flex items-center gap-2">
-                                                            <input
-                                                                type="color"
-                                                                className="rounded border border-[color:var(--border)] bg-[color:var(--muted)]/40 h-8 w-12 cursor-pointer"
-                                                                value={videoBackgroundColorSwatch}
-                                                                onChange={(e) => setFieldValue('backgroundColor', e.target.value)}
-                                                                disabled={locked}
-                                                                aria-label="Background color"
-                                                            />
-                                                            <input
-                                                                className="input flex-1 font-mono text-xs"
-                                                                value={videoBackgroundColorValue}
-                                                                onChange={(e) => setFieldValue('backgroundColor', e.target.value)}
-                                                                onKeyDown={handleEnterSubmitComp}
-                                                                placeholder="var(--surface)"
-                                                                disabled={locked}
-                                                            />
-                                                        </div>
-                                                    </div>
-                                                    <div>
-                                                        <label className="block text-[color:var(--fg-muted)] text-xs mb-1">Shape</label>
-                                                        <div className="flex flex-wrap gap-2">
-                                                            {(['rectangle', 'rounded', 'circle'] as const).map((shape) => (
-                                                                <button
-                                                                    key={shape}
-                                                                    type="button"
-                                                                    className={`px-3 py-1.5 rounded border text-xs font-semibold transition ${carouselShapeValue === shape ? 'bg-[color:var(--accent)]/20 border-[color:var(--accent)] text-[color:var(--accent)]' : 'border-[color:var(--border)] text-[color:var(--fg-muted)] bg-[color:var(--surface)]'}`}
-                                                                    onClick={() => setFieldValue('shape', shape)}
-                                                                    disabled={locked}
-                                                                >
-                                                                    {shape.charAt(0).toUpperCase() + shape.slice(1)}
-                                                                </button>
-                                                            ))}
-                                                        </div>
-                                                        {formErrors.shape && <div className="text-red-500 text-xs mt-1">{formErrors.shape}</div>}
-                                                    </div>
-                                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                                                        <div>
-                                                            <label className="block text-[color:var(--fg-muted)] text-xs mb-1">Border width (px)</label>
-                                                            <input
-                                                                className="input w-full"
-                                                                type="number"
-                                                                min={0}
-                                                                max={48}
-                                                                step={1}
-                                                                value={videoBorderWidthValue === '' ? '' : videoBorderWidthValue}
-                                                                onChange={(e) => {
-                                                                    const raw = e.target.value;
-                                                                    setFieldValue('borderWidth', raw === '' ? undefined : Number(raw));
-                                                                }}
-                                                                onKeyDown={handleEnterSubmitComp}
-                                                                disabled={locked}
-                                                            />
-                                                            {formErrors.borderWidth && <div className="text-red-500 text-xs mt-1">{formErrors.borderWidth}</div>}
-                                                        </div>
-                                                        <div>
-                                                            <label className="block text-[color:var(--fg-muted)] text-xs mb-1">Radius (px)</label>
-                                                            <input
-                                                                className="input w-full"
-                                                                type="number"
-                                                                min={0}
-                                                                max={240}
-                                                                step={1}
-                                                                value={carouselRadiusValue === '' ? '' : carouselRadiusValue}
-                                                                onChange={(e) => {
-                                                                    const raw = e.target.value;
-                                                                    setFieldValue('radius', raw === '' ? undefined : Number(raw));
-                                                                }}
-                                                                onKeyDown={handleEnterSubmitComp}
-                                                                disabled={locked}
-                                                            />
-                                                            {formErrors.radius && <div className="text-red-500 text-xs mt-1">{formErrors.radius}</div>}
-                                                        </div>
-                                                    </div>
-                                                    <div>
-                                                        <label className="block text-[color:var(--fg-muted)] text-xs mb-1">Border style</label>
-                                                        <select
-                                                            className="input w-full"
-                                                            value={videoBorderStyleValue}
-                                                            onChange={(e) => setFieldValue('borderStyle', e.target.value)}
-                                                            disabled={locked}
-                                                        >
-                                                            <option value="solid">Solid</option>
-                                                            <option value="dashed">Dashed</option>
-                                                            <option value="dotted">Dotted</option>
-                                                        </select>
-                                                        {formErrors.borderStyle && <div className="text-red-500 text-xs mt-1">{formErrors.borderStyle}</div>}
-                                                    </div>
-                                                    <div>
-                                                        <label className="block text-[color:var(--fg-muted)] text-xs mb-1">Border color</label>
-                                                        <div className="flex items-center gap-2">
-                                                            <input
-                                                                type="color"
-                                                                className="rounded border border-[color:var(--border)] bg-[color:var(--muted)]/40 h-8 w-12 cursor-pointer"
-                                                                value={videoBorderColorValue}
-                                                                onChange={(e) => setFieldValue('borderColor', e.target.value)}
-                                                                disabled={locked}
-                                                                aria-label="Border color"
-                                                            />
-                                                            <input
-                                                                className="input flex-1 font-mono text-xs"
-                                                                value={typeof formValues.borderColor === 'string' ? formValues.borderColor : ''}
-                                                                onChange={(e) => setFieldValue('borderColor', e.target.value)}
-                                                                onKeyDown={handleEnterSubmitComp}
-                                                                placeholder="#e5e7eb"
-                                                                disabled={locked}
-                                                            />
-                                                        </div>
-                                                        {formErrors.borderColor && <div className="text-red-500 text-xs mt-1">{formErrors.borderColor}</div>}
-                                                    </div>
-                                                </div>
-                                                {carouselError && (
-                                                    <div className="text-red-500 text-xs">{carouselError}</div>
-                                                )}
-                                            </div>
-                                        )}
-                                    </div>
-                                )}
+                                {carouselWidgetSettingsNode}
+                                {imageWidgetSettingsNode}
+                                {textWidgetSettingsNode}
+                                {linkWidgetSettingsNode}
+                                {navWidgetSettingsNode}
+                                {projectWidgetSettingsNode}
+                                {contactWidgetSettingsNode}
+                                {githubWidgetSettingsNode}
+                                {videoWidgetSettingsNode}
 
                                 {/* Zod-backed properties */}
-                                {zodSchema && (
+                                {zodSchema && (!!defaultFieldNodes.length || !!appearanceFieldNodes.length || defType === 'link') && (
                                     <div className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)]/90 p-4">
                                         <div className="text-[color:var(--fg-muted)] mb-2 font-medium">Component Properties</div>
                                         {!!defaultFieldNodes.length && (
@@ -1622,9 +914,6 @@ export default function ModifyWidgetModal({
                                                 <div className="text-[color:var(--fg-muted)] font-medium">Appearance</div>
                                                 {appearanceFieldNodes}
                                             </div>
-                                        )}
-                                        {defType === 'link' && (
-                                            <LinkPreviewPanel rawUrl={linkRawUrl} fieldError={linkFieldError} disabled={locked} />
                                         )}
                                     </div>
                                 )}
@@ -1642,10 +931,10 @@ export default function ModifyWidgetModal({
                             <div className="text-[color:var(--fg-muted)]" />
                         </button>
                         {widgetOpen && (
-                            <div className="p-4 bg-[color:var(--surface)]/90 space-y-4">
+                            <div className="p-4 bg-[color:var(--surface)]/95 space-y-5">
                                 {/* Name */}
-                                <div>
-                                    <label className="block text-[color:var(--fg-muted)] mb-1">Name</label>
+                                <div className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)] p-4 space-y-2">
+                                    <label className="block text-[color:var(--fg-muted)] text-xs uppercase tracking-wide">Name</label>
                                     <input
                                         className="input w-full"
                                         value={title}
@@ -1673,19 +962,19 @@ export default function ModifyWidgetModal({
                                 </div>
 
                                 {/* Protection */}
-                                <div className="rounded-xl border border-[color:var(--border)] bg-[color:var(--surface)]/80">
-                                    <button className="w-full flex items-center justify-between gap-2 px-3 py-2 text-xs font-semibold text-[color:var(--fg-muted)]" onClick={() => persistedToggle('py_widget_protection_open', setProtectionOpen)}>
-                                        <div className="flex items-center gap-2">
-                                            {protectionOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-                                            <span>Protection</span>
-                                        </div>
-                                        <div />
+                                <div className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)]/95">
+                                    <button className="w-full flex items-center justify-between gap-2 px-4 py-3 text-left text-sm font-semibold text-[color:var(--fg)]" onClick={() => persistedToggle('py_widget_protection_open', setProtectionOpen)}>
+                                        <span className="flex items-center gap-2">
+                                            {protectionOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                                            Protection
+                                        </span>
+                                        <span className="text-[11px] text-[color:var(--fg-muted)]">{protectionOpen ? 'Hide' : 'Show'}</span>
                                     </button>
                                     {protectionOpen && (
-                                        <div className="p-3 bg-[color:var(--surface)]/90">
-                                            <div className="flex items-center gap-2">
+                                        <div className="p-4 border-t border-[color:var(--border)] space-y-3">
+                                            <div className="flex flex-wrap gap-2">
                                                 <button
-                                                    className={`btn btn-ghost flex items-center gap-2 ${pinDisabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                                    className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-sm font-semibold transition-colors duration-150 ${pinned ? 'bg-[color:var(--accent)]/20 border-[color:var(--accent)] text-[color:var(--accent)] shadow-sm' : 'border-[color:var(--border)] text-[color:var(--fg-muted)] hover:border-[color:var(--accent)] hover:text-[color:var(--accent)]'} ${pinDisabled ? 'opacity-50 cursor-not-allowed' : ''}`}
                                                     onClick={() => { if (!pinDisabled) onTogglePin(); }}
                                                     title={pinned ? 'Unpin (allow move)' : 'Pin (prevent move)'}
                                                     disabled={pinDisabled}
@@ -1694,7 +983,7 @@ export default function ModifyWidgetModal({
                                                     <span>{pinned ? 'Pinned' : 'Pin'}</span>
                                                 </button>
                                                 <button
-                                                    className="btn btn-ghost flex items-center gap-2"
+                                                    className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-sm font-semibold transition-colors duration-150 ${locked ? 'bg-[color:var(--accent)]/20 border-[color:var(--accent)] text-[color:var(--accent)] shadow-sm' : 'border-[color:var(--border)] text-[color:var(--fg-muted)] hover:border-[color:var(--accent)] hover:text-[color:var(--accent)]'}`}
                                                     onClick={onToggleLock}
                                                     title={locked ? 'Unlock (allow modify)' : 'Lock (prevent modify)'}
                                                 >
@@ -1702,33 +991,34 @@ export default function ModifyWidgetModal({
                                                     <span>{locked ? 'Locked' : 'Lock'}</span>
                                                 </button>
                                             </div>
+                                            <p className="text-[11px] text-[color:var(--fg-muted)]">Pinning keeps the widget anchored while locking prevents accidental edits.</p>
                                         </div>
                                     )}
                                 </div>
 
                                 {/* Layer order */}
-                                <div className="rounded-xl border border-[color:var(--border)] bg-[color:var(--surface)]/80">
-                                    <button className="w-full flex items-center justify-between gap-2 px-3 py-2 text-xs font-semibold text-[color:var(--fg-muted)]" onClick={() => persistedToggle('py_widget_layers_open', setLayerOpen)}>
-                                        <div className="flex items-center gap-2">
-                                            {layerOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-                                            <span>Layer order</span>
-                                        </div>
-                                        <div />
+                                <div className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)]/95">
+                                    <button className="w-full flex items-center justify-between gap-2 px-4 py-3 text-left text-sm font-semibold text-[color:var(--fg)]" onClick={() => persistedToggle('py_widget_layers_open', setLayerOpen)}>
+                                        <span className="flex items-center gap-2">
+                                            {layerOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                                            Layer order
+                                        </span>
+                                        <span className="text-[11px] text-[color:var(--fg-muted)]">{layerOpen ? 'Hide' : 'Show'}</span>
                                     </button>
                                     {layerOpen && (
-                                        <div className="p-3">
-                                            <div className="grid grid-cols-2 gap-2">
-                                                <button className="btn btn-ghost flex items-center gap-2" onClick={onBringToFront} disabled={locked} title="Bring to front">
-                                                    <ChevronsUp size={16} /> Bring to front
+                                        <div className="p-4 border-t border-[color:var(--border)]">
+                                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                                <button className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg border border-[color:var(--border)] text-sm font-semibold transition-colors duration-150 hover:border-[color:var(--accent)] hover:text-[color:var(--accent)] disabled:opacity-50" onClick={onBringToFront} disabled={locked} title="Bring to front">
+                                                    <span className="flex items-center gap-2"><ChevronsUp size={16} /> Bring to front</span>
                                                 </button>
-                                                <button className="btn btn-ghost flex items-center gap-2" onClick={onSendToBack} disabled={locked} title="Send to back">
-                                                    <ChevronsDown size={16} /> Send to back
+                                                <button className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg border border-[color:var(--border)] text-sm font-semibold transition-colors duration-150 hover:border-[color:var(--accent)] hover:text-[color:var(--accent)] disabled:opacity-50" onClick={onSendToBack} disabled={locked} title="Send to back">
+                                                    <span className="flex items-center gap-2"><ChevronsDown size={16} /> Send to back</span>
                                                 </button>
-                                                <button className="btn btn-ghost flex items-center gap-2" onClick={onBringForward} disabled={locked} title="Move up one layer">
-                                                    <ChevronUp size={16} /> Move up
+                                                <button className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg border border-[color:var(--border)] text-sm font-semibold transition-colors duration-150 hover:border-[color:var(--accent)] hover:text-[color:var(--accent)] disabled:opacity-50" onClick={onBringForward} disabled={locked} title="Move up one layer">
+                                                    <span className="flex items-center gap-2"><ChevronUp size={16} /> Move up</span>
                                                 </button>
-                                                <button className="btn btn-ghost flex items-center gap-2" onClick={onSendBackward} disabled={locked} title="Move down one layer">
-                                                    <ChevronDown size={16} /> Move down
+                                                <button className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg border border-[color:var(--border)] text-sm font-semibold transition-colors duration-150 hover:border-[color:var(--accent)] hover:text-[color:var(--accent)] disabled:opacity-50" onClick={onSendBackward} disabled={locked} title="Move down one layer">
+                                                    <span className="flex items-center gap-2"><ChevronDown size={16} /> Move down</span>
                                                 </button>
                                             </div>
                                         </div>
@@ -1736,16 +1026,16 @@ export default function ModifyWidgetModal({
                                 </div>
 
                                 {/* Widget info */}
-                                <div>
-                                    <div className="text-[color:var(--fg-muted)] mb-1">Type</div>
-                                    <div className="font-mono text-xs px-2 py-1 rounded bg-[color:var(--muted)]/40 border border-[color:var(--border)] inline-block">
+                                <div className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)] p-4 space-y-1">
+                                    <div className="text-[color:var(--fg-muted)] text-xs uppercase tracking-wide">Type</div>
+                                    <div className="font-mono text-xs px-3 py-2 rounded-lg bg-[color:var(--muted)]/30 border border-[color:var(--border)]">
                                         {item.type ?? 'unknown'}
                                     </div>
                                 </div>
 
                                 {/* JSON settings */}
-                                <div className="border border-[color:var(--border)] rounded-md p-3 bg-[color:var(--muted)]/40">
-                                    <label className="block text-[color:var(--fg-muted)] mb-1">Advanced: Raw JSON settings</label>
+                                <div className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)] p-4 space-y-2">
+                                    <label className="block text-[color:var(--fg-muted)] text-xs uppercase tracking-wide">Advanced: Raw JSON settings</label>
                                     <textarea
                                         className="input w-full font-mono min-h-[10rem]"
                                         value={propsText}
@@ -1754,6 +1044,7 @@ export default function ModifyWidgetModal({
                                         onKeyDown={handleCtrlEnterApplyJson}
                                     />
                                     {propsError && <div className="mt-1 text-xs text-red-500">{propsError}</div>}
+                                    <div className="text-[10px] text-[color:var(--fg-muted)]">Use this area for bulk edits or to paste props from another widget.</div>
                                 </div>
                             </div>
                         )}
@@ -1794,169 +1085,3 @@ export default function ModifyWidgetModal({
     );
 }
 
-type SchemaAssetFieldProps = {
-    value: string;
-    placeholder: string;
-    disabled: boolean;
-    assets: AssetsCtx;
-    assetKind: AssetKind;
-    onChange: (value?: string) => void;
-    onKeyDown?: (event: React.KeyboardEvent<HTMLInputElement>) => void;
-};
-
-function SchemaAssetField({ value, placeholder, disabled, assets, assetKind, onChange, onKeyDown }: SchemaAssetFieldProps) {
-    const filteredAssets = useMemo(() => {
-        return assets.list.filter((asset) => {
-            if (assetKind === 'image') return asset.type?.startsWith('image/');
-            if (assetKind === 'video') return asset.type?.startsWith('video/');
-            return true;
-        });
-    }, [assets.list, assetKind]);
-    const assetHash = value.startsWith('asset://') ? value.slice('asset://'.length) : '';
-    const currentAsset = assetHash ? assets.list.find((a) => a.hash === assetHash) : null;
-    const accept = assetKind === 'image' ? 'image/*' : assetKind === 'video' ? 'video/*' : '*/*';
-    return (
-        <div className="space-y-2">
-            <div className={`flex flex-wrap items-center gap-2 text-xs`}>
-                <label className={`inline-flex items-center justify-center px-3 py-1.5 rounded border border-dashed border-[color:var(--border)] bg-[color:var(--muted)]/40 ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}>
-                    <span className="font-semibold">Upload</span>
-                    <input
-                        type="file"
-                        accept={accept}
-                        className="sr-only"
-                        disabled={disabled}
-                        onChange={async (e) => {
-                            const file = e.target.files?.[0];
-                            e.target.value = '';
-                            if (!file) return;
-                            try {
-                                const metas = await assets.addFiles([file]);
-                                const meta = metas[0];
-                                if (meta?.hash) onChange(`asset://${meta.hash}`);
-                            } catch (err) {
-                                console.error('Asset upload failed', err);
-                            }
-                        }}
-                    />
-                </label>
-                <span className="px-2 py-1 rounded border border-[color:var(--border)] bg-[color:var(--muted)]/20 text-[color:var(--fg-muted)]">
-                    {currentAsset?.name ?? (assetHash ? `asset://${assetHash}` : 'No asset selected')}
-                </span>
-            </div>
-            {filteredAssets.length > 0 && (
-                <select
-                    className="input w-full"
-                    value={assetHash}
-                    disabled={disabled}
-                    onChange={(e) => onChange(e.target.value ? `asset://${e.target.value}` : undefined)}
-                >
-                    <option value="">Select asset…</option>
-                    {filteredAssets.map((asset) => (
-                        <option key={asset.hash} value={asset.hash}>{asset.name}</option>
-                    ))}
-                </select>
-            )}
-            <input
-                className="input w-full font-mono text-xs"
-                placeholder={placeholder}
-                value={value}
-                onChange={(e) => onChange(e.target.value)}
-                disabled={disabled}
-                onKeyDown={onKeyDown}
-            />
-        </div>
-    );
-}
-
-type SchemaUrlFieldProps = {
-    value: string;
-    disabled: boolean;
-    onChange: (value?: string) => void;
-    onKeyDown?: (event: React.KeyboardEvent<HTMLInputElement>) => void;
-};
-
-function SchemaUrlField({ value, disabled, onChange, onKeyDown }: SchemaUrlFieldProps) {
-    return (
-        <div className="space-y-1">
-            <input
-                className="input w-full"
-                type="url"
-                placeholder="https://example.com"
-                value={value}
-                onChange={(e) => onChange(e.target.value)}
-                disabled={disabled}
-                onKeyDown={onKeyDown}
-            />
-            <div className="flex flex-wrap gap-1">
-                {URL_PROTOCOL_SUGGESTIONS.map((proto) => (
-                    <button
-                        key={proto}
-                        type="button"
-                        className="px-2 py-1 rounded border border-[color:var(--border)] text-[10px] font-semibold text-[color:var(--fg-muted)] hover:text-[color:var(--fg)]"
-                        onClick={() => onChange(proto)}
-                        disabled={disabled}
-                    >
-                        {proto}
-                    </button>
-                ))}
-                {value && (
-                    <button
-                        type="button"
-                        className="px-2 py-1 rounded border border-[color:var(--border)] text-[10px] font-semibold text-[color:var(--fg-muted)] hover:text-[color:var(--fg)]"
-                        onClick={() => onChange(undefined)}
-                        disabled={disabled}
-                    >
-                        Clear
-                    </button>
-                )}
-            </div>
-        </div>
-    );
-}
-
-type SchemaNumberFieldProps = {
-    value?: number;
-    min?: number;
-    max?: number;
-    step?: number;
-    disabled: boolean;
-    onChange: (value: number | undefined) => void;
-    onKeyDown?: (event: React.KeyboardEvent<HTMLInputElement>) => void;
-};
-
-function SchemaNumberField({ value, min, max, step, disabled, onChange, onKeyDown }: SchemaNumberFieldProps) {
-    const stepValue = step ?? 1;
-    const formattedStep = Number.isInteger(stepValue) ? stepValue.toFixed(0) : stepValue.toString();
-    const handleChange = (raw: string) => {
-        if (raw === '') { onChange(undefined); return; }
-        const num = Number(raw);
-        if (Number.isNaN(num)) { onChange(undefined); return; }
-        onChange(num);
-    };
-    const adjust = (delta: number) => {
-        const current = typeof value === 'number' ? value : (typeof min === 'number' ? min : 0);
-        let next = current + delta;
-        if (typeof min === 'number') next = Math.max(min, next);
-        if (typeof max === 'number') next = Math.min(max, next);
-        onChange(Number(next.toFixed(4)));
-    };
-    return (
-        <div className="flex items-stretch gap-2">
-            <input
-                className="input w-full"
-                type="number"
-                value={value === undefined ? '' : value}
-                min={min}
-                max={max}
-                step={stepValue}
-                onChange={(e) => handleChange(e.target.value)}
-                disabled={disabled}
-                onKeyDown={onKeyDown}
-            />
-            <div className="flex flex-col gap-1">
-                <button className="px-2 py-1 rounded border border-[color:var(--border)] text-[10px] font-semibold" type="button" onClick={() => adjust(stepValue)} disabled={disabled}>+{formattedStep}</button>
-                <button className="px-2 py-1 rounded border border-[color:var(--border)] text-[10px] font-semibold" type="button" onClick={() => adjust(-stepValue)} disabled={disabled}>-{formattedStep}</button>
-            </div>
-        </div>
-    );
-}

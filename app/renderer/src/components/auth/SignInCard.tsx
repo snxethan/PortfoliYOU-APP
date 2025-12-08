@@ -1,10 +1,11 @@
 ﻿import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { LogOut, Mail, Lock, AlertCircle, Loader2 } from "lucide-react";
+import { LogOut, Mail, Lock, AlertCircle, Loader2, Settings } from "lucide-react";
 
 import { useAuth } from "../../providers/AuthProvider";
 import { useNotifications } from "../../providers/NotificationsProvider";
 import { signInGoogle, emailSignIn, emailSignUp, logout } from "../../lib/auth";
+import AccountSettingsModal from "../modals/AccountSettingsModal";
 
 export default function SignInCard() {
   const { user } = useAuth();
@@ -14,6 +15,7 @@ export default function SignInCard() {
   const [pw, setPw] = useState("");
   const [msg, setMsg] = useState<string | null>(null);
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
+  const [accountSettingsOpen, setAccountSettingsOpen] = useState(false);
 
   const handleGoogleSignIn = async () => {
     setMsg(null);
@@ -158,7 +160,14 @@ export default function SignInCard() {
             window.dispatchEvent(new CustomEvent('py:highlight-account', { detail: { origin: 'sidebar' } }));
           }, 100);
         }}
+        onSettingsClick={(e) => {
+          e.stopPropagation();
+          setAccountSettingsOpen(true);
+        }}
       />
+      {accountSettingsOpen && (
+        <AccountSettingsModal open={accountSettingsOpen} onClose={() => setAccountSettingsOpen(false)} />
+      )}
       {!verified && (
         <div className="flex items-start gap-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md p-2">
           <AlertCircle size={14} className="mt-0.5 flex-shrink-0" />
@@ -176,16 +185,27 @@ export default function SignInCard() {
   );
 }
 
-function ClickableAccountCard({ email, onClick }: { email: string; onClick: () => void; }) {
+function ClickableAccountCard({ email, onClick, onSettingsClick }: { email: string; onClick: () => void; onSettingsClick: (e: React.MouseEvent) => void; }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="text-xs w-full text-left leading-relaxed bg-[color:var(--bg)] border border-[color:var(--accent)] rounded-md p-3 hover:border-[color:var(--accent-600)] hover:bg-[color:var(--muted)]/60 hover-accent transition-colors"
-      title="Go to account section"
-    >
-      <div className="font-medium text-[color:var(--fg)]">Logged in</div>
-      <div className="text-[color:var(--fg-muted)] break-all mt-1">{email}</div>
-    </button>
+    <div className="relative text-xs w-full leading-relaxed bg-[color:var(--bg)] border border-[color:var(--accent)] rounded-md overflow-hidden">
+      <button
+        type="button"
+        onClick={onClick}
+        className="w-full text-left p-3 pr-10 hover:bg-[color:var(--muted)]/60 transition-colors"
+        title="Go to account section"
+      >
+        <div className="font-medium text-[color:var(--fg)]">Logged in</div>
+        <div className="text-[color:var(--fg-muted)] break-all mt-1">{email}</div>
+      </button>
+      <button
+        type="button"
+        onClick={onSettingsClick}
+        className="absolute right-0 top-0 bottom-0 px-3 flex items-center justify-center hover:bg-[color:var(--accent)]/10 transition-colors border-l border-[color:var(--border)]"
+        title="Account Settings"
+        aria-label="Account Settings"
+      >
+        <Settings size={14} className="text-[color:var(--fg-muted)]" />
+      </button>
+    </div>
   );
 }

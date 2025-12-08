@@ -122,7 +122,7 @@ export default function Sidebar() {
 
   return (
     <aside
-      className="fixed left-0 bottom-0 border-r border-[color:var(--border)] bg-[color:var(--muted)] flex flex-col"
+      className="fixed left-0 bottom-0 border-r border-[color:var(--border)] bg-[color:var(--muted)] flex flex-col transition-all duration-300 ease-in-out"
       style={{ width: sidebarWidthValue, zIndex: 90, top: 'calc(var(--frame-bar-h, 36px) + 1px)' }}
     >
       {!collapsed && (

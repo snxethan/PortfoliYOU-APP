@@ -43,48 +43,64 @@ function PagePreviewInner({ width, cols, gap, rowH, items, currentPageId, onNavi
         })
         .map(x => x.it), [items]);
 
+    const outerStyle = useMemo<React.CSSProperties>(() => ({
+        minHeight: '100vh',
+        width: '100%',
+        background: background || 'transparent',
+        display: 'flex',
+        justifyContent: 'center',
+        alignItems: 'flex-start',
+    }), [background]);
+
+    const canvasStyle = useMemo<React.CSSProperties>(() => ({
+        width,
+        height,
+        position: 'relative' as const,
+    }), [width, height]);
+
+    const handleNavigate = (e: React.MouseEvent<HTMLDivElement>) => {
+        if (!onNavigatePage) return;
+        const t = e.target as HTMLElement | null;
+        if (!t) return;
+        const a = t.closest('a[href]') as HTMLAnchorElement | null;
+        if (!a) return;
+        const raw = a.getAttribute('href') || '';
+        if (raw.startsWith('#/page/')) {
+            e.preventDefault();
+            const pid = raw.slice('#/page/'.length);
+            if (pid) onNavigatePage(pid);
+        }
+    };
+
     return (
-        <div
-            style={{ width, height, position: 'relative' as const, background: background || 'transparent' }}
-            onClick={(e) => {
-                if (!onNavigatePage) return;
-                const t = e.target as HTMLElement | null;
-                if (!t) return;
-                const a = t.closest('a[href]') as HTMLAnchorElement | null;
-                if (!a) return;
-                const raw = a.getAttribute('href') || '';
-                if (raw.startsWith('#/page/')) {
-                    e.preventDefault();
-                    const pid = raw.slice('#/page/'.length);
-                    if (pid) onNavigatePage(pid);
-                }
-            }}
-        >
-            {sorted.map((item) => {
-                const unitX = colW + gap;
-                const unitY = effRowH + gap;
-                const left = item.x * unitX;
-                const top = item.y * unitY;
-                const wpx = item.w * colW + (item.w - 1) * gap;
-                const hpx = item.h * effRowH + (item.h - 1) * gap;
-                return (
-                    <div
-                        key={item.id}
-                        style={{ position: 'absolute', left, top, width: wpx, height: hpx, zIndex: typeof item.z === 'number' ? 100 + item.z : undefined, overflow: 'hidden' }}
-                    >
-                        {item.type ? (
-                            <WidgetRenderer
-                                instance={{ id: item.id, type: item.type, props: item.props ?? {}, schemaVersion: item.schemaVersion }}
-                                interactive={false}
-                                currentPageId={currentPageId}
-                                themeSnapshot={themeSnapshot}
-                            />
-                        ) : (
-                            <div style={{ fontSize: 10, color: 'var(--fg-muted)', border: '1px dashed var(--border)', borderRadius: 4, height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>Unknown widget</div>
-                        )}
-                    </div>
-                );
-            })}
+        <div style={outerStyle}>
+            <div style={canvasStyle} onClick={handleNavigate}>
+                {sorted.map((item) => {
+                    const unitX = colW + gap;
+                    const unitY = effRowH + gap;
+                    const left = item.x * unitX;
+                    const top = item.y * unitY;
+                    const wpx = item.w * colW + (item.w - 1) * gap;
+                    const hpx = item.h * effRowH + (item.h - 1) * gap;
+                    return (
+                        <div
+                            key={item.id}
+                            style={{ position: 'absolute', left, top, width: wpx, height: hpx, zIndex: typeof item.z === 'number' ? 100 + item.z : undefined, overflow: 'hidden' }}
+                        >
+                            {item.type ? (
+                                <WidgetRenderer
+                                    instance={{ id: item.id, type: item.type, props: item.props ?? {}, schemaVersion: item.schemaVersion }}
+                                    interactive={false}
+                                    currentPageId={currentPageId}
+                                    themeSnapshot={themeSnapshot}
+                                />
+                            ) : (
+                                <div style={{ fontSize: 10, color: 'var(--fg-muted)', border: '1px dashed var(--border)', borderRadius: 4, height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>Unknown widget</div>
+                            )}
+                        </div>
+                    );
+                })}
+            </div>
         </div>
     );
 }

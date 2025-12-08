@@ -19,7 +19,7 @@ export default function QuickstartPanel({
                     <p className="text-xs uppercase tracking-wide text-[color:var(--fg-muted)]">Quickstart</p>
                     <p className="text-xs text-[color:var(--fg-muted)]">Create or import a project to keep building.</p>
                 </div>
-                <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
+                <div className="quickstart-row">
                     <button className="btn btn-accent w-full sm:w-auto gap-2 text-base font-semibold shadow-lg shadow-[color:var(--accent)]/25" onClick={onOpenCreate} data-testid="create-portfolio-btn">
                         <Plus size={16} /> New portfolio
                     </button>

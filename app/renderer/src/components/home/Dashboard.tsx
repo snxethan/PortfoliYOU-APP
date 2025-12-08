@@ -12,32 +12,46 @@ export default function Dashboard({
 }) {
     const badge = notifBadge > 0 ? notifBadge : null;
     return (
-        <section className="surface border border-[color:var(--border)] rounded-2xl p-6 shadow-lg shadow-black/20">
-            <div className="flex flex-col gap-6 lg:flex-row lg:items-center">
-                <div className="flex items-center gap-4 flex-1">
-                    <div className="relative">
+        <section className="surface border border-[color:var(--border)] rounded-2xl shadow-lg shadow-black/20 portfolio-workspace-card" style={{ animation: 'py-pop 0.4s ease-out' }}>
+            <div className="portfolio-workspace-card__header">
+                <div className="portfolio-workspace-card__identity">
+                    <div className="portfolio-workspace-card__logo-block relative">
                         <img
-                            src="/icon.png"
-                            onError={(e) => { const img = e.currentTarget as HTMLImageElement; if (!img.dataset.fallback) { img.dataset.fallback = '1'; img.src = '/icon.svg'; } }}
+                            src="./icon.png"
+                            onError={(e) => {
+                                const img = e.currentTarget as HTMLImageElement;
+                                if (!img.dataset.fallback) {
+                                    img.dataset.fallback = '1';
+                                    img.src = './icon.svg';
+                                }
+                            }}
                             alt="Portfoli-YOU icon"
-                            className="w-20 h-20 rounded-xl border border-[color:var(--border)] object-cover"
+                            className="portfolio-workspace-card__logo rounded-xl border border-[color:var(--border)] object-cover"
                         />
                     </div>
-                    <div>
-                        <p className="text-xs uppercase tracking-[0.2em] text-[color:var(--fg-muted)] mb-1">portfoliyou.snxethan.dev</p>
+                    <div className="portfolio-workspace-card__text">
+                        <a
+                            href="https://portfoliyou.snxethan.dev"
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-xs uppercase tracking-[0.2em] text-[color:var(--fg-muted)] mb-1 inline-block cursor-pointer hover:text-[color:var(--accent)] transition-colors"
+                            title="Visit portfoliyou.snxethan.dev"
+                        >
+                            portfoliyou.snxethan.dev
+                        </a>
                         <h1 className="section-title text-2xl tracking-tight">Portfoli-YOU</h1>
                         <p className="text-sm text-[color:var(--fg-muted)]">A Portfolio for you, by you.</p>
                     </div>
                 </div>
-                <div className="flex flex-wrap gap-2 justify-start lg:justify-end text-sm">
-                    <a className="btn btn-ghost btn-sm" href="https://portfoliyou.snxethan.dev" target="_blank" rel="noreferrer">Website</a>
-                    <a className="btn btn-ghost btn-sm" href="https://portfoliyou.snxethan.dev/about" target="_blank" rel="noreferrer">FAQs</a>
-                    <a className="btn btn-ghost btn-sm" href="https://portfoliyou.snxethan.dev/changelog" target="_blank" rel="noreferrer">Changelog</a>
+                <div className="portfolio-workspace-card__tabs">
+                    <a className="portfolio-workspace-card__tab btn btn-ghost btn-sm hover:bg-[color:var(--muted)] hover:border-[color:var(--border)] transition-colors" href="https://portfoliyou.snxethan.dev" target="_blank" rel="noreferrer">Website</a>
+                    <a className="portfolio-workspace-card__tab btn btn-ghost btn-sm hover:bg-[color:var(--muted)] hover:border-[color:var(--border)] transition-colors" href="https://portfoliyou.snxethan.dev/about" target="_blank" rel="noreferrer">FAQs</a>
+                    <a className="portfolio-workspace-card__tab btn btn-ghost btn-sm hover:bg-[color:var(--muted)] hover:border-[color:var(--border)] transition-colors" href="https://portfoliyou.snxethan.dev/changelog" target="_blank" rel="noreferrer">Changelog</a>
                 </div>
             </div>
-            <div className="mt-6 flex flex-wrap items-center justify-between gap-3 border-t border-dashed border-[color:var(--border)] pt-4">
-                <div className="text-sm text-[color:var(--fg-muted)]">Stay on top of announcements, updates, and account alerts.</div>
-                <div className="flex items-center gap-2">
+            <div className="portfolio-workspace-card__cta">
+                <div className="portfolio-workspace-card__desc">Stay on top of announcements, updates, and account alerts.</div>
+                <div className="portfolio-workspace-card__bell">
                     <button
                         onClick={onToggleNotifications}
                         className={`btn btn-ghost relative w-11 h-11 p-0 ${notificationsOpen ? 'hover-accent border-[color:var(--accent)]' : ''}`}

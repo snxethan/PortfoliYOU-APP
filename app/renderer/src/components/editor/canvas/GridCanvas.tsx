@@ -3,9 +3,9 @@ import { useDroppable } from "@dnd-kit/core";
 
 import type { Theme } from "../../../themes/types";
 import type { WidgetThemeSnapshot } from "../../../widgets/theme";
+import { hasAppendModifier, type SelectionChangeOptions, type MarqueeSelectionOptions } from "../selection";
 
 import DraggableItem, { GridItem, GridMetrics } from "./DraggableItem";
-import { hasAppendModifier, type SelectionChangeOptions, type MarqueeSelectionOptions } from "../selection";
 
 export default function GridCanvas({ pageWidth, zoom, cols, gap, rowH, items, onChange, scrollEl, viewportHeight, onDelete, onDuplicate, onItemMoveStart, onItemMoveEnd, onBringToFront, onSendToBack, onBringForward, onSendBackward, onTogglePin, onOpenModify, onDropAsset, showGrid, selectedIds, onSelect, onMarqueeSelect, theme, themeSnapshot }: {
   pageWidth: number;

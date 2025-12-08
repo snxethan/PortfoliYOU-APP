@@ -6,22 +6,17 @@ import type { FirestoreError, Unsubscribe } from "firebase/firestore";
 import { ref as storageRef, uploadBytes, getDownloadURL, getMetadata, getBytes, deleteObject } from "firebase/storage";
 import JSZip from "jszip";
 
-import { idbGet, idbPut, computeHash, stores, AssetMeta } from "../lib/assetsStore";
 import { auth, db, storage } from "../lib/firebase";
-import { sanitizeVideoProps } from "../../../shared/widgets/videoProps";
+import { idbGet, idbPut, stores, computeHash, type AssetMeta } from "../lib/assetsStore";
 import type { VideoWidgetProps } from "../../../shared/widgets/videoProps";
+import { sanitizeVideoProps } from "../widgets/videoProps";
 import type { Theme, ThemePatch } from "../themes/types";
 import { THEME_PRESETS, DEFAULT_THEME_PRESET_ID, getPresetById } from "../themes/presets";
 import { createThemeFromPreset as createThemeFromPresetUtil, mergeTheme } from "../themes/utils";
 
 import { useNotifications } from "./NotificationsProvider";
 
-type ZipEntry = {
-	async(type: 'arraybuffer'): Promise<ArrayBuffer>;
-	async(type: 'string'): Promise<string>;
-	dir: boolean;
-	name: string;
-};
+type ZipEntry = any;
 
 export type Page = {
 	pageId: string;
@@ -46,6 +41,7 @@ export type Widget = {
 	schemaVersion: number;
 	createdAt: string;
 	updatedAt: string;
+	originWidgetId?: string; // optional: if this widget was cloned, record original id
 };
 
 export type PortfolioMeta = {
@@ -188,7 +184,9 @@ function ensurePortfolioMeta(project: LocalProject): LocalProject {
 function sanitizeProjectsList(projects: LocalProject[]): LocalProject[] {
 	return projects.map((proj) => {
 		const hydrated = ensurePortfolioMeta(ensureProjectThemes(sanitizeProjectVideoWidgets(proj)));
-		return { ...hydrated, storage: hydrated.storage === 'cloud' ? 'cloud' : 'local' } as LocalProject;
+		const normalizedWidgets = normalizeProjectWidgetReferences(hydrated);
+		const normalized = normalizeProjectPageTitles(normalizedWidgets);
+		return { ...normalized, storage: normalized.storage === 'cloud' ? 'cloud' : 'local' } as LocalProject;
 	});
 }
 
@@ -255,6 +253,9 @@ function serializeProjectForCloud(proj: LocalProject, ownerUid?: string, opts?: 
 }
 
 type ProjectsCtx = {
+	// New helpers to compute accurate cloud sizes
+	recomputeCloudStorageUsage: () => Promise<number>;
+	getCloudProjectTotalSizeByCloudId: (cloudId: string) => Promise<number>;
 	projects: LocalProject[];
 	hasAny: boolean;
 	cloudMaxProjects: number;
@@ -293,7 +294,8 @@ type ProjectsCtx = {
 	reconcileCloudLinks: (knownCloudIds: string[]) => void;
 	// Pages
 	createPage: (projectId: string, title?: string) => string | null;
-	renamePage: (projectId: string, pageId: string, newTitle: string) => void;
+	duplicatePage: (projectId: string, pageId: string) => string | null;
+	renamePage: (projectId: string, pageId: string, newTitle: string) => boolean;
 	deletePage: (projectId: string, pageId: string) => void;
 	setPageStarter: (projectId: string, pageId: string, starter: boolean) => void;
 	setPageBackground: (projectId: string, pageId: string, color?: string | null) => void;
@@ -301,11 +303,11 @@ type ProjectsCtx = {
 	getPageItems: (projectId: string, pageId: string) => Array<{
 		id: string; x: number; y: number; w: number; h: number; z: number;
 		title?: string; type?: string; props?: unknown; schemaVersion?: number; pinned?: boolean; locked?: boolean;
-	}>;
+	}>
 	setPageItems: (projectId: string, pageId: string, items: Array<{
 		id: string; x: number; y: number; w: number; h: number; z: number;
 		title?: string; type?: string; props?: unknown; schemaVersion?: number; pinned?: boolean; locked?: boolean;
-	}>) => void;
+	}>, opts?: { allowClear?: boolean; force?: boolean }) => LocalProject | void;
 	activeTheme: Theme | null;
 	setActiveTheme: (projectId: string, themeId: string) => void;
 	createThemeFromPreset: (projectId: string, presetId: string, opts?: { activate?: boolean; name?: string }) => Theme | null;
@@ -320,25 +322,298 @@ function readStore(): LocalProject[] {
 	try {
 		const raw = JSON.parse(localStorage.getItem("py.projects") || "[]");
 		if (!Array.isArray(raw)) return [];
-		return sanitizeProjectsList(raw as LocalProject[]).map(p => ({ ...p, storage: 'local' })) as LocalProject[];
+		const sanitized = sanitizeProjectsList(raw as LocalProject[]).map(p => ({ ...p, storage: 'local' })) as LocalProject[];
+		if (process.env.NODE_ENV === 'development') {
+			try { console.debug('[ProjectsProvider] readStore: loaded projects from localStorage', sanitized.map(p => ({ id: p.id, pageCount: p.pageOrder?.length || 0, widgetCount: Object.keys(p.widgets || {}).length }))); } catch { /* noop */ }
+		}
+		// Normalize widget ids across pages to avoid accidental sharing of widget instances.
+		const normalized = sanitized.map((proj) => {
+			const res = normalizeProjectWidgetReferences(proj);
+			return res;
+		});
+		// If any normalization changed something, persist the cleaned store
+		const changed = normalized.some((p, idx) => JSON.stringify(p) !== JSON.stringify(sanitized[idx]));
+		if (changed) {
+			try { localStorage.setItem("py.projects", JSON.stringify(normalized)); } catch { /* ignore */ }
+		}
+		return normalized;
 	} catch { return []; }
+}
+
+export function normalizeProjectWidgetReferences(proj: LocalProject): LocalProject {
+	try {
+		// Build references map: widgetId -> list of pages referencing it
+		const refs: Record<string, string[]> = {};
+		for (const pid of proj.pageOrder || []) {
+			const page = proj.pages[pid]; if (!page) continue;
+			for (const wid of (page.widgets || [])) {
+				refs[wid] = refs[wid] || [];
+				refs[wid].push(pid);
+			}
+		}
+		let changed = false;
+		const nextWidgets = { ...proj.widgets } as Record<string, Widget>;
+		const nextPages = { ...proj.pages } as Record<string, Page>;
+		for (const [wid, pids] of Object.entries(refs)) {
+			if (!pids || pids.length <= 1) continue;
+			// Keep the widget for the first page, duplicate for others
+			for (let i = 1; i < pids.length; i++) {
+				const pid = pids[i];
+				const page = nextPages[pid]; if (!page) continue;
+				const original = nextWidgets[wid]; if (!original) continue;
+				// If a clone with this origin already exists for that page, skip
+				const existingCloneForPage = Object.entries(nextWidgets).find(([k, v]) => (v as any).originWidgetId === wid && (page.widgets || []).includes(k));
+				if (existingCloneForPage) continue;
+				const newWid = `widget_${crypto.randomUUID()}`;
+				const nowStr = new Date().toISOString();
+				const clone: Widget = { ...original, widgetId: newWid, createdAt: nowStr, updatedAt: nowStr };
+				(clone as any).originWidgetId = original.widgetId;
+				nextWidgets[newWid] = clone;
+				// Replace reference in that page
+				const pageWidgets = (page.widgets || []).map((id) => id === wid ? newWid : id);
+				nextPages[pid] = { ...page, widgets: pageWidgets, updatedAt: nowStr };
+				changed = true;
+			}
+		}
+		if (!changed) return proj;
+		return { ...proj, widgets: nextWidgets, pages: nextPages, updatedAt: new Date().toISOString() } as LocalProject;
+	} catch {
+		return proj;
+	}
+}
+
+// Helper: check if a project already contains a page title (case-insensitive)
+export function projectHasPageTitle(proj: LocalProject, title: string, excludePageId?: string): boolean {
+	try {
+		const t = (title || '').trim().toLowerCase();
+		if (!t) return false;
+		for (const pid of proj.pageOrder || []) {
+			if (pid === excludePageId) continue;
+			const p = proj.pages[pid]; if (!p) continue;
+			if (((p.title || '').trim().toLowerCase()) === t) return true;
+		}
+		return false;
+	} catch { return false; }
+}
+
+// Generate a unique page title using a base title by appending ` (copy)` or ` (n)` when necessary.
+export function generateUniquePageTitle(proj: LocalProject, baseTitle: string, excludePageId?: string): string {
+	const base = (baseTitle || '').trim() || 'Untitled';
+	if (!projectHasPageTitle(proj, base, excludePageId)) return base;
+	const copyCandidate = `${base} copy`;
+	if (!projectHasPageTitle(proj, copyCandidate, excludePageId)) return copyCandidate;
+	let n = 1;
+	while (true) {
+		const cand = `${base} (${n})`;
+		if (!projectHasPageTitle(proj, cand, excludePageId)) return cand;
+		n += 1;
+	}
+}
+
+// Ensure page titles in a project are unique (case-insensitive). If duplicates exist,
+// modify subsequent titles by appending ' (copy)' or ' (n)' to make them unique.
+export function normalizeProjectPageTitles(proj: LocalProject): LocalProject {
+	try {
+		const nextPages = { ...proj.pages } as Record<string, Page>;
+		const seen: Record<string, number> = {};
+		for (const pid of proj.pageOrder || []) {
+			const page = nextPages[pid]; if (!page) continue;
+			const base = (page.title || '').trim() || 'Untitled';
+			const t = base;
+			let low = t.toLowerCase();
+			if (!low) low = 'untitled';
+			if (seen[low] === undefined) {
+				seen[low] = 1;
+				// keep original
+				nextPages[pid] = { ...page, title: t, updatedAt: page.updatedAt };
+				continue;
+			}
+			// generate a new title with '(copy)' / '(1)' suffix
+			let n = seen[low];
+			let candidate: string;
+			while (true) {
+				candidate = `${base} (${n})`;
+				const lowc = candidate.toLowerCase();
+				if (!seen[lowc]) break;
+				n += 1;
+			}
+			seen[low] += 1;
+			seen[candidate.toLowerCase()] = 1;
+			nextPages[pid] = { ...page, title: candidate, updatedAt: new Date().toISOString() } as Page;
+		}
+		// Only return new object if changes made
+		let changed = false;
+		for (const pid of proj.pageOrder || []) {
+			if (proj.pages[pid] && nextPages[pid] && proj.pages[pid].title !== nextPages[pid].title) { changed = true; break; }
+		}
+		if (!changed) return proj;
+		return { ...proj, pages: nextPages, updatedAt: new Date().toISOString() } as LocalProject;
+	} catch {
+		return proj;
+	}
+}
+
+// When saving items for a given page, incoming item ids may conflict with widget ids
+// used by other pages. This helper detects such conflicts and returns a map of
+// resolved items + an updated set of widgets for the project. It does not write
+// to disk — the caller should persist results.
+export function resolveIncomingWidgetIds(proj: LocalProject, pageId: string, items: Array<{
+	id: string; x: number; y: number; w: number; h: number; z: number; title?: string; type?: string; props?: unknown; schemaVersion?: number; pinned?: boolean; locked?: boolean;
+}>): { resolvedItems: Array<{ id: string; x: number; y: number; w: number; h: number; z: number; title?: string; type?: string; props?: unknown; schemaVersion?: number; pinned?: boolean; locked?: boolean; }>; nextWidgets: Record<string, Widget>; } {
+	const nextWidgets: Record<string, Widget> = { ...proj.widgets };
+	const usedByOtherPages = new Set<string>();
+	for (const pid of proj.pageOrder || []) {
+		if (pid === pageId) continue;
+		const pg = proj.pages[pid]; if (!pg) continue;
+		for (const wid of (pg.widgets || [])) usedByOtherPages.add(wid);
+	}
+	const resolvedItems = items.map((it) => {
+		const wid = it.id;
+		if (typeof wid === 'string' && wid && usedByOtherPages.has(wid)) {
+			if (process.env.NODE_ENV === 'development') {
+				try { console.error('[ProjectsProvider] resolveIncomingWidgetIds: incoming wid used by other pages', { projectId: proj.id, pageId, wid }); } catch { /* noop */ }
+			}
+			// If a clone already exists for this original widget within the project, reuse it
+			const existingCloneId = Object.entries(nextWidgets).find(([, w]) => (w as any).originWidgetId === wid)?.[0];
+			if (existingCloneId) {
+				if (process.env.NODE_ENV === 'development') {
+					try { console.error('[ProjectsProvider] resolveIncomingWidgetIds: reusing existing clone', { projectId: proj.id, pageId, originalWid: wid, cloneId: existingCloneId }); } catch { /* noop */ }
+				}
+				return { ...it, id: existingCloneId };
+			}
+			// Clone the referenced widget for this page; do not mutate other pages' widget)
+			const original = proj.widgets[wid];
+			const nowStr = new Date().toISOString();
+			const newWid = `widget_${crypto.randomUUID()}`;
+			const createdAt = original?.createdAt || nowStr;
+			const schemaVersion = typeof it.schemaVersion === 'number'
+				? it.schemaVersion
+				: (typeof original?.schemaVersion === 'number' ? original?.schemaVersion : 1);
+			nextWidgets[newWid] = {
+				widgetId: newWid,
+				type: it.type || original?.type || 'custom',
+				slot: original?.slot || 'default',
+				order: 0,
+				props: it.props ?? original?.props ?? {},
+				layout: {
+					x: it.x,
+					y: it.y,
+					w: it.w,
+					h: it.h,
+					z: it.z,
+					title: it.title ?? ((original?.layout as any)?.title) ?? undefined,
+					pinned: !!it.pinned,
+					locked: !!it.locked,
+				},
+				schemaVersion,
+				createdAt,
+				updatedAt: nowStr,
+				originWidgetId: original?.widgetId,
+			} as Widget;
+			if (process.env.NODE_ENV === 'development') {
+				try {
+					console.error('[ProjectsProvider] resolveIncomingWidgetIds: created clone', { projectId: proj.id, pageId, originalWid: wid, newWid });
+				} catch {
+					/* noop */
+				}
+			}
+			return { ...it, id: newWid };
+		}
+		// id not used by other pages — keep as-is
+		return it;
+	});
+	return { resolvedItems, nextWidgets };
+}
+
+// Pure helper that applies `setPageItems` logic to a single project instance and returns
+// an updated project. Use this for unit testing and for the provider's in-place operations.
+export function applySetPageItemsToProject(proj: LocalProject, pageId: string, items: Array<{ id: string; x: number; y: number; w: number; h: number; z: number; title?: string; type?: string; props?: unknown; schemaVersion?: number; pinned?: boolean; locked?: boolean; }>): LocalProject {
+	const nowStr = new Date().toISOString();
+	const { resolvedItems, nextWidgets: resolvedWidgets } = resolveIncomingWidgetIds(proj, pageId, items as any);
+	const nextWidgets: Record<string, Widget> = { ...proj.widgets, ...resolvedWidgets };
+	for (let i = 0; i < resolvedItems.length; i++) {
+		const it = resolvedItems[i];
+		const wid = it.id;
+		const existing = nextWidgets[wid];
+		const createdAt = existing?.createdAt || nowStr;
+		const schemaVersion = typeof it.schemaVersion === 'number' ? it.schemaVersion : (typeof existing?.schemaVersion === 'number' ? existing?.schemaVersion : 1);
+		nextWidgets[wid] = {
+			widgetId: wid,
+			type: it.type || existing?.type || 'custom',
+			slot: existing?.slot || 'default',
+			order: i,
+			props: it.props ?? existing?.props ?? {},
+			layout: {
+				x: it.x, y: it.y, w: it.w, h: it.h, z: it.z,
+				pinned: !!it.pinned, locked: !!it.locked,
+				title: it.title ?? ((existing?.layout as { title?: string } | undefined)?.title) ?? undefined,
+			},
+			schemaVersion,
+			createdAt,
+			updatedAt: nowStr,
+			originWidgetId: existing?.originWidgetId,
+		} as Widget;
+	}
+	const updatedPage: Page = { ...proj.pages[pageId], widgets: resolvedItems.map(it => it.id), order: proj.pages[pageId].order, updatedAt: nowStr } as Page;
+	// Safety placeholder ensure
+	for (let i = 0; i < updatedPage.widgets.length; i++) {
+		const wid = updatedPage.widgets[i];
+		if (!nextWidgets[wid]) {
+			nextWidgets[wid] = {
+				widgetId: wid,
+				type: 'custom',
+				slot: 'default',
+				order: i,
+				props: {},
+				layout: { x: 0, y: 0, w: 1, h: 1, z: 0 },
+				schemaVersion: 1,
+				createdAt: nowStr,
+				updatedAt: nowStr,
+			} as Widget;
+		}
+	}
+	const nextProj: LocalProject = { ...proj, pages: { ...proj.pages, [pageId]: updatedPage }, widgets: nextWidgets, updatedAt: nowStr };
+	return nextProj as LocalProject;
 }
 type IdleHandle = number;
 let pendingStoreWrite: IdleHandle | null = null;
 let queuedStorePayload: LocalProject[] | null = null;
+// Development-only: keep track of projects we've warned about sharing widget ids to avoid spamming logs
+const devWarnedWidgetSharedProjectIds = new Set<string>();
 function flushQueuedStore() {
 	const payload = queuedStorePayload;
 	queuedStorePayload = null;
 	if (!payload) return;
 	try {
-		localStorage.setItem("py.projects", JSON.stringify(payload));
+		try {
+			const sanitized = sanitizeProjectsList(payload);
+			localStorage.setItem("py.projects", JSON.stringify(sanitized));
+		} catch {
+			// Fallback to raw if sanitization fails
+			localStorage.setItem("py.projects", JSON.stringify(payload));
+		}
 	} catch {
 		/* ignore storage failures */
 	}
 }
-function writeStore(list: LocalProject[]) {
+function writeStore(list: LocalProject[], immediate = false) {
 	const locals = list.filter(p => (p.storage ?? 'local') === 'local');
 	queuedStorePayload = locals;
+	if (immediate) {
+		if (pendingStoreWrite !== null) {
+			if (typeof window !== 'undefined' && typeof window.cancelIdleCallback === 'function') {
+				window.cancelIdleCallback(pendingStoreWrite as unknown as number);
+			} else {
+				clearTimeout(pendingStoreWrite as unknown as number);
+			}
+			pendingStoreWrite = null;
+		}
+		flushQueuedStore();
+		if (process.env.NODE_ENV === 'development') {
+			try { console.debug('[ProjectsProvider] writeStore: immediate write', queuedStorePayload?.map(p => ({ id: p.id, pageCount: p.pageOrder?.length || 0, widgetCount: Object.keys(p.widgets || {}).length }))); } catch { /* noop */ }
+		}
+		return;
+	}
 	if (pendingStoreWrite !== null) return;
 	const schedule = () => {
 		pendingStoreWrite = null;
@@ -376,6 +651,17 @@ function pushRevisionSnapshot(proj: LocalProject) {
 
 export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 	const [projects, setProjects] = useState<LocalProject[]>([]);
+	const projectsRef = useRef<LocalProject[]>(projects);
+	useEffect(() => { projectsRef.current = projects; }, [projects]);
+
+	// Development: log project shape changes for easier tracing of missing widgets/pages
+	useEffect(() => {
+		if (process.env.NODE_ENV !== 'development') return;
+		try {
+			const debugData = projects.map(p => ({ id: p.id, pageCount: p.pageOrder?.length || 0, widgetCount: Object.keys(p.widgets || {}).length }));
+			console.debug('[ProjectsProvider] projects changed', debugData);
+		} catch { /* ignore */ }
+	}, [projects]);
 	const { add: notify } = useNotifications();
 	const notifyRef = useRef(notify);
 	useEffect(() => { notifyRef.current = notify; }, [notify]);
@@ -397,6 +683,76 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 	const cloudEditBurstRef = useRef<{ windowStart: number; count: number }>({ windowStart: Date.now(), count: 0 });
 	const missingIndexWarnedRef = useRef(false);
 
+	// Cache for storage file sizes to avoid repeated getMetadata calls
+	const cloudFileSizeCacheRef = useRef<Record<string, number>>({});
+
+	// Compute total size for a cloud project (project file + assets)
+	const getCloudProjectTotalSizeByCloudId = useCallback(async (cloudId: string) => {
+		const user = auth.currentUser; if (!user) return 0;
+		const docRef = doc(db, 'projects', cloudId);
+		const ds = await getDoc(docRef);
+		if (!ds.exists()) return 0;
+		const data = ds.data() as Record<string, unknown>;
+		let total = 0;
+		// project file
+		try {
+			const path: string = typeof data['storagePath'] === 'string' ? (data['storagePath'] as string) : `users/${user.uid}/projects/${cloudId}/project.portfoliyou`;
+			const cacheKey = `f:${path}`;
+			const cache = cloudFileSizeCacheRef.current;
+			if (typeof cache[cacheKey] === 'number') {
+				total += cache[cacheKey];
+			} else {
+				try {
+					const md = await getMetadata(storageRef(storage, path));
+					const sizeBytes = typeof md.size === 'number' ? md.size : 0;
+					cache[cacheKey] = sizeBytes;
+					total += sizeBytes;
+				} catch { /* ignore */ }
+			}
+		} catch { /* ignore */ }
+		// assets
+		const manifestRaw = data['assetManifest'];
+		const manifest = manifestRaw && typeof manifestRaw === 'object' ? manifestRaw as AssetManifest : undefined;
+		if (manifest) {
+			const cache = cloudFileSizeCacheRef.current;
+			for (const entry of Object.values(manifest)) {
+				const p = entry?.path;
+				if (!p) continue;
+				const cacheKey = `f:${p}`;
+				if (typeof cache[cacheKey] === 'number') { total += cache[cacheKey]; continue; }
+				try {
+					const md = await getMetadata(storageRef(storage, p));
+					const size = typeof md.size === 'number' ? md.size : 0;
+					cache[cacheKey] = size;
+					total += size;
+				} catch { /* ignore */ }
+			}
+		}
+		return total;
+	}, []);
+
+	// Computes and sets the summed cloud size for all projects.
+	const recomputeCloudStorageUsage = useCallback(async () => {
+		const user = auth.currentUser; if (!user) return 0;
+		const projectsCol = collection(db, 'projects');
+		let sum = 0;
+		try {
+			const q = query(projectsCol, where('ownerUid', '==', user.uid));
+			const snap = await getDocs(q);
+			for (const docSnap of snap.docs) {
+				try {
+					const size = await getCloudProjectTotalSizeByCloudId(docSnap.id);
+					sum += size;
+				} catch { /* ignore */ }
+			}
+			setCloudBytesUsed(sum);
+			return sum;
+		} catch {
+			setCloudBytesUsed(0);
+			return 0;
+		}
+	}, [getCloudProjectTotalSizeByCloudId]);
+
 	const signalCloudSlowdown = useCallback(() => {
 		const state = cloudPersistStateRef.current;
 		const nowTs = Date.now();
@@ -416,7 +772,9 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 			return;
 		}
 		const pendingEntries = Object.entries(state.pending);
+		console.info('ProjectsProvider.flushCloudPersist: starting flush');
 		if (!pendingEntries.length) {
+			console.info('ProjectsProvider.flushCloudPersist: pendingEntriesCount=', pendingEntries.length);
 			if (state.timer) {
 				clearTimeout(state.timer);
 				state.timer = null;
@@ -438,10 +796,16 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 		try {
 			const batch = writeBatch(db);
 			let writes = 0;
-			/* eslint-disable no-await-in-loop */
+
 			for (const [projectId, proj] of pendingEntries) {
 				if (!proj || (proj.storage ?? 'local') !== 'cloud') continue;
 				const ownerUid = proj.ownerUid || user.uid;
+				// Skip cloud persist for projects owned by a different user
+				if (proj.ownerUid && (proj.ownerUid !== user.uid)) {
+					try { notify({ type: 'warning', title: proj.name, message: 'Skipping cloud save: you are not the owner of this portfolio.', persistent: false }); } catch { /* noop */ }
+					console.warn('flushCloudPersist: skipping persist for project owned by another user', { projectId, ownerUid: proj.ownerUid, currentUid: user.uid });
+					continue;
+				}
 				if (!ownerUid) continue;
 				const sanitizedForCloud = sanitizeProjectVideoWidgets(ensurePortfolioMeta(ensureProjectThemes(proj)));
 				let assetManifest: AssetManifest | null = null;
@@ -456,17 +820,19 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 				cloudLocalVersionRef.current[projectId] = sanitizedForCloud.updatedAt || '';
 				writes++;
 			}
-			/* eslint-enable no-await-in-loop */
+
 			if (!writes) {
 				state.saving = false;
 				return;
 			}
 			try { notify({ type: 'info', message: 'Saving to cloud…', persistent: false }); } catch { /* noop */ }
+			console.info('ProjectsProvider.flushCloudPersist: committing batch for projects', pendingEntries.map(([id]) => id));
 			await batch.commit();
 			state.lastFlushAt = Date.now();
 			state.slowModeUntil = 0;
 			state.saving = false;
 			try { notify({ type: 'success', message: 'Cloud save complete.', persistent: false }); } catch { /* noop */ }
+			console.info('ProjectsProvider.flushCloudPersist: cloud save complete');
 		} catch (err) {
 			console.error('Failed to persist cloud projects', err);
 			const retryPayload = Object.fromEntries(pendingEntries) as Record<string, LocalProject>;
@@ -480,6 +846,7 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 	}, [notify, signalCloudSlowdown]);
 
 	const queueCloudPersist = useCallback((proj: LocalProject) => {
+		console.info('ProjectsProvider.queueCloudPersist: enqueue project', { projectId: proj?.id, storage: proj?.storage });
 		if (!proj || (proj.storage ?? 'local') !== 'cloud') return;
 		const state = cloudPersistStateRef.current;
 		state.pending[proj.id] = proj;
@@ -563,6 +930,8 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 					writeStore(locals);
 					return locals;
 				});
+				// Fire & forget: recompute a more accurate cloud usage when we have the latest cloud project list
+				void (async () => { try { const sum = await recomputeCloudStorageUsage(); setCloudBytesUsed(sum); } catch { /* ignore */ } })();
 				setSelectedProjectId(null);
 				writeSelected(null);
 				return;
@@ -613,7 +982,43 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 						setCloudProjectsCount(snapshot.size);
 						setProjects(prev => {
 							const locals = prev.filter(p => (p.storage ?? 'local') === 'local');
-							const merged = [...cloudList, ...locals];
+							// Merge cloud projects, but preserve local cloud projects if they're newer
+							const cloudMap = new Map(cloudList.map(p => [p.id, p]));
+							const existingClouds = prev.filter(p => (p.storage ?? 'local') === 'cloud');
+							const mergedClouds = existingClouds.map(existing => {
+								const fromServer = cloudMap.get(existing.id);
+								if (!fromServer) return existing;
+								// Keep local version if it's newer (optimistic update pending sync)
+								const localTime = existing.updatedAt || '';
+								const serverTime = fromServer.updatedAt || '';
+								// Defensive: verify the server doc doesn't appear to be missing widgets referenced by its pages
+								const serverRefsOk = (() => {
+									try {
+										const pids = fromServer.pageOrder || [];
+										const widMap = fromServer.widgets || {};
+										for (const pid of pids) {
+											const page = fromServer.pages?.[pid]; if (!page) continue;
+											for (const wid of (page.widgets || [])) {
+												if (!widMap[wid]) return false;
+											}
+										}
+										return true;
+									} catch { return true; }
+								})();
+								if (!serverRefsOk) {
+									// If the server appears to reference missing widgets, prefer the local copy
+									if (process.env.NODE_ENV === 'development') console.warn('[ProjectsProvider] Cloud snapshot appears inconsistent (pages reference unknown widgets); keeping local copy', { projectId: existing.id });
+									return existing;
+								}
+								return localTime > serverTime ? existing : fromServer;
+							});
+							// Add any cloud projects from server that we don't have locally
+							for (const cloud of cloudList) {
+								if (!existingClouds.some(p => p.id === cloud.id)) {
+									mergedClouds.push(cloud);
+								}
+							}
+							const merged = sanitizeProjectsList([...mergedClouds, ...locals]);
 							writeStore(merged);
 							return merged;
 						});
@@ -677,6 +1082,8 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 
 	// Helper: serialize project + referenced assets into a zip (base64)
 	const buildArchiveBase64 = async (proj: LocalProject, opts?: BuildArchiveOptions) => {
+		const startTs = Date.now();
+		console.info('ProjectsProvider.buildArchiveBase64: starting archive build', { projectId: proj.id, pages: proj.pageOrder?.length, opts: !!opts });
 		const sanitizedProject = sanitizeProjectVideoWidgets(proj);
 		const zip = new JSZip();
 		const payload: { _format: string; _version: number; exportedAt: string; project: LocalProject } = {
@@ -829,6 +1236,7 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 		// Yield before final ZIP generation
 		await new Promise(resolve => setTimeout(resolve, 0));
 		const base64 = await zip.generateAsync({ type: 'base64' });
+		console.info('ProjectsProvider.buildArchiveBase64: archive build complete', { projectId: proj.id, durationMs: Date.now() - startTs, sizeBase64: base64.length });
 		return base64;
 	};
 
@@ -846,7 +1254,7 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 			try {
 				const bytes = await getBytes(ref);
 				buffer = bytes.slice(0);
-			} catch (err) {
+			} catch {
 				try {
 					const url = entry?.downloadUrl || await getDownloadURL(ref);
 					const resp = await fetch(url, { cache: 'no-store' });
@@ -902,6 +1310,7 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 					};
 					await idbPut(stores.STORE_META, hash, nextMeta);
 				}
+				console.info('uploadReferencedAssetsToStorage: uploaded asset', { hash, path, downloadUrl });
 				manifest[hash] = { path, downloadUrl };
 			} catch (err) {
 				console.error('Failed to upload referenced asset to storage', hash, err);
@@ -1208,16 +1617,42 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 				const idx = projects.findIndex(p => p.id === projectId); if (idx < 0) return null;
 				const proj = projects[idx];
 				const isCloud = !!proj._cloudId;
-				const current = proj.pageOrder?.length ?? 0;
+				// Use a new order as max order + 1 to avoid reusing deleted page numbers
+				const current = (proj.pageOrder?.length ?? 0);
+				const maxOrder = Object.values(proj.pages || {}).reduce((m, p) => Math.max(m, (p?.order ?? -1)), -1);
+				const newOrder = maxOrder + 1;
 				if (isCloud && current >= 10) {
 					window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'warn', message: 'Cloud projects can have up to 10 pages. Delete a page to add another.' } }));
 					return null;
 				}
+				// Prevent providing a title that duplicates an existing page title (case-insensitive)
+				const trimmed = (title || '').trim();
+				if (trimmed) {
+					const duplicate = Object.values(proj.pages).some(p => (p.title || '').toLowerCase() === trimmed.toLowerCase());
+					if (duplicate) {
+						window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'warn', message: 'That page title already exists. Please choose a different name.', persistent: false } }));
+						return null;
+					}
+				}
 				const pid = `page_${crypto.randomUUID()}`;
-				const order = current;
+				// Set page order to be newOrder (max+1) not simply current count; default title uses 1-based new number
+				const order = newOrder;
+				// If titles already include a Page N, pick next N as default to avoid numeric collisions
+				let maxNum = -1;
+				for (const p of Object.values(proj.pages || {})) {
+					const t = (p?.title || '').trim();
+					const m = t.match(/\bPage\s*(\d+)\b/i);
+					if (m && m[1]) {
+						const n = Number(m[1]);
+						if (Number.isFinite(n)) maxNum = Math.max(maxNum, n);
+					}
+				}
+				const defaultNumber = Math.max(maxNum + 1, order + 1);
+				const defaultTitle = `Page ${defaultNumber}`;
+				const pageTitle = (title && title.trim()) || generateUniquePageTitle(proj, defaultTitle);
 				const page: Page = {
 					pageId: pid,
-					title: (title && title.trim()) || `Page ${order + 1}`,
+					title: pageTitle,
 					starter: false,
 					order,
 					widgets: [],
@@ -1227,6 +1662,9 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 					createdAt: now(),
 					updatedAt: now(),
 				};
+				if (process.env.NODE_ENV === 'development') {
+					try { console.debug('[ProjectsProvider] createPage: title selection', { projectId: proj.id, defaultTitle, pageTitle, order, pageOrderCount: proj.pageOrder?.length }); } catch { /* noop */ }
+				}
 				const nextProj: LocalProject = {
 					...proj,
 					pageOrder: [...proj.pageOrder, pid],
@@ -1240,14 +1678,76 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 				notify({ type: 'success', message: `Page "${page.title}" created`, title: nextProj.name, persistent: false });
 				return pid;
 			},
-			renamePage: (projectId: string, pageId: string, newTitle: string) => {
-				const idx = projects.findIndex(p => p.id === projectId); if (idx < 0) return;
+			duplicatePage: (projectId: string, pageId: string) => {
+				const idx = projects.findIndex(p => p.id === projectId); if (idx < 0) return null;
 				const proj = projects[idx];
-				const page = proj.pages[pageId]; if (!page) return;
-				const updatedPage: Page = { ...page, title: (newTitle || '').trim() || page.title, updatedAt: now() };
+				const sourcePage = proj.pages[pageId]; if (!sourcePage) return null;
+				const isCloud = !!proj._cloudId;
+				const current = proj.pageOrder?.length ?? 0;
+				if (isCloud && current >= 10) {
+					window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'warn', message: 'Cloud projects can have up to 10 pages. Delete a page to add another.' } }));
+					return null;
+				}
+				const newPageId = `page_${crypto.randomUUID()}`;
+				const order = current;
+				const newTitle = generateUniquePageTitle(proj, `${sourcePage.title} copy`);
+				const newPage: Page = {
+					...sourcePage,
+					pageId: newPageId,
+					title: newTitle,
+					order,
+					widgets: [], // Will be populated with duplicated widgets
+					createdAt: now(),
+					updatedAt: now(),
+				};
+				// Duplicate all widgets from the source page
+				const sourceWidgetIds = sourcePage.widgets || [];
+				const newWidgetIds: string[] = [];
+				const newWidgets: Record<string, Widget> = {};
+				for (const oldWidId of sourceWidgetIds) {
+					const oldWidget = proj.widgets[oldWidId];
+					if (!oldWidget) continue;
+					const newWidId = `widget_${crypto.randomUUID()}`;
+					newWidgetIds.push(newWidId);
+					newWidgets[newWidId] = {
+						...oldWidget,
+						widgetId: newWidId,
+						createdAt: now(),
+						updatedAt: now(),
+						originWidgetId: oldWidget.widgetId,
+					};
+				}
+				newPage.widgets = newWidgetIds;
+				const nextProj: LocalProject = {
+					...proj,
+					pageOrder: [...proj.pageOrder, newPageId],
+					pages: { ...proj.pages, [newPageId]: newPage },
+					widgets: { ...proj.widgets, ...newWidgets },
+					updatedAt: now(),
+				} as LocalProject;
+				const next = [...projects]; next[idx] = nextProj; setProjects(next); writeStore(next);
+				if (!isCloud) {
+					notify({ type: 'info', message: 'Adding more pages increases your project file size.', title: nextProj.name, persistent: false });
+				}
+				notify({ type: 'success', message: `Page "${newPage.title}" created from duplicate`, title: nextProj.name, persistent: false });
+				return newPageId;
+			},
+			renamePage: (projectId: string, pageId: string, newTitle: string) => {
+				const idx = projects.findIndex(p => p.id === projectId); if (idx < 0) return false;
+				const proj = projects[idx];
+				const page = proj.pages[pageId]; if (!page) return false;
+				const trimmedTitle = (newTitle || '').trim() || page.title;
+				// Prevent duplicate page titles (case-insensitive) within the same project
+				const exists = Object.values(proj.pages).some(p => p.pageId !== pageId && (p.title || '').toLowerCase() === (trimmedTitle || '').toLowerCase());
+				if (exists) {
+					try { notify({ type: 'warn', message: 'That page title already exists. Please choose a different name.', title: proj.name, persistent: false }); } catch { /* ignore */ }
+					return false;
+				}
+				const updatedPage: Page = { ...page, title: trimmedTitle, updatedAt: now() };
 				const nextProj: LocalProject = { ...proj, pages: { ...proj.pages, [pageId]: updatedPage }, updatedAt: now() } as LocalProject;
 				const next = [...projects]; next[idx] = nextProj; setProjects(next); writeStore(next);
 				notify({ type: 'success', message: `Page renamed to "${updatedPage.title}"`, title: nextProj.name, persistent: false });
+				return true;
 			},
 			deletePage: (projectId: string, pageId: string) => {
 				const idx = projects.findIndex(p => p.id === projectId); if (idx < 0) return;
@@ -1437,6 +1937,8 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 				// If we got a valid import, deduplicate by file path and by id
 				if (imported) {
 					imported = ensurePortfolioMeta(imported as LocalProject);
+					// Normalize widget references to avoid introducing shared widget ids
+					try { imported = sanitizeProjectsList([imported as LocalProject])[0]; } catch { /* ignore */ }
 					(imported as LocalProject).storage = 'local';
 					// Prefer dedupe by path when available
 					if (importedFilePath) {
@@ -1467,7 +1969,30 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 				localStorage.setItem("py.hasAnyProject", "1");
 				return imported;
 			},
-			selectProject: (projectId: string) => { setSelectedProjectId(projectId); writeSelected(projectId); },
+			selectProject: (projectId: string) => {
+				// When selecting a project at runtime, ensure it's sanitized/normalized
+				// so that any older projects with shared widget ids get fixed before we edit them.
+				const idx = projects.findIndex(p => p.id === projectId);
+				if (idx >= 0) {
+					const proj = projects[idx];
+					try {
+						const normalized = sanitizeProjectsList([proj])[0];
+						if (JSON.stringify(normalized) !== JSON.stringify(proj)) {
+							if (process.env.NODE_ENV === 'development') {
+								console.info('[ProjectsProvider] Normalized project on selectProject:', projectId);
+							}
+							// Defer writing to avoid setState during render (prevents React warning)
+							queueMicrotask(() => {
+								const next = [...projects];
+								next[idx] = normalized;
+								setProjects(next);
+								writeStore(next);
+							});
+						}
+					} catch { /* ignore */ }
+				}
+				setSelectedProjectId(projectId); writeSelected(projectId);
+			},
 			selectedProjectId,
 			selectedProject: selected,
 			activeTheme: selectedTheme,
@@ -1494,12 +2019,16 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 			autosaveEnabled,
 			setAutosaveEnabled: (v: boolean) => { try { localStorage.setItem('py_autosave_enabled', v ? '1' : '0'); } catch { /* noop */ } setAutosaveEnabled(v); try { notify({ type: 'info', message: v ? 'Autosave enabled' : 'Autosave disabled', persistent: false }); } catch { /* ignore */ } },
 			getPageItems: (projectId: string, pageId: string) => {
-				const proj = projects.find(p => p.id === projectId); if (!proj) return [];
+				const proj = projectsRef.current.find(p => p.id === projectId); if (!proj) return [];
 				const page = proj.pages[pageId]; if (!page) return [];
 				const ids = page.widgets || [];
 				const out: Array<{ id: string; x: number; y: number; w: number; h: number; z: number; title?: string; type?: string; props?: unknown; schemaVersion?: number; pinned?: boolean; locked?: boolean; }> = [];
 				for (const wid of ids) {
-					const w = proj.widgets[wid]; if (!w) continue;
+					const w = proj.widgets[wid];
+					if (!w) {
+						if (process.env.NODE_ENV === 'development') console.warn('[ProjectsProvider] getPageItems: page references widget id not present in widgets mapping', { projectId, pageId, wid, pageWidgetIds: ids.length, projectWidgetCount: Object.keys(proj.widgets).length });
+						continue;
+					}
 					type LayoutLike = Partial<{ x: number | string; y: number | string; w: number | string; h: number | string; z: number | string; title: string; pinned: boolean; locked: boolean }>;
 					const layout = (w.layout ?? {}) as LayoutLike;
 					out.push({
@@ -1519,58 +2048,129 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 				}
 				// Ensure stable z ordering
 				out.sort((a, b) => a.z - b.z);
+
+				// Development-only diagnostic: warn if any widget id is referenced by multiple pages
+				try {
+					if (process.env.NODE_ENV === 'development') {
+						const refCount: Record<string, number> = {};
+						for (const pid of proj.pageOrder) {
+							const pg = proj.pages[pid]; if (!pg) continue;
+							for (const wid of (pg.widgets || [])) {
+								refCount[wid] = (refCount[wid] || 0) + 1;
+							}
+						}
+						const shared = Object.entries(refCount).filter(([, count]) => count > 1);
+						if (shared.length > 0) {
+							// Print a compact mapping for debugging. Only warn once per project
+							if (!devWarnedWidgetSharedProjectIds.has(projectId)) {
+								console.warn('[ProjectsProvider] Widget id(s) referenced by multiple pages:', shared.map(([wid, count]) => `${wid} (${count})`).join(', '), 'Project:', projectId);
+								devWarnedWidgetSharedProjectIds.add(projectId);
+							}
+							// Perform a project normalization to split shared widget ids if this project hasn't been
+							// normalized yet (only in development to avoid unexpected silent rewrites).
+							try {
+								const normalized = normalizeProjectWidgetReferences(proj);
+								if (JSON.stringify(normalized) !== JSON.stringify(proj)) {
+									const next = projects.map(p => p.id === projectId ? normalized : p);
+									setProjects(next);
+									writeStore(next);
+								}
+							} catch { /* ignore normalization failures */ }
+						}
+					}
+				} catch {
+					// ignore diagnostics failure
+				}
+				if (process.env.NODE_ENV === 'development') {
+					try { console.debug('[ProjectsProvider] getPageItems', { projectId, pageId, items: out.map(o => o.id) }); } catch { /* ignore */ }
+				}
 				return out;
 			},
-			setPageItems: (projectId: string, pageId: string, items) => {
-				const idx = projects.findIndex(p => p.id === projectId); if (idx < 0) return;
-				const proj = projects[idx];
-				const page = proj.pages[pageId]; if (!page) return;
-				const nowStr = now();
-				// Update or create widgets for this page
-				const nextWidgets: Record<string, Widget> = { ...proj.widgets };
-				for (let i = 0; i < items.length; i++) {
-					const it = items[i];
-					const existing = nextWidgets[it.id];
-					const createdAt = existing?.createdAt || nowStr;
-					const schemaVersion = typeof it.schemaVersion === 'number' ? it.schemaVersion : (typeof existing?.schemaVersion === 'number' ? existing?.schemaVersion : 1);
-					nextWidgets[it.id] = {
-						widgetId: it.id,
-						type: it.type || existing?.type || 'custom',
-						slot: existing?.slot || 'default',
-						order: i,
-						props: it.props ?? existing?.props ?? {},
-						layout: {
-							x: it.x, y: it.y, w: it.w, h: it.h, z: it.z,
-							pinned: !!it.pinned, locked: !!it.locked, title: it.title ?? ((existing?.layout as { title?: string } | undefined)?.title) ?? undefined,
-						},
-						schemaVersion,
-						createdAt,
-						updatedAt: nowStr,
-					} as Widget;
-				}
-				// Page widgets list in the order provided
-				const updatedPage: Page = { ...page, widgets: items.map(it => it.id), order: page.order, updatedAt: nowStr };
-				// Remove orphan widgets not referenced by any page
-				const referenced = new Set<string>();
-				// include current page changes
-				for (const id of updatedPage.widgets) referenced.add(id);
-				// include other pages
-				for (const pid of proj.pageOrder) {
-					if (pid === pageId) continue;
-					const pg = proj.pages[pid];
-					for (const id of (pg.widgets || [])) referenced.add(id);
-				}
-				const compactWidgets: Record<string, Widget> = {};
-				for (const [wid, w] of Object.entries(nextWidgets)) {
-					if (referenced.has(wid)) compactWidgets[wid] = w;
-				}
-				const nextProj: LocalProject = {
-					...proj,
-					pages: { ...proj.pages, [pageId]: updatedPage },
-					widgets: compactWidgets,
-					updatedAt: nowStr,
-				} as LocalProject;
-				const next = [...projects]; next[idx] = nextProj; setProjects(next); writeStore(next);
+			setPageItems: (projectId: string, pageId: string, items, opts?: { allowClear?: boolean; force?: boolean }) => {
+				let updated: LocalProject | undefined;
+				setProjects((prev) => {
+					const idx = prev.findIndex(p => p.id === projectId);
+					if (idx < 0) return prev;
+					const proj = prev[idx];
+					const page = proj.pages[pageId];
+					if (!page) return prev;
+					// Defensive: don't overwrite with an empty array unless explicitly allowed AND force==true
+					const prevPageWidgets = proj.pages[pageId]?.widgets || [];
+					if ((!opts || !opts.allowClear || !opts.force) && (!items || items.length === 0) && prevPageWidgets.length > 0) {
+						if (process.env.NODE_ENV === 'development') console.warn('[ProjectsProvider] Preventing accidental clear of page widgets; set opts.allowClear to true to confirm', { projectId, pageId, prevPageWidgets });
+						return prev;
+					}
+					const nextProj = applySetPageItemsToProject(proj, pageId, items);
+					if (process.env.NODE_ENV === 'development') {
+						try {
+							const incomingIds = items.map(it => it.id).join(', ');
+							const _diag = resolveIncomingWidgetIds(proj, pageId, items as any);
+							const resolvedIds = (_diag.resolvedItems || []).map((it: any) => it.id).join(', ');
+							const prevPageIds = (proj.pages[pageId]?.widgets || []).join(', ');
+							const updatedPage = nextProj.pages[pageId];
+							const nextWidgets = nextProj.widgets;
+							console.debug('[ProjectsProvider] setPageItems: project=', projectId, 'page=', pageId, 'incoming=', incomingIds, 'resolved=', resolvedIds, 'prevPage=', prevPageIds, 'updatedPage=', updatedPage?.widgets?.join(', '), 'projectWidgetCount=', Object.keys(nextWidgets).length);
+							// Spot-check: warn if updated page widget list is empty but incoming had items
+							if (items.length > 0 && (!updatedPage?.widgets || updatedPage.widgets.length === 0)) {
+								console.warn('[ProjectsProvider] setPageItems wrote empty page widget list for page that had incoming items', projectId, pageId, items.map(i => i.id));
+							}
+							// Warn if there exist page widget ids not present in nextWidgets mapping
+							const missing = (updatedPage?.widgets || []).filter((wid: string) => !nextWidgets[wid]);
+							if (missing.length > 0) {
+								console.warn('[ProjectsProvider] setPageItems: page widget ids are missing in project widget mapping after save', projectId, pageId, missing);
+							}
+						} catch { /* ignore */ }
+					}
+					const next = [...prev];
+					next[idx] = nextProj;
+					if (process.env.NODE_ENV === 'development') {
+						try {
+							// Warn if incoming setPageItems payload is empty for a page that previously had widgets
+							const prevPageWidgets = proj.pages[pageId]?.widgets || [];
+							if (items.length === 0 && prevPageWidgets.length > 0) {
+								// Print a stack trace in development so we can find the caller that is clearing items
+								const st = (new Error('stack')).stack?.split('\n').slice(1).join('\n');
+								console.warn('[ProjectsProvider] setPageItems called with empty items for page that had widgets; this will clear widgets on the page', { projectId, pageId, prevPageWidgets, stack: st });
+							}
+							// Also log when page's widget array changes length
+							const newPageWidgets = (nextProj.pages[pageId]?.widgets || []).length;
+							if (prevPageWidgets.length !== newPageWidgets) {
+								console.debug('[ProjectsProvider] setPageItems: page widget count changed', { projectId, pageId, prevCount: prevPageWidgets.length, newCount: newPageWidgets });
+							}
+						} catch { /* ignore */ }
+					}
+					if (process.env.NODE_ENV === 'development') {
+						try {
+							const missingRefs: Array<{ pid: string; wid: string }> = [];
+							for (const pid of nextProj.pageOrder || []) {
+								const pg = nextProj.pages[pid];
+								if (!pg) continue;
+								for (const wid of (pg.widgets || [])) {
+									if (!nextProj.widgets[wid]) missingRefs.push({ pid, wid });
+								}
+							}
+							if (missingRefs.length > 0) {
+								console.warn('[ProjectsProvider] setPageItems: project has page references to non-existent widgets', { projectId, missingRefs, projectWidgetCount: Object.keys(nextProj.widgets).length });
+							}
+						} catch { /* ignore */ }
+					}
+					updated = nextProj;
+					writeStore(next, true); // Immediate write for widget changes
+					if ((nextProj.storage ?? 'local') === 'local' && nextProj._filePath && window.api?.writeFile) {
+						void (async () => {
+							try {
+								const base64 = await buildArchiveBase64(nextProj);
+								if (window.api!.writeFileBytes) {
+									await window.api!.writeFileBytes({ filePath: nextProj._filePath!, dataBase64: base64 });
+								} else {
+									await window.api!.writeFile({ filePath: nextProj._filePath!, data: base64, encoding: 'base64' });
+								}
+							} catch { /* ignore */ }
+						})();
+					}
+					return next;
+				});
+				return updated;
 			},
 			setActiveTheme: (projectId: string, themeId: string) => {
 				const idx = projects.findIndex(p => p.id === projectId); if (idx < 0) return;
@@ -1841,6 +2441,8 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 					return { storagePath: path, sizeBytes: 0, updatedAt: now() };
 				}
 			},
+			getCloudProjectTotalSizeByCloudId: getCloudProjectTotalSizeByCloudId,
+			recomputeCloudStorageUsage: recomputeCloudStorageUsage,
 			renameCloudProject: async (cloudId: string, newName: string) => {
 				const user = auth.currentUser; if (!user) return false;
 				try {
@@ -1911,6 +2513,14 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 				// Ensure no cloud linkage
 				(imported as LocalProject)._cloudId = undefined;
 				(imported as LocalProject)._synced = false;
+				// Sanitize and normalize imported project to avoid shared widget ids
+				try {
+					const priorId = imported.id;
+					imported = sanitizeProjectsList([imported as LocalProject])[0];
+					if (process.env.NODE_ENV === 'development' && priorId !== imported.id) {
+						console.info('[ProjectsProvider] Normalized imported project (local-only) id:', priorId);
+					}
+				} catch { /* ignore */ }
 				// Dedupe by id
 				const existingIdx = projects.findIndex(p => p.id === imported.id);
 				if (existingIdx >= 0) {
@@ -1960,6 +2570,14 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 				}
 				// Attach cloud link
 				(imported as LocalProject)._cloudId = cloudId;
+				// Sanitize and normalize imported cloud project before usage
+				try {
+					const priorId = imported.id;
+					imported = sanitizeProjectsList([imported as LocalProject])[0];
+					if (process.env.NODE_ENV === 'development' && priorId !== imported.id) {
+						console.info('[ProjectsProvider] Normalized imported cloud project:', priorId);
+					}
+				} catch { /* ignore */ }
 				(imported as LocalProject)._synced = true;
 				// Dedupe by id
 				const existingIdx = projects.findIndex(p => p.id === imported.id);

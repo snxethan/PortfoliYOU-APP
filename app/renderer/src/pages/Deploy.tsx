@@ -1,11 +1,12 @@
 import { useEffect, useState, useRef } from "react";
-import { ChevronDown, ChevronRight, Plus, Play, Square, Copy, ExternalLink, X, Eye, RefreshCw, SlidersHorizontal } from "lucide-react";
+import { ChevronDown, ChevronRight, Play, Square, Copy, ExternalLink, X, Eye, RefreshCw, SlidersHorizontal, Github, ListOrdered, Lightbulb, Rocket, Package, Server } from "lucide-react";
+import { useNavigate } from 'react-router-dom';
+
 import { useProjects } from "../providers/ProjectsProvider";
 import { startPreviewServer } from "../lib/previewServer";
 import { captureGlobalStyleSnapshot } from "../lib/styleSnapshot";
 import { usePortfolioSettings } from "../providers/PortfolioSettingsProvider";
 import { useAssets } from "../providers/AssetsProvider";
-import { useNavigate } from 'react-router-dom';
 import { getWidgetThemeSnapshot, themeSnapshotToCss } from "../widgets/theme";
 import { appendPreviewLog, clearPreviewLog, getPreviewLog, getPreviewState, setPreviewState } from "../lib/previewInterop";
 
@@ -36,6 +37,8 @@ export default function DeployPage() {
 	const { list: assetList } = useAssets();
 	const [buildLog, setBuildLog] = useState<string[]>([]);
 	const logRef = useRef<HTMLDivElement | null>(null);
+	const previewRef = useRef<HTMLDivElement | null>(null);
+	const [pulsePreview, setPulsePreview] = useState(false);
 	const selectedProjectCloudId = selectedProject?._cloudId ?? selectedProjectId ?? (selectedProject as any)?.id ?? null;
 
 	function appendLog(line: string) {
@@ -73,10 +76,10 @@ export default function DeployPage() {
 		if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
 	}, [buildLog]);
 
-	const navigate = useNavigate();
-	const [status, setStatus] = useState<"online" | "offline" | "unknown">("unknown");
-	const [lastDeployed, setLastDeployed] = useState<string | null>(null);
-	const [previewAvailable, setPreviewAvailable] = useState(false);
+	const _navigate = useNavigate(); // Reserved for future use
+	const [_status, _setStatus] = useState<"online" | "offline" | "unknown">("unknown");
+	const [_lastDeployed, _setLastDeployed] = useState<string | null>(null);
+	const [_previewAvailable, _setPreviewAvailable] = useState(false);
 	const [previewRunning, setPreviewRunning] = useState(false);
 	const [previewLocalUrl, setPreviewLocalUrl] = useState<string | null>(null);
 	const [previewLanUrl, setPreviewLanUrl] = useState<string | null>(null);
@@ -84,7 +87,7 @@ export default function DeployPage() {
 	const [exporting, setExporting] = useState(false);
 	const [exportedFilePath, setExportedFilePath] = useState<string | null>(null);
 	const [includeAssets, setIncludeAssets] = useState(true);
-	const [basePath, setBasePath] = useState<string | null>(null);
+	const [_basePath, _setBasePath] = useState<string | null>(null);
 
 	function deriveDirFromPath(p?: string | null) {
 		if (!p) return null;
@@ -96,10 +99,10 @@ export default function DeployPage() {
 	}
 
 	useEffect(() => {
-		setStatus("unknown");
+		_setStatus("unknown");
 		try {
 			const candidate = deriveDirFromPath((selectedProject as any)?._filePath as string | undefined);
-			if (candidate) setBasePath(candidate);
+			if (candidate) _setBasePath(candidate);
 		} catch { /* ignore */ }
 	}, [selectedProject]);
 
@@ -193,12 +196,22 @@ export default function DeployPage() {
 		};
 		window.addEventListener('py:preview-reload-request', onReloadRequest as EventListener);
 
+		const onHighlightPreview = () => {
+			setPulsePreview(true);
+			if (previewRef.current) {
+				previewRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
+			}
+			setTimeout(() => setPulsePreview(false), 2000);
+		};
+		window.addEventListener('py:highlight-preview', onHighlightPreview as EventListener);
+
 		return () => {
 			window.removeEventListener('py:preview-start-request', onRequest as EventListener);
 			window.removeEventListener('py:export-request', onExport as EventListener);
 			window.removeEventListener('py:preview:log', onLog as EventListener);
 			window.removeEventListener('py:preview-stop-request', onStopRequest as EventListener);
 			window.removeEventListener('py:preview-reload-request', onReloadRequest as EventListener);
+			window.removeEventListener('py:highlight-preview', onHighlightPreview as EventListener);
 		};
 	}, [previewRunning, previewStarting, selectedProjectCloudId]);
 
@@ -236,6 +249,7 @@ export default function DeployPage() {
 		clearPreviewLog(selectedProjectCloudId);
 		setExportedFilePath(null);
 		appendLog('Starting export...');
+		console.info('Deploy.handleExportZip: start', { projectId: selectedProject?.id, projectName: selectedProject?.name });
 		try {
 			const assetsBase64: Record<string, string> = {};
 			if (includeAssets) {
@@ -254,6 +268,7 @@ export default function DeployPage() {
 			}
 
 			appendLog('Building static site...');
+			console.info('Deploy.handleExportZip: building static site', { projectId: selectedProject?.id });
 			const activeTheme = selectedProject?.themes?.[selectedProject.activeThemeId] ?? null;
 			const [styleSnapshot, themeSnapshot] = await Promise.all([
 				captureGlobalStyleSnapshot(),
@@ -274,6 +289,7 @@ export default function DeployPage() {
 			appendLog(`✅ Build succeeded: ${buildRes.path}`);
 			window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'success', message: 'Build succeeded', persistent: false } }));
 
+			console.info('Deploy.handleExportZip: build succeeded', { projectId: selectedProject?.id, path: buildRes.path });
 			// Try embedding into existing project package if possible, else fallback to ZIP
 			try {
 				const rawProjectPath = (selectedProject as any)?._filePath as string | undefined;
@@ -301,6 +317,7 @@ export default function DeployPage() {
 				}
 
 				appendLog('Preparing export folder for ZIP...');
+				console.info('Deploy.handleExportZip: preparing export folder', { buildPath: buildRes.path });
 				const exportRes = await (window as any).api?.buildExportFolder?.({ distDir: buildRes.path, projectName: (selectedProject && selectedProject.name) || (selectedProject && (selectedProject as any).title) || 'portfolio' });
 				let zipSourceDir = buildRes.path;
 				if (!exportRes || !exportRes.ok) {
@@ -311,6 +328,7 @@ export default function DeployPage() {
 				}
 
 				appendLog('⚠️ Creating ZIP from export folder');
+				console.info('Deploy.handleExportZip: creating zip', { zipSourceDir });
 				const zipRes = await (window as any).api?.zipDir?.({ dir: zipSourceDir });
 				if (!zipRes || !zipRes.ok) {
 					appendLog('❌ ZIP failed: ' + (zipRes?.error || 'unknown'));
@@ -320,6 +338,7 @@ export default function DeployPage() {
 				const saveRes = await (window as any).api?.saveFileBytes?.({ defaultPath: `${selectedProject.name || 'portfolio'}.zip`, dataBase64: zipRes.dataBase64 });
 				if (saveRes && saveRes.filePath) {
 					appendLog('✅ ZIP saved: ' + saveRes.filePath);
+					console.info('Deploy.handleExportZip: zip saved', { projectId: selectedProject?.id, filePath: saveRes.filePath });
 					setExportedFilePath(saveRes.filePath);
 					window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'success', message: 'ZIP saved: ' + saveRes.filePath, href: saveRes.filePath, ctaLabel: 'Reveal', persistent: false } }));
 				} else {
@@ -453,14 +472,14 @@ export default function DeployPage() {
 
 	return (
 		<div className="p-6 space-y-6">
-			<section className="surface border border-[color:var(--border)] rounded-2xl p-6 shadow-lg shadow-black/20">
+			<section className="surface border border-[color:var(--border)] rounded-2xl p-6 shadow-lg shadow-black/20" style={{ animation: 'py-pop 0.4s ease-out' }}>
 				<div className="flex flex-col gap-1">
 					<p className="section-title">Portfolio Deployer workspace</p>
 					<p className="text-sm text-[color:var(--fg-muted)]">Preview, build and export your portfolio in a single workspace.</p>
 				</div>
 				<div className="mt-4 space-y-4">
 					{/* 1) Build Log (non-collapsible) */}
-					<div className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)]/90 p-4 relative">
+					<div className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)]/90 p-4 relative" style={{ animation: 'py-pop 0.35s ease-out' }}>
 						<div className="flex items-start justify-between">
 							<div>
 								<p className="text-xs uppercase tracking-wide text-[color:var(--fg-muted)]">Deployment Log</p>
@@ -528,16 +547,16 @@ export default function DeployPage() {
 					</div>
 
 					{/* 2) Local Preview (quickstart style) */}
-					<div className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)]/90 p-4">
+					<div ref={previewRef} className={`rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)]/90 p-4 ${pulsePreview ? 'highlight-pulse' : ''}`} style={{ animation: 'py-pop 0.3s ease-out' }}>
 						<p className="text-xs uppercase tracking-wide text-[color:var(--fg-muted)]">Local Preview</p>
 						<p className="text-sm text-[color:var(--fg-muted)]">Start a local static server to preview your compiled site on this machine or your LAN.</p>
 						<div className="mt-3">
 							<div className="rounded-xl border border-[color:var(--border)] bg-[color:var(--surface)]/80 p-4">
 								<div className="max-w-5xl mx-auto">
 									{!previewRunning ? (
-										<div className="flex flex-col sm:flex-row items-center justify-center gap-3 text-center">
+										<div className="flex flex-wrap flex-col sm:flex-row items-center justify-center gap-3 text-center">
 											<div className="flex items-center gap-2">
-												<button className="btn btn-accent w-full sm:w-auto gap-2 text-base font-semibold shadow-lg shadow-[color:var(--accent)]/25" onClick={() => handleStartLocalPreview()} disabled={previewStarting || exporting} title="Start local preview">
+												<button className="btn btn-accent w-full sm:w-auto gap-2 text-base font-semibold shadow-lg shadow-[color:var(--accent)]/25" onClick={() => handleStartLocalPreview()} disabled={previewStarting || exporting} title="Start local preview" style={{ animation: 'py-fade-in 0.2s ease-out' }}>
 													<Play size={16} /> <span>Start Preview</span>
 												</button>
 											</div>
@@ -546,17 +565,18 @@ export default function DeployPage() {
 												onClick={() => openSettings({ projectId: selectedProjectId || (selectedProject as any)?.id, section: 'preview' })}
 												disabled={!selectedProject && !selectedProjectId}
 												title="Preview settings"
+												style={{ animation: 'py-fade-in 0.2s ease-out' }}
 											>
 												<SlidersHorizontal size={16} /> <span>Preview Settings</span>
 											</button>
 										</div>
 									) : (
-										<div className="flex flex-col sm:flex-row items-center justify-center gap-3 text-center">
-											<button className="btn btn-danger w-full sm:w-auto gap-2 text-base font-semibold" onClick={() => handleStopLocalPreview()} title="Stop preview">
+										<div className="flex flex-wrap flex-col sm:flex-row items-center justify-center gap-3 text-center">
+											<button className="btn btn-danger w-full sm:w-auto gap-2 text-base font-semibold" onClick={() => handleStopLocalPreview()} title="Stop preview" style={{ animation: 'py-fade-in 0.2s ease-out' }}>
 												<Square size={16} className="text-[color:var(--danger)]" aria-hidden="true" /> <span>Stop</span>
 											</button>
 											{previewLocalUrl && (
-												<button className="btn btn-ghost w-full sm:w-auto gap-2 text-base flex items-center justify-center" onClick={() => handleReloadLocalPreview()} title="Reload preview (rebuild + restart)">
+												<button className="btn btn-ghost w-full sm:w-auto gap-2 text-base flex items-center justify-center" onClick={() => handleReloadLocalPreview()} title="Reload preview (rebuild + restart)" style={{ animation: 'py-fade-in 0.2s ease-out' }}>
 													<RefreshCw size={16} /> <span>Reload</span>
 												</button>
 											)}
@@ -567,6 +587,7 @@ export default function DeployPage() {
 													target="_blank"
 													rel="noreferrer"
 													title="Open preview in browser"
+													style={{ animation: 'py-fade-in 0.2s ease-out' }}
 													onClick={async (e) => {
 														e.preventDefault();
 														try { await (window as any).api?.openExternal?.({ url: previewLocalUrl }); } catch { /* ignore */ }
@@ -577,21 +598,21 @@ export default function DeployPage() {
 												</a>
 											)}
 											{/* Preview settings moved up into the running controls (next to Reload) */}
-											<button className="btn btn-ghost w-full sm:w-auto gap-2 text-base flex items-center" onClick={() => openSettings({ projectId: selectedProjectId || (selectedProject as any)?.id, section: 'preview' })} disabled={!selectedProject && !selectedProjectId} title="Preview settings">
+											<button className="btn btn-ghost w-full sm:w-auto gap-2 text-base flex items-center" onClick={() => openSettings({ projectId: selectedProjectId || (selectedProject as any)?.id, section: 'preview' })} disabled={!selectedProject && !selectedProjectId} title="Preview settings" style={{ animation: 'py-fade-in 0.2s ease-out' }}>
 												<SlidersHorizontal size={16} /> <span>Preview Settings</span>
 											</button>
 											{previewLocalUrl && (
-												<button className="btn btn-ghost w-full sm:w-auto gap-2 text-base flex items-center" onClick={() => (window as any).api?.clipboardWrite?.({ text: previewLocalUrl })} title="Copy local URL">
+												<button className="btn btn-ghost w-full sm:w-auto gap-2 text-base flex items-center" onClick={() => (window as any).api?.clipboardWrite?.({ text: previewLocalUrl })} title="Copy local URL" style={{ animation: 'py-fade-in 0.2s ease-out' }}>
 													<Copy size={16} /> <span>Copy</span>
 												</button>
 											)}
 											{previewLanUrl && (
-												<a className="btn btn-ghost w-full sm:w-auto gap-2 text-base flex items-center" href={previewLanUrl} target="_blank" rel="noreferrer" title="Open LAN preview" onClick={() => window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'info', message: 'Opening LAN preview in browser', persistent: false } }))}>
+												<a className="btn btn-ghost w-full sm:w-auto gap-2 text-base flex items-center" href={previewLanUrl} target="_blank" rel="noreferrer" title="Open LAN preview" onClick={() => window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'info', message: 'Opening LAN preview in browser', persistent: false } }))} style={{ animation: 'py-fade-in 0.2s ease-out' }}>
 													<ExternalLink size={16} /> <span>Open LAN</span>
 												</a>
 											)}
 											{previewLanUrl && (
-												<button className="btn btn-ghost w-full sm:w-auto gap-2 text-base flex items-center" onClick={() => (window as any).api?.clipboardWrite?.({ text: previewLanUrl })} title="Copy LAN URL">
+												<button className="btn btn-ghost w-full sm:w-auto gap-2 text-base flex items-center" onClick={() => (window as any).api?.clipboardWrite?.({ text: previewLanUrl })} title="Copy LAN URL" style={{ animation: 'py-fade-in 0.2s ease-out' }}>
 													<Copy size={16} /> <span>Copy LAN</span>
 												</button>
 											)}
@@ -603,7 +624,7 @@ export default function DeployPage() {
 					</div>
 
 					{/* 3) Compiling */}
-					<div className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)]/90 p-4">
+					<div className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)]/90 p-4" style={{ animation: 'py-pop 0.35s ease-out' }}>
 						<p className="text-xs uppercase tracking-wide text-[color:var(--fg-muted)]">Compiling</p>
 						<p className="text-sm text-[color:var(--fg-muted)]">Export and configure build settings for this portfolio.</p>
 						<div className="mt-4">
@@ -659,38 +680,322 @@ export default function DeployPage() {
 
 			{/* Theme settings removed from Deploy page; moved into Editor workspace */}
 
-			<section className="surface border border-[color:var(--border)] rounded-2xl p-6 shadow-lg shadow-black/20">
+			<section className="surface border border-[color:var(--border)] rounded-2xl p-6 shadow-lg shadow-black/20" style={{ animation: 'py-pop 0.4s ease-out' }}>
 				<div className="flex flex-col gap-1">
 					<p className="section-title">PORTFOLIO PUBLISHER</p>
-					<p className="text-sm text-[color:var(--fg-muted)]">Publish your portfolio to various platforms and services.</p>
+					<p className="text-sm text-[color:var(--fg-muted)]">Learn how to publish your portfolio to the web using free hosting platforms. Follow the step-by-step guides below to deploy your static site.</p>
 				</div>
 				<div className="mt-4 space-y-3">
-					<CollapsibleBlock storageKey="py_deploy_github_open" title="Publish to GitHub Pages" subtitle={<span className="text-xs text-[color:var(--fg-muted)]">Publish a static build by pushing the site to a <code className="font-mono">gh-pages</code> branch.</span>}>
-						<div className="mt-2">
-							<div className="text-sm mb-2">Quickly publish your static export to GitHub Pages. We'll guide you through connecting a repository and creating a <code className="font-mono">gh-pages</code> branch.</div>
-							<div className="flex items-center gap-2">
-								<button className="btn btn-accent">Connect & Publish</button>
-								<button className="btn">Learn more</button>
+					<CollapsibleBlock storageKey="py_deploy_github_open" title="Deploy to GitHub Pages" subtitle={<span className="text-xs text-[color:var(--fg-muted)]">Host your portfolio for free using GitHub Pages. Follow these steps to get your site live.</span>}>
+						<div className="mt-2 space-y-4">
+							<div>
+								<p className="text-sm font-semibold mb-2 flex items-center gap-2">
+									<ListOrdered size={16} className="text-[color:var(--accent)]" />
+									Step-by-step Guide
+								</p>
+								<ol className="space-y-3 text-sm list-decimal list-inside">
+									<li>
+										<strong>Export your portfolio</strong> — Click "Export Portfolio" above to download a ZIP file containing your static site.
+									</li>
+									<li>
+										<strong>Create a GitHub repository</strong> — Go to{' '}
+										<a
+											href="https://github.com/new"
+											target="_blank"
+											rel="noopener noreferrer"
+											className="text-[color:var(--accent)] hover:underline inline-flex items-center gap-1"
+											onClick={(e) => {
+												e.preventDefault();
+												(window as any).api?.openExternal?.({ url: 'https://github.com/new' });
+											}}
+										>
+											github.com/new <ExternalLink size={12} />
+										</a>
+										{' '}and create a new public repository (e.g., <code className="font-mono text-xs bg-[color:var(--bg-muted)] px-1 py-0.5 rounded">my-portfolio</code>).
+									</li>
+									<li>
+										<strong>Extract and push your files</strong> — Unzip the exported folder, initialize a Git repository, and push to GitHub:
+										<div className="mt-2 text-xs font-mono bg-[color:var(--bg-muted)] p-3 rounded border border-[color:var(--border)] space-y-1">
+											<div className="text-[color:var(--fg-muted)]"># Navigate to your unzipped folder</div>
+											<div>cd path/to/your-portfolio</div>
+											<div className="text-[color:var(--fg-muted)] mt-2"># Initialize git and push to GitHub</div>
+											<div>git init</div>
+											<div>git add .</div>
+											<div>git commit -m "Initial portfolio deploy"</div>
+											<div>git branch -M main</div>
+											<div>git remote add origin https://github.com/YOUR-USERNAME/YOUR-REPO.git</div>
+											<div>git push -u origin main</div>
+										</div>
+									</li>
+									<li>
+										<strong>Enable GitHub Pages</strong> — In your repository settings:
+										<ul className="ml-6 mt-1 space-y-1 list-disc text-xs">
+											<li>Go to <strong>Settings</strong> → <strong>Pages</strong></li>
+											<li>Under "Source", select <strong>Deploy from a branch</strong></li>
+											<li>Choose <strong>main</strong> branch and <strong>/ (root)</strong> folder</li>
+											<li>Click <strong>Save</strong></li>
+										</ul>
+									</li>
+									<li>
+										<strong>Access your live site</strong> — After a few minutes, your portfolio will be live at{' '}
+										<code className="font-mono text-xs bg-[color:var(--bg-muted)] px-1 py-0.5 rounded">https://YOUR-USERNAME.github.io/YOUR-REPO</code>
+									</li>
+								</ol>
 							</div>
-							<div className="mt-3 text-xs text-[color:var(--fg-muted)]">Tip: If you prefer, download the ZIP and enable Pages for your repository manually.</div>
+
+							<div className="border-t border-[color:var(--border)] pt-3">
+								<p className="text-sm font-semibold mb-2">📚 Helpful Resources</p>
+								<div className="space-y-1.5 text-xs">
+									<a
+										href="https://docs.github.com/en/pages/getting-started-with-github-pages"
+										target="_blank"
+										rel="noopener noreferrer"
+										className="text-[color:var(--accent)] hover:underline flex items-center gap-1"
+										onClick={(e) => {
+											e.preventDefault();
+											(window as any).api?.openExternal?.({ url: 'https://docs.github.com/en/pages/getting-started-with-github-pages' });
+										}}
+									>
+										<ExternalLink size={12} /> GitHub Pages Official Documentation
+									</a>
+									<a
+										href="https://pages.github.com/"
+										target="_blank"
+										rel="noopener noreferrer"
+										className="text-[color:var(--accent)] hover:underline flex items-center gap-1"
+										onClick={(e) => {
+											e.preventDefault();
+											(window as any).api?.openExternal?.({ url: 'https://pages.github.com/' });
+										}}
+									>
+										<ExternalLink size={12} /> GitHub Pages Quick Start Guide
+									</a>
+									<a
+										href="https://docs.github.com/en/pages/configuring-a-custom-domain-for-your-github-pages-site"
+										target="_blank"
+										rel="noopener noreferrer"
+										className="text-[color:var(--accent)] hover:underline flex items-center gap-1"
+										onClick={(e) => {
+											e.preventDefault();
+											(window as any).api?.openExternal?.({ url: 'https://docs.github.com/en/pages/configuring-a-custom-domain-for-your-github-pages-site' });
+										}}
+									>
+										<ExternalLink size={12} /> Using a Custom Domain with GitHub Pages
+									</a>
+								</div>
+							</div>
+
+							<div className="border-t border-[color:var(--border)] pt-3">
+								<p className="text-xs text-[color:var(--fg-muted)] flex items-start gap-2">
+									<Lightbulb size={14} className="text-[color:var(--accent)] flex-shrink-0 mt-0.5" />
+									<span><strong>Tip:</strong> For automatic deployments, consider using GitHub Actions to rebuild your site whenever you push changes. Check out the{' '}
+										<a
+											href="https://github.com/marketplace/actions/deploy-to-github-pages"
+											target="_blank"
+											rel="noopener noreferrer"
+											className="text-[color:var(--accent)] hover:underline"
+											onClick={(e) => {
+												e.preventDefault();
+												(window as any).api?.openExternal?.({ url: 'https://github.com/marketplace/actions/deploy-to-github-pages' });
+											}}
+										>
+											Deploy to GitHub Pages action
+										</a>.</span>
+								</p>
+							</div>
+
+							<div className="border-t border-[color:var(--border)] pt-3">
+								<p className="text-sm font-semibold mb-2 flex items-center gap-2">
+									<Rocket size={16} className="text-[color:var(--accent)]" />
+									Quick Deploy (Coming Soon)
+								</p>
+								<p className="text-xs text-[color:var(--fg-muted)] mb-3">
+									We're working on a one-click deployment feature that will automatically push your portfolio to GitHub Pages.
+								</p>
+								<button
+									className="btn btn-accent gap-2"
+									disabled
+									title="Coming soon - automated GitHub Pages deployment"
+								>
+									<Github size={16} />
+									<span>Upload to GitHub Pages</span>
+								</button>
+							</div>
 						</div>
 					</CollapsibleBlock>
 
-					<CollapsibleBlock storageKey="py_deploy_providers_open" title="Hosted Platforms" subtitle={<span className="text-xs text-[color:var(--fg-muted)]">Deploy using services like Vercel or Netlify, which build from your repo.</span>}>
-						<div className="mt-2">
-							<div className="flex items-center gap-2">
-								<button className="btn btn-accent">Deploy to Vercel</button>
-								<button className="btn btn-accent">Deploy to Netlify</button>
+					<CollapsibleBlock storageKey="py_deploy_providers_open" title="Other Hosting Platforms" subtitle={<span className="text-xs text-[color:var(--fg-muted)]">Alternative platforms with automatic deployments from your Git repository.</span>}>
+						<div className="mt-2 space-y-4">
+							<div>
+								<p className="text-sm font-semibold mb-2 flex items-center gap-2">
+									<Rocket size={16} className="text-[color:var(--accent)]" />
+									Recommended Platforms
+								</p>
+								<div className="space-y-3">
+									<div className="border border-[color:var(--border)] rounded-lg p-3">
+										<div className="flex items-center justify-between mb-2">
+											<p className="font-semibold text-sm">Vercel</p>
+											<a
+												href="https://vercel.com"
+												target="_blank"
+												rel="noopener noreferrer"
+												className="btn btn-ghost btn-xs gap-1"
+												onClick={(e) => {
+													e.preventDefault();
+													(window as any).api?.openExternal?.({ url: 'https://vercel.com' });
+												}}
+											>
+												Visit Site <ExternalLink size={12} />
+											</a>
+										</div>
+										<p className="text-xs text-[color:var(--fg-muted)] mb-2">
+											Fast, zero-config deployments with automatic HTTPS and global CDN. Perfect for static sites.
+										</p>
+										<ul className="text-xs space-y-1 list-disc list-inside text-[color:var(--fg-muted)]">
+											<li>Connect your GitHub repository</li>
+											<li>Auto-deploy on every push</li>
+											<li>Free SSL certificate included</li>
+											<li>Custom domains supported</li>
+										</ul>
+										<a
+											href="https://vercel.com/docs"
+											target="_blank"
+											rel="noopener noreferrer"
+											className="text-xs text-[color:var(--accent)] hover:underline mt-2 inline-flex items-center gap-1"
+											onClick={(e) => {
+												e.preventDefault();
+												(window as any).api?.openExternal?.({ url: 'https://vercel.com/docs' });
+											}}
+										>
+											<ExternalLink size={10} /> View Documentation
+										</a>
+									</div>
+
+									<div className="border border-[color:var(--border)] rounded-lg p-3">
+										<div className="flex items-center justify-between mb-2">
+											<p className="font-semibold text-sm">Netlify</p>
+											<a
+												href="https://netlify.com"
+												target="_blank"
+												rel="noopener noreferrer"
+												className="btn btn-ghost btn-xs gap-1"
+												onClick={(e) => {
+													e.preventDefault();
+													(window as any).api?.openExternal?.({ url: 'https://netlify.com' });
+												}}
+											>
+												Visit Site <ExternalLink size={12} />
+											</a>
+										</div>
+										<p className="text-xs text-[color:var(--fg-muted)] mb-2">
+											All-in-one platform for modern web projects with continuous deployment and built-in forms.
+										</p>
+										<ul className="text-xs space-y-1 list-disc list-inside text-[color:var(--fg-muted)]">
+											<li>Drag-and-drop deployment or Git integration</li>
+											<li>Instant cache invalidation</li>
+											<li>Form handling without backend code</li>
+											<li>Free tier includes 100GB bandwidth/month</li>
+										</ul>
+										<a
+											href="https://docs.netlify.com"
+											target="_blank"
+											rel="noopener noreferrer"
+											className="text-xs text-[color:var(--accent)] hover:underline mt-2 inline-flex items-center gap-1"
+											onClick={(e) => {
+												e.preventDefault();
+												(window as any).api?.openExternal?.({ url: 'https://docs.netlify.com' });
+											}}
+										>
+											<ExternalLink size={10} /> View Documentation
+										</a>
+									</div>
+
+									<div className="border border-[color:var(--border)] rounded-lg p-3">
+										<div className="flex items-center justify-between mb-2">
+											<p className="font-semibold text-sm">Cloudflare Pages</p>
+											<a
+												href="https://pages.cloudflare.com"
+												target="_blank"
+												rel="noopener noreferrer"
+												className="btn btn-ghost btn-xs gap-1"
+												onClick={(e) => {
+													e.preventDefault();
+													(window as any).api?.openExternal?.({ url: 'https://pages.cloudflare.com' });
+												}}
+											>
+												Visit Site <ExternalLink size={12} />
+											</a>
+										</div>
+										<p className="text-xs text-[color:var(--fg-muted)] mb-2">
+											JAMstack platform built on Cloudflare's global network with unlimited bandwidth.
+										</p>
+										<ul className="text-xs space-y-1 list-disc list-inside text-[color:var(--fg-muted)]">
+											<li>Unlimited bandwidth on free tier</li>
+											<li>Deploy from GitHub or GitLab</li>
+											<li>Built-in analytics</li>
+											<li>Lightning-fast edge network</li>
+										</ul>
+										<a
+											href="https://developers.cloudflare.com/pages"
+											target="_blank"
+											rel="noopener noreferrer"
+											className="text-xs text-[color:var(--accent)] hover:underline mt-2 inline-flex items-center gap-1"
+											onClick={(e) => {
+												e.preventDefault();
+												(window as any).api?.openExternal?.({ url: 'https://developers.cloudflare.com/pages' });
+											}}
+										>
+											<ExternalLink size={10} /> View Documentation
+										</a>
+									</div>
+								</div>
 							</div>
-							<div className="mt-3 text-xs text-[color:var(--fg-muted)]">Tip: These platforms can build directly from your Git repo and offer continuous deployment on push.</div>
+
+							<div className="border-t border-[color:var(--border)] pt-3">
+								<p className="text-xs text-[color:var(--fg-muted)] flex items-center gap-2">
+									<Lightbulb size={14} className="text-[color:var(--accent)] shrink-0" />
+									<span><strong>Tip:</strong> All these platforms support Git-based workflows. Simply connect your repository and they'll automatically build and deploy your portfolio whenever you push changes.</span>
+								</p>
+							</div>
 						</div>
 					</CollapsibleBlock>
 
-					<CollapsibleBlock storageKey="py_deploy_manual_open" title="Manual Deployment & Tips" subtitle={<span className="text-xs text-[color:var(--fg-muted)]">Instructions for using the exported ZIP or deploying via CLI.</span>}>
-						<div className="mt-2">
-							<div className="text-xs font-mono bg-[color:var(--bg-muted)] p-2 rounded">npm run build:export</div>
-							<div className="mt-2 text-sm">Download the ZIP produced by the Export step, then upload the contents to your host or provider. If you use Git, push the static files to a <code className="font-mono">gh-pages</code> branch or connect your repo to a hosting provider for automatic builds.</div>
-							<div className="mt-2 text-xs text-[color:var(--fg-muted)]">If you're unsure where to host: GitHub Pages, Vercel, Netlify, and many traditional hosts support static sites.</div>
+					<CollapsibleBlock storageKey="py_deploy_manual_open" title="Manual Deployment" subtitle={<span className="text-xs text-[color:var(--fg-muted)]">Deploy your exported files to any web host or server.</span>}>
+						<div className="mt-2 space-y-4">
+							<div>
+								<p className="text-sm font-semibold mb-2 flex items-center gap-2">
+									<Package size={16} className="text-[color:var(--accent)]" />
+									Using the Exported ZIP
+								</p>
+								<ol className="space-y-2 text-sm list-decimal list-inside">
+									<li>Click <strong>Export Portfolio</strong> above to download your site as a ZIP file</li>
+									<li>Extract the ZIP to access your static HTML, CSS, JavaScript, and assets</li>
+									<li>Upload the extracted files to your web host via FTP, SFTP, or your host's file manager</li>
+									<li>Ensure the files are placed in your web root directory (often <code className="font-mono text-xs bg-[color:var(--bg-muted)] px-1 py-0.5 rounded">public_html</code> or <code className="font-mono text-xs bg-[color:var(--bg-muted)] px-1 py-0.5 rounded">www</code>)</li>
+								</ol>
+							</div>
+
+							<div className="border-t border-[color:var(--border)] pt-3">
+								<p className="text-sm font-semibold mb-2 flex items-center gap-2">
+									<Server size={16} className="text-[color:var(--accent)]" />
+									Self-Hosting Options
+								</p>
+								<p className="text-xs text-[color:var(--fg-muted)] mb-2">
+									You can host your portfolio on your own server or VPS. Popular choices include:
+								</p>
+								<ul className="text-xs space-y-1 list-disc list-inside text-[color:var(--fg-muted)]">
+									<li><strong>Traditional Web Hosts:</strong> Bluehost, HostGator, SiteGround (supports static files)</li>
+									<li><strong>VPS Providers:</strong> DigitalOcean, Linode, Vultr (requires server configuration)</li>
+									<li><strong>Static File Servers:</strong> Use Nginx or Apache to serve your files</li>
+								</ul>
+							</div>
+
+							<div className="border-t border-[color:var(--border)] pt-3">
+								<p className="text-xs text-[color:var(--fg-muted)] flex items-center gap-2">
+									<Lightbulb size={14} className="text-[color:var(--accent)] shrink-0" />
+									<span><strong>Note:</strong> Manual deployment requires re-uploading files whenever you make changes. For automatic deployments, consider using one of the platforms above.</span>
+								</p>
+							</div>
 						</div>
 					</CollapsibleBlock>
 				</div>
@@ -699,13 +1004,14 @@ export default function DeployPage() {
 	);
 }
 
-function StatusBadge({ status, large }: { status: "online" | "offline" | "unknown"; large?: boolean }) {
-	const size = large ? "w-5 h-5" : "w-3 h-3";
-	const common = `rounded-full ${size} inline-block`;
-	if (status === "online") return <span className={`${common} bg-[color:var(--success)]`} aria-label="online" />;
-	if (status === "offline") return <span className={`${common} bg-[color:var(--danger)]`} aria-label="offline" />;
-	return <span className={`${common} bg-[color:var(--fg-muted)]`} aria-label="unknown" />;
-}
+// StatusBadge component - reserved for future use
+// function StatusBadge({ status, large }: { status: "online" | "offline" | "unknown"; large?: boolean }) {
+// 	const size = large ? "w-5 h-5" : "w-3 h-3";
+// 	const common = `rounded-full ${size} inline-block`;
+// 	if (status === "online") return <span className={`${common} bg-[color:var(--success)]`} aria-label="online" />;
+// 	if (status === "offline") return <span className={`${common} bg-[color:var(--danger)]`} aria-label="offline" />;
+// 	return <span className={`${common} bg-[color:var(--fg-muted)]`} aria-label="unknown" />;
+// }
 
 function CollapsibleBlock({ storageKey, title, subtitle, children }: { storageKey: string; title: React.ReactNode; subtitle?: React.ReactNode; children?: React.ReactNode }) {
 	const [open, setOpen] = useState<boolean>(() => {
@@ -726,7 +1032,7 @@ function CollapsibleBlock({ storageKey, title, subtitle, children }: { storageKe
 				<div />
 			</button>
 			{open && (
-				<div className="p-4 border-t border-[color:var(--border)]">
+				<div className="p-4 border-t border-[color:var(--border)] animate-[py-fade-in_0.2s_ease-out]">
 					{children}
 				</div>
 			)}

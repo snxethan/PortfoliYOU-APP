@@ -139,6 +139,8 @@ function FileVideoPlayer({
     loop,
     playsInline,
     title,
+    ariaLabel,
+    ariaDescription,
 }: {
     src: string;
     poster?: string;
@@ -149,6 +151,8 @@ function FileVideoPlayer({
     loop: boolean;
     playsInline: boolean;
     title?: string;
+    ariaLabel?: string;
+    ariaDescription?: string;
 }) {
     const { url, resolving } = useResolvedAssetUrl(src);
     const posterState = useResolvedAssetUrl((poster || '').trim());
@@ -174,6 +178,8 @@ function FileVideoPlayer({
             preload="metadata"
             style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block', background: '#000' }}
             title={title || 'Embedded video'}
+            aria-label={ariaLabel || title || 'Embedded video'}
+            aria-description={ariaDescription}
             onError={() => setErrored(true)}
         />
     );
@@ -189,6 +195,8 @@ function YouTubeEmbed({
     playsInline,
     allowFullscreen,
     title,
+    ariaLabel,
+    ariaDescription,
 }: {
     src: string;
     fallbackMessage: string;
@@ -199,6 +207,8 @@ function YouTubeEmbed({
     playsInline: boolean;
     allowFullscreen: boolean;
     title?: string;
+    ariaLabel?: string;
+    ariaDescription?: string;
 }) {
     const videoId = useMemo(() => extractYouTubeId(src), [src]);
     if (!videoId) {
@@ -209,6 +219,8 @@ function YouTubeEmbed({
         <iframe
             src={embedUrl}
             title={title || 'Embedded video'}
+            aria-label={ariaLabel || title || 'Embedded video'}
+            aria-description={ariaDescription}
             allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
             allowFullScreen={allowFullscreen}
             loading="lazy"
@@ -283,6 +295,8 @@ const def: WidgetDefinition<Props> = {
                         playsInline={playsInline}
                         allowFullscreen={allowFullscreen}
                         title={safe.title}
+                        ariaLabel={safe.ariaLabel}
+                        ariaDescription={safe.ariaDescription}
                     />
                 </div>
             );
@@ -301,6 +315,8 @@ const def: WidgetDefinition<Props> = {
                         loop={Boolean(safe.loop)}
                         playsInline={playsInline}
                         title={safe.title}
+                        ariaLabel={safe.ariaLabel}
+                        ariaDescription={safe.ariaDescription}
                     />
                 </div>
             );
@@ -339,6 +355,14 @@ const def: WidgetDefinition<Props> = {
             return safe || undefined;
         }),
         title: z.string().optional().transform((value) => sanitizeText(value, VIDEO_BASE_TITLE, 120)),
+        ariaLabel: z.string().max(160).optional().transform((value: string | undefined) => {
+            const safe = sanitizeText(value, '', 160);
+            return safe || undefined;
+        }),
+        ariaDescription: z.string().max(320).optional().transform((value: string | undefined) => {
+            const safe = sanitizeText(value, '', 320);
+            return safe || undefined;
+        }),
         autoplay: z.boolean().optional(),
         muted: z.boolean().optional(),
         loop: z.boolean().optional(),

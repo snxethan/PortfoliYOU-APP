@@ -49,6 +49,14 @@
 		--body-font: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
 		--font-scale: 1;
 		--color-scheme: dark;
+		/* Portfolio island tokens */
+		--island-radius: 1.6rem;
+		--island-section-radius: 1.2rem;
+		--island-elevation: 0 32px 70px -45px rgba(2, 6, 23, 0.9);
+		--island-section-shadow: 0 18px 45px -30px rgba(2, 6, 23, 0.65);
+		--island-motion-fast: clamp(120ms, 0.45vw, 210ms);
+		--island-motion-medium: clamp(170ms, 0.6vw, 300ms);
+		--island-motion-slow: clamp(230ms, 0.75vw, 420ms);
 	}
 
 	/* Light mode: white background, cyan highlights (accent becomes cyan) */
@@ -241,7 +249,9 @@
 		animation: py-flash-double 1.4s ease-in-out 1 forwards;
 		will-change: box-shadow;
 		/* Subtle accent border during pulse to match new styling */
-		border-color: color-mix(in oklab, var(--accent) 40%, var(--border));
+		border-color: color-mix(in oklab, var(--accent) 40%, var(--border)) !important;
+		position: relative;
+		z-index: 10;
 	}
 
 	/* Darker, clearer hover background for rows */
@@ -452,6 +462,109 @@
 	}
 }
 
+/* ==============================================
+   Animation Keyframes
+   ============================================== */
+
+/* Smooth slide-in from right (dashboards) */
+@keyframes py-slide-in-right {
+	from {
+		transform: translateX(100%);
+		opacity: 0;
+	}
+
+	to {
+		transform: translateX(0);
+		opacity: 1;
+	}
+}
+
+/* Smooth slide-out to right (dashboards) */
+@keyframes py-slide-out-right {
+	from {
+		transform: translateX(0);
+		opacity: 1;
+	}
+
+	to {
+		transform: translateX(100%);
+		opacity: 0;
+	}
+}
+
+/* Pop animation (scale + fade) */
+@keyframes py-pop {
+	0% {
+		transform: scale(0.85);
+		opacity: 0;
+	}
+
+	50% {
+		transform: scale(1.05);
+	}
+
+	100% {
+		transform: scale(1);
+		opacity: 1;
+	}
+}
+
+/* Pop-out animation (reverse pop) */
+@keyframes py-pop-out {
+	0% {
+		transform: scale(1);
+		opacity: 1;
+	}
+
+	50% {
+		transform: scale(1.05);
+	}
+
+	100% {
+		transform: scale(0.85);
+		opacity: 0;
+	}
+}
+
+/* Gentle bounce for pin/unpin */
+@keyframes py-bounce {
+
+	0%,
+	100% {
+		transform: scale(1);
+	}
+
+	50% {
+		transform: scale(1.15);
+	}
+}
+
+/* Smooth expand (collapsibles) */
+@keyframes py-expand {
+	from {
+		max-height: 0;
+		opacity: 0;
+	}
+
+	to {
+		max-height: 1000px;
+		opacity: 1;
+	}
+}
+
+/* Smooth collapse (collapsibles) */
+@keyframes py-collapse {
+	from {
+		max-height: 1000px;
+		opacity: 1;
+	}
+
+	to {
+		max-height: 0;
+		opacity: 0;
+	}
+}
+
 /* Modal header sticky helper: keeps header visible when modal content scrolls */
 .modal-header-sticky {
 	position: sticky;
@@ -487,16 +600,22 @@
 	gap: 8px;
 	padding: 0 12px;
 	border-bottom: 1px solid color-mix(in oklab, var(--border) 90%, transparent);
-	background: color-mix(in oklab, var(--surface) 94%, transparent);
+	background: var(--surface);
 	z-index: 200000;
 	box-sizing: border-box;
 }
 
 .window-frame__left {
+	-webkit-app-region: no-drag;
 	min-width: 56px;
 	display: flex;
 	align-items: center;
-	gap: 8px;
+	gap: 0;
+}
+
+.window-frame__left .window-control {
+	width: 44px;
+	height: 100%;
 }
 
 
@@ -587,6 +706,652 @@
 	color: #fff;
 }
 
+/* Portfolio island scaffolding ensures responsive behavior without shifting the primary styling. */
+.portfolio-island {
+	width: 100%;
+	min-width: min(320px, 100%);
+}
+
+.portfolio-island__surface {
+	min-height: 220px;
+	max-width: 100%;
+	overflow-x: hidden;
+	overflow-y: hidden;
+	border-radius: 1.6rem;
+	position: relative;
+	isolation: isolate;
+	background: color-mix(in oklab, var(--surface) 98%, transparent);
+	box-shadow: var(--island-section-shadow, 0 18px 45px -28px rgba(15, 23, 42, 0.4));
+	transition: padding var(--island-motion-medium, 200ms) ease, box-shadow var(--island-motion-medium, 200ms) ease;
+}
+
+.portfolio-island__surface--compact {
+	min-height: 190px;
+	border-radius: 1.2rem;
+}
+
+.portfolio-island__row {
+	width: 100%;
+}
+
+.portfolio-island__project-card {
+	min-width: min(360px, 100%);
+}
+
+
+.portfolio-island__project-row {
+	width: 100%;
+}
+
+.portfolio-island__project-button {
+	width: 100%;
+	min-height: 3.2rem;
+	min-width: 0;
+	display: flex;
+	flex-direction: column;
+	align-items: stretch;
+	justify-content: flex-start;
+	gap: clamp(0.5rem, 1vw, 0.75rem);
+	overflow: visible;
+}
+
+.portfolio-island__project-meta {
+	min-width: 0;
+	flex: 1 1 auto;
+	word-wrap: break-word;
+	overflow-wrap: break-word;
+}
+
+.portfolio-island__project-actions {
+	display: flex;
+	align-items: center;
+	gap: 0.35rem;
+	flex-wrap: wrap;
+	justify-content: flex-start;
+	flex: 1 1 auto;
+	min-width: 0;
+}
+
+.portfolio-island__badge {
+	position: absolute;
+	top: 0.15rem;
+	right: 0.15rem;
+	min-width: 1.15rem;
+	height: 1.15rem;
+	border-radius: 999px;
+	font-size: 0.6rem;
+	font-weight: 700;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	background: color-mix(in oklab, var(--accent) 92%, transparent);
+	color: #050505;
+	border: 1px solid color-mix(in oklab, var(--accent-700, var(--accent)) 80%, transparent);
+	padding: 0;
+}
+
+@media (max-width: 900px) {
+	.portfolio-island__project-button {
+		flex-wrap: wrap;
+	}
+
+	.portfolio-island__project-actions {
+		justify-content: flex-start;
+	}
+}
+
+.portfolio-workspace-card {
+	display: flex;
+	flex-direction: column;
+	gap: clamp(1.25rem, 2vw, 2rem);
+	padding: clamp(1.5rem, 2vw, 2rem);
+	overflow-x: hidden;
+	overflow-y: auto;
+}
+
+.home-content {
+	width: 100%;
+	max-width: min(1100px, calc(100vw - clamp(2rem, 4vw, 3.5rem)));
+	margin: 0 auto;
+	box-sizing: border-box;
+	padding: clamp(1rem, 1.8vw, 1.75rem);
+}
+
+.portfolio-workspace {
+	display: flex;
+	flex-direction: column;
+	gap: clamp(1rem, 1.5vw, 1.5rem);
+	width: 100%;
+	min-width: min(320px, 100%);
+	overflow-x: hidden;
+}
+
+.portfolio-workspace>* {
+	min-width: 0;
+}
+
+.portfolio-workspace-list {
+	display: flex;
+	flex-direction: column;
+	gap: 1rem;
+	width: 100%;
+	min-width: 0;
+}
+
+.portfolio-workspace-list__header {
+	display: flex;
+	justify-content: space-between;
+	align-items: flex-start;
+	flex-wrap: wrap;
+	gap: 0.75rem;
+	width: 100%;
+}
+
+.portfolio-workspace-list__header>div {
+	flex: 1 1 220px;
+	min-width: 0;
+}
+
+.portfolio-workspace-list__count {
+	flex: 0 0 auto;
+	margin-left: auto;
+	text-align: right;
+	min-width: 0;
+}
+
+.portfolio-workspace-list__item {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 1rem;
+	flex-wrap: wrap;
+	width: 100%;
+	min-width: 0;
+	overflow-x: hidden;
+}
+
+.portfolio-workspace-list__item-info {
+	flex: 1 1 200px;
+	min-width: 0;
+	padding-right: 0.5rem;
+}
+
+.portfolio-workspace-list__item-actions {
+	display: flex;
+	gap: 0.5rem;
+	flex-wrap: wrap;
+	flex: 0 1 320px;
+	min-width: 0;
+	align-items: center;
+	justify-content: flex-end;
+	align-content: flex-start;
+}
+
+.portfolio-workspace-list__item-actions .btn {
+	width: 2.5rem;
+	height: 2.5rem;
+	min-width: 2.5rem;
+	padding: 0;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+}
+
+.account-dashboard {
+	display: flex;
+	flex-direction: column;
+	gap: 1.25rem;
+	width: 100%;
+	position: relative;
+	min-width: min(320px, 100%);
+	overflow-x: hidden;
+}
+
+.account-dashboard__header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 0.75rem;
+	flex-wrap: wrap;
+}
+
+.account-dashboard__identity {
+	display: flex;
+	flex-direction: column;
+	flex: 1 1 200px;
+	min-width: 0;
+}
+
+.account-dashboard__identity p {
+	margin: 0;
+}
+
+.account-dashboard__actions {
+	display: flex;
+	flex: 0 0 auto;
+	min-width: 0;
+}
+
+.account-dashboard__settings-btn {
+	justify-content: center;
+}
+
+.account-dashboard__stats {
+	display: flex;
+	gap: 1rem;
+	flex-wrap: wrap;
+	width: 100%;
+	min-width: 0;
+}
+
+.account-dashboard__stat {
+	flex: 1 1 240px;
+	min-width: 0;
+	padding: 1rem;
+	border-radius: 1rem;
+	border: 1px solid color-mix(in oklab, var(--border) 95%, transparent);
+	background: color-mix(in oklab, var(--muted) 45%, transparent);
+}
+
+.account-dashboard__stat>div {
+	margin: 0;
+}
+
+@media (max-width: 640px) {
+	.account-dashboard__actions {
+		width: 100%;
+		justify-content: flex-end;
+	}
+
+	.account-dashboard__settings-btn {
+		align-self: flex-end;
+	}
+}
+
+.quickstart-row {
+	display: flex;
+	justify-content: center;
+	align-items: center;
+	gap: 1rem;
+	flex-wrap: wrap;
+}
+
+.portfolio-workspace-card__identity {
+	display: flex;
+	flex-direction: row;
+	align-items: center;
+	justify-content: flex-start;
+	gap: clamp(0.75rem, 1.5vw, 1.5rem);
+	flex: 1 1 auto;
+	min-width: 0;
+	width: 100%;
+}
+
+.portfolio-workspace-card__header {
+	display: flex;
+	flex-direction: row;
+	align-items: flex-start;
+	justify-content: space-between;
+	gap: clamp(1rem, 2vw, 2rem);
+	flex-wrap: wrap;
+	width: 100%;
+}
+
+
+.portfolio-workspace-card__logo-block {
+	flex: 0 0 auto;
+	width: clamp(64px, 10vw, 96px);
+	height: clamp(64px, 10vw, 96px);
+	display: flex;
+	align-items: center;
+	justify-content: center;
+}
+
+.portfolio-workspace-card__logo {
+	width: 100%;
+	height: 100%;
+	display: block;
+	object-fit: cover;
+}
+
+
+.portfolio-workspace-card__text {
+	display: flex;
+	flex: 1 1 220px;
+	flex-direction: column;
+	gap: 0.25rem;
+	min-width: 0;
+}
+
+.portfolio-workspace-card__text h1 {
+	font-size: clamp(1.5rem, 2vw, 2.4rem);
+	line-height: 1.25;
+	white-space: normal;
+	word-break: break-word;
+}
+
+.portfolio-workspace-card__text h1,
+.portfolio-workspace-card__text p {
+	margin: 0;
+	word-break: break-word;
+}
+
+.portfolio-workspace-card__tabs {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.5rem;
+	justify-content: flex-end;
+	align-items: center;
+	width: auto;
+	min-width: 0;
+	flex: 1 1 260px;
+}
+
+.portfolio-workspace-card__tab {
+	flex: 0 1 auto;
+	min-width: 140px;
+	text-align: center;
+}
+
+@media (max-width: 640px) {
+	.portfolio-workspace-card__tabs {
+		margin-top: 0.5rem;
+	}
+
+	.portfolio-workspace-card__tab {
+		flex: 1 1 100%;
+		min-width: 0;
+	}
+
+	.quickstart-row {
+		flex-direction: column;
+		align-items: stretch;
+	}
+
+	.quickstart-row .btn {
+		width: 100%;
+	}
+
+	.portfolio-workspace-list__item {
+		flex-direction: column;
+		align-items: flex-start;
+		gap: 0.75rem;
+	}
+
+	.portfolio-workspace-list__item-actions {
+		align-self: flex-end;
+		width: 100%;
+		justify-content: flex-end;
+	}
+}
+
+.portfolio-workspace-card__cta {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	justify-content: space-between;
+	gap: 0.75rem;
+	width: 100%;
+	min-width: 0;
+	border-top: 1px dashed color-mix(in oklab, var(--border) 90%, transparent);
+	padding-top: clamp(1rem, 1.5vw, 1.5rem);
+}
+
+.portfolio-workspace-card__desc {
+	flex: 1 1 240px;
+	min-width: 0;
+	font-size: 0.95rem;
+	line-height: 1.6;
+	color: color-mix(in oklab, var(--fg-muted) 92%, transparent);
+}
+
+.portfolio-workspace-card__bell {
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+}
+
+@media (max-width: 900px) {
+	.portfolio-workspace-card__header {
+		flex-direction: column;
+		align-items: flex-start;
+		gap: 1.5rem;
+	}
+
+	.portfolio-workspace-card {
+		gap: 1.25rem;
+	}
+
+	.portfolio-workspace-card__identity {
+		flex-direction: column;
+		align-items: flex-start;
+	}
+
+	.portfolio-workspace-card__tabs {
+		width: 100%;
+		flex: 1 1 auto;
+		justify-content: flex-start;
+	}
+}
+
+@media (max-width: 600px) {
+	.portfolio-workspace-card {
+		padding: 1.25rem;
+		gap: 1rem;
+	}
+
+	.portfolio-workspace-card__header {
+		gap: 1rem;
+	}
+
+	.portfolio-workspace-card__identity {
+		gap: 0.75rem;
+	}
+
+	.portfolio-workspace-card__logo-block {
+		align-self: flex-start;
+		width: 60px;
+		height: 60px;
+	}
+
+	.portfolio-workspace-card__text {
+		min-width: 0;
+	}
+
+	.portfolio-workspace-card__text h1 {
+		font-size: clamp(1.35rem, 6vw, 1.75rem);
+	}
+
+	.portfolio-workspace-card__text p,
+	.portfolio-workspace-card__desc {
+		font-size: 0.9rem;
+	}
+
+	.portfolio-workspace-card__tabs {
+		flex-direction: column;
+		width: 100%;
+		margin-top: 0.25rem;
+	}
+
+	.portfolio-workspace-card__tab {
+		width: 100%;
+	}
+
+	.portfolio-workspace-card__cta {
+		flex-direction: column;
+		align-items: flex-start;
+		gap: 0.5rem;
+	}
+
+	.portfolio-workspace-card__bell {
+		align-self: flex-end;
+		justify-content: flex-end;
+		width: 100%;
+	}
+}
+
+.portfolio-island__toolbar {
+	min-width: min(280px, 100%);
+}
+
+.portfolio-island__segment {
+	min-width: 0;
+	flex: 1 1 260px;
+	width: 100%;
+	display: flex;
+	flex-direction: column;
+	align-items: stretch;
+	gap: 0.35rem;
+	padding: 0.85rem 0.95rem;
+	border-radius: 1.35rem;
+	background-clip: padding-box;
+	background: color-mix(in oklab, var(--surface) 92%, transparent);
+	box-shadow: none;
+}
+
+.portfolio-island__segment-label {
+	flex: 0 0 auto;
+	display: flex;
+	align-items: center;
+	width: 100%;
+}
+
+.portfolio-island__segment-actions {
+	flex: 1 1 auto;
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.35rem;
+	margin-left: 0;
+	align-items: center;
+	width: 100%;
+	min-width: 0;
+}
+
+.portfolio-island__segment-action {
+	min-height: 2.1rem;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 0.3rem;
+	width: auto;
+	flex: 0 1 auto;
+	min-width: 0;
+	max-width: 100%;
+}
+
+.portfolio-island__segment--compact {
+	padding: 0.65rem 0.85rem;
+	border-radius: 1rem;
+	gap: 0.35rem;
+}
+
+.portfolio-island__segment--compact .portfolio-island__segment-actions {
+	gap: 0.25rem;
+}
+
+.portfolio-island__segment--compact .portfolio-island__segment-action.btn {
+	padding: 0.35rem 0.5rem;
+	font-size: 0.85rem;
+}
+
+.portfolio-island__segment-action.btn {
+	padding: 0.45rem 0.65rem;
+	font-size: 0.92rem;
+}
+
+
+.portfolio-island__status-chip {
+	min-width: 0;
+}
+
+.portfolio-island__controls-slider {
+	background: color-mix(in oklab, var(--surface) 90%, transparent);
+	border-radius: 0.75rem;
+	max-width: 100%;
+	width: 100%;
+	padding: 0.2rem 0.45rem;
+	border: 1px solid color-mix(in oklab, var(--border) 75%, transparent);
+	overflow: hidden;
+}
+
+.portfolio-island__controls-slider .accent-range {
+	flex: 1 1 auto;
+	min-width: 0;
+	max-width: 100%;
+}
+
+@media (max-width: 960px) {
+	.portfolio-island__segment-actions {
+		justify-content: flex-start;
+	}
+
+	.portfolio-island__segment-action {
+		max-width: 100%;
+	}
+}
+
+@media (max-width: 640px) {
+	.portfolio-island__row {
+		flex-direction: column;
+	}
+
+	.portfolio-island__surface {
+		max-height: 85vh;
+	}
+
+	.portfolio-island__status-chip {
+		min-width: 0;
+	}
+}
+
+@media (max-width: 700px) {
+	.portfolio-island__surface {
+		padding: 2.5rem 1rem 4.75rem 1rem;
+	}
+
+	.portfolio-island__row {
+		gap: 0.75rem;
+	}
+
+	.portfolio-island__segment {
+		padding: 0.7rem 0.9rem;
+		border-radius: 0.85rem;
+		gap: 0.45rem;
+	}
+
+	.portfolio-island__segment-label span {
+		font-size: 0.65rem;
+		letter-spacing: 0.25em;
+	}
+
+	.portfolio-island__segment-actions {
+		gap: 0.35rem;
+	}
+
+	.portfolio-island__segment-action {
+		width: 100%;
+		justify-content: center;
+	}
+
+	.portfolio-island__segment-action.btn {
+		padding: 0.5rem 0.65rem;
+	}
+
+	.portfolio-island__project-button {
+		flex-direction: column;
+		align-items: flex-start;
+		gap: 0.65rem;
+	}
+
+	.portfolio-island__project-actions {
+		width: 100%;
+		margin-left: 0;
+		justify-content: flex-start;
+		flex-wrap: wrap;
+	}
+
+}
+
 /* Portfolio island: use CSS variable --island-opacity (0.25 - 1) to control background transparency
    Keep inner UI elements fully opaque while allowing page content beneath to show through. */
 .portfolio-island .surface {
@@ -656,4 +1421,139 @@
 	background: var(--accent);
 	border: 2px solid var(--surface);
 	box-shadow: 0 2px 4px rgba(0, 0, 0, 0.25);
+}
+
+/* Contact widget preview styling */
+.widget-contact {
+	display: flex;
+	width: 100%;
+	height: 100%;
+	min-height: 0;
+}
+
+.widget-contact .contact-card {
+	width: 100%;
+	height: 100%;
+	display: flex;
+	flex-direction: column;
+	gap: 0.75rem;
+	padding: 1.25rem;
+	border: 1px solid var(--border, #d1d5db);
+	border-radius: 1.125rem;
+	background: var(--contact-card-bg, var(--widget-bg, var(--surface)));
+	min-height: 0;
+	overflow: hidden;
+	box-shadow: 0 18px 30px -24px rgba(2, 6, 23, 0.6);
+}
+
+.widget-contact .contact-heading {
+	margin: 0;
+	font-size: 1rem;
+	font-weight: 600;
+	color: var(--fg, #0f172a);
+}
+
+.widget-contact .contact-description {
+	margin: 0;
+	font-size: 0.85rem;
+	color: var(--fg-muted, #475569);
+}
+
+.widget-contact .contact-form {
+	display: flex;
+	flex-direction: column;
+	gap: 0.75rem;
+	width: 100%;
+	flex: 1;
+	min-height: 0;
+	overflow: auto;
+}
+
+.widget-contact .contact-field label {
+	display: block;
+	font-size: 0.75rem;
+	font-weight: 600;
+	margin-bottom: 0.25rem;
+	color: var(--fg, #0f172a);
+}
+
+.widget-contact .contact-field input,
+.widget-contact .contact-field textarea {
+	width: 100%;
+	border: 1px solid color-mix(in oklab, var(--border, #d1d5db) 90%, transparent);
+	border-radius: 0.625rem;
+	padding: 0.65rem 0.75rem;
+	background: color-mix(in oklab, var(--surface, #ffffff) 95%, transparent);
+	color: var(--fg, #0f172a);
+	font: inherit;
+	transition: border-color 0.12s ease, box-shadow 0.12s ease;
+}
+
+.widget-contact .contact-field textarea {
+	min-height: 6rem;
+	resize: vertical;
+}
+
+.widget-contact .contact-field input:focus-visible,
+.widget-contact .contact-field textarea:focus-visible {
+	outline: none;
+	border-color: var(--accent, #2563eb);
+	box-shadow: 0 0 0 2px color-mix(in oklab, var(--accent, #2563eb) 35%, transparent);
+}
+
+.widget-contact .contact-field [aria-invalid='true'] {
+	border-color: #f87171 !important;
+	box-shadow: 0 0 0 1px #f87171 inset;
+}
+
+.widget-contact .contact-error {
+	min-height: 0.9rem;
+	font-size: 0.7rem;
+	color: #f87171;
+}
+
+.widget-contact .contact-actions {
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+}
+
+.widget-contact .contact-actions button {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	padding: 0.6rem 1.15rem;
+	border-radius: 999px;
+	border: 2px solid transparent;
+	font-weight: 600;
+	font-size: 0.9rem;
+	background: var(--accent, #2563eb);
+	color: var(--widget-fg, #ffffff);
+	cursor: pointer;
+	transition: transform 0.14s ease, box-shadow 0.14s ease;
+}
+
+.widget-contact .contact-actions button:hover:not(:disabled) {
+	transform: translateY(-1px);
+	box-shadow: 0 12px 24px -12px rgba(2, 6, 23, 0.45);
+}
+
+.widget-contact .contact-actions button:focus-visible {
+	outline: none;
+	box-shadow: 0 0 0 2px color-mix(in oklab, var(--accent, #2563eb) 40%, transparent);
+}
+
+.widget-contact .contact-actions button:disabled {
+	opacity: 0.5;
+	cursor: not-allowed;
+}
+
+.widget-contact .contact-status {
+	font-size: 0.75rem;
+	color: var(--fg-muted, #475569);
+	display: none;
+}
+
+.widget-contact .contact-status.is-visible {
+	display: block;
 }

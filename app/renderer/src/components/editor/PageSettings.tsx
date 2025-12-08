@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from "react";
-import { Plus, Edit3, Trash2, Settings, Droplet, RotateCcw, Palette } from 'lucide-react';
+import { Plus, Edit3, Trash2, Settings, RotateCcw, Palette, Copy } from 'lucide-react';
 
 const HEX_COLOR_RE = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i;
 const DEFAULT_PAGE_BG = '#ffffff';
@@ -11,7 +11,8 @@ export type PageSettingsProps = {
     currentPageId: string | null;
     onSelectPage: (id: string | null) => void;
     onCreatePage: () => void;
-    onRenameInline: (newName: string) => void;
+    onDuplicatePage: () => void;
+    onRenameInline: (newName: string) => boolean;
     onDeleteCurrentPage: () => void;
     onOpenSettings: () => void;
     pageBackground?: string | null;
@@ -27,6 +28,7 @@ export default function PageSettings({
     currentPageId,
     onSelectPage,
     onCreatePage,
+    onDuplicatePage,
     onRenameInline,
     onDeleteCurrentPage,
     onOpenSettings,
@@ -37,6 +39,7 @@ export default function PageSettings({
 }: PageSettingsProps) {
     const [editing, setEditing] = useState<boolean>(false);
     const [draft, setDraft] = useState<string>('');
+    const [error, setError] = useState<string | null>(null);
     const fallbackTheme = useMemo(() => {
         const raw = (themeBackground || '').trim();
         return HEX_COLOR_RE.test(raw) ? raw : DEFAULT_PAGE_BG;
@@ -47,34 +50,35 @@ export default function PageSettings({
         return fallbackTheme;
     }, [pageBackground, fallbackTheme]);
     const hasCustomBackground = Boolean((pageBackground || '').trim());
-    const groupClass = "flex items-center gap-2 md:gap-3 px-2.5 py-1.5 rounded-lg border border-[color:var(--border)] bg-[color:var(--surface)]/70 shadow-sm";
     const groupLabelClass = "text-[10px] uppercase tracking-wide text-[color:var(--fg-muted)]";
-    const panelContentClass = "w-full text-[12px]";
-    const panelLabelClass = "text-[10px] uppercase tracking-wide text-[color:var(--fg-muted)] w-28";
-    const inputClass = "input px-2 py-1 text-sm w-auto md:w-auto min-w-0 md:min-w-[160px] max-w-[10rem]";
+    const baseCardClass = "flex flex-col gap-2 px-3 py-2 rounded-xl border border-[color:var(--border)] bg-[color:var(--surface)]/70 shadow-sm min-w-0 w-full overflow-x-hidden";
+    const selectClass = "input px-2 py-1 text-sm w-auto max-w-full flex-shrink min-w-0";
+    const inputClass = "input flex-1 min-w-0 px-2 py-1 text-sm w-full max-w-full";
+    const hexInputClass = "input px-2 py-1 text-sm w-24 flex-shrink-0";
+    const rowClass = "inline-flex items-center gap-2 flex-wrap";
 
     return (
-        <div className="flex flex-wrap items-stretch gap-2 md:gap-3">
-            <div className={`${groupClass}`}>
-                <span className={groupLabelClass}>appearance</span>
-                <div className="flex items-start gap-2 ml-2 flex-nowrap">
+        <div className="grid w-full gap-4 min-w-0" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 280px), 1fr))' }}>
+            <div className={baseCardClass}>
+                <span className={groupLabelClass}>Appearance</span>
+                <div className="flex items-center gap-2 flex-wrap">
                     <input
                         type="color"
-                        className="w-9 h-9 rounded border border-[color:var(--border)]"
+                        className="w-9 h-9 rounded border border-[color:var(--border)] flex-shrink-0"
                         value={quickSwatch}
                         onChange={(e) => onQuickBackgroundChange(e.target.value)}
                         disabled={!currentPageId}
                         aria-label="Pick page background color"
                     />
                     <input
-                        className={inputClass}
+                        className={hexInputClass}
                         value={((pageBackground || '').trim() || (quickSwatch || '')).toUpperCase()}
                         onChange={(e) => onQuickBackgroundChange(e.target.value)}
                         disabled={!currentPageId}
                     />
                     {hasCustomBackground && (
                         <button
-                            className="btn btn-ghost btn-xs"
+                            className="btn btn-ghost btn-xs flex-shrink-0"
                             type="button"
                             title="Reset to theme"
                             aria-label="Reset page background to theme"
@@ -85,19 +89,25 @@ export default function PageSettings({
                         </button>
                     )}
                     {onOpenSettings && (
-                        <button className="btn btn-ghost btn-xs ml-2 inline-flex items-center gap-2" type="button" title="Page settings" aria-label="Open page settings" onClick={() => onOpenSettings?.()} disabled={!currentPageId}>
+                        <button className="btn btn-ghost btn-xs inline-flex items-center gap-2 flex-shrink-0" type="button" title="Page settings" aria-label="Open page settings" onClick={() => onOpenSettings?.()} disabled={!currentPageId}>
                             <Settings size={14} />
                             <span className="text-sm">Page Settings</span>
+                        </button>
+                    )}
+                    {onOpenThemeSettings && (
+                        <button className="btn btn-ghost btn-xs inline-flex items-center gap-2 flex-shrink-0" type="button" title="Theme settings" aria-label="Open theme settings" onClick={onOpenThemeSettings}>
+                            <Palette size={14} />
+                            <span className="text-sm">Theme</span>
                         </button>
                     )}
                 </div>
             </div>
 
-            <div className={`${groupClass}`}>
-                <span className={groupLabelClass}>navigation</span>
+            <div className={baseCardClass}>
+                <span className={groupLabelClass}>Navigation</span>
                 {!editing ? (
-                    <div className="flex items-start gap-2 ml-2 flex-nowrap">
-                        <button className="btn btn-ghost btn-xs" title="Rename page" aria-label="Rename page" onClick={() => {
+                    <div className="flex items-center gap-2 flex-wrap">
+                        <button className="btn btn-ghost btn-xs flex-shrink-0" title="Rename page" aria-label="Rename page" onClick={() => {
                             if (!currentPageId) return;
                             const title = pages[currentPageId]?.title || 'Untitled';
                             setDraft(title);
@@ -106,7 +116,7 @@ export default function PageSettings({
                             <Edit3 size={14} />
                         </button>
                         <select
-                            className={inputClass}
+                            className={selectClass}
                             value={currentPageId || ''}
                             onChange={(e) => {
                                 const id = e.target.value || null;
@@ -122,37 +132,50 @@ export default function PageSettings({
                                 );
                             })}
                         </select>
-                        <button className="btn btn-ghost btn-xs" title="New page" aria-label="New page" onClick={() => onCreatePage()}>
+                        <button className="btn btn-ghost btn-xs flex items-center gap-2 flex-shrink-0" title="New page" aria-label="New page" onClick={() => onCreatePage()}>
                             <Plus size={14} />
+                            <span className="text-xs">New page</span>
                         </button>
-                        <button className="btn btn-ghost btn-xs text-red-500 border border-red-500/40 hover:bg-red-500/10" title="Delete current page" aria-label="Delete page" onClick={() => onDeleteCurrentPage()} disabled={!currentPageId}>
+                        <button className="btn btn-ghost btn-xs flex items-center gap-2 flex-shrink-0" title="Duplicate page" aria-label="Duplicate page" onClick={() => onDuplicatePage()} disabled={!currentPageId}>
+                            <Copy size={14} />
+                            <span className="text-xs">Duplicate</span>
+                        </button>
+                        <button className="btn btn-ghost btn-xs text-red-500 border border-red-500/40 hover:bg-red-500/10 flex items-center gap-2 flex-shrink-0" title="Delete current page" aria-label="Delete page" onClick={() => onDeleteCurrentPage()} disabled={!currentPageId}>
                             <Trash2 size={14} />
+                            <span className="text-xs">Delete</span>
                         </button>
                     </div>
                 ) : (
-                    <div className="flex items-start gap-2 ml-2 flex-nowrap">
-                        <input
-                            className={inputClass}
-                            value={draft}
-                            onChange={(e) => setDraft(e.target.value)}
-                            onKeyDown={(e) => {
-                                if (e.key === 'Enter') {
-                                    const t = (draft || '').trim();
-                                    if (t) { onRenameInline(t); }
-                                    setEditing(false);
-                                }
-                                if (e.key === 'Escape') setEditing(false);
-                            }}
-                            autoFocus
-                            placeholder="Page name"
-                        />
-                        <button className="btn btn-accent btn-xs" onClick={() => { const t = (draft || '').trim(); if (t) { onRenameInline(t); } setEditing(false); }}>
-                            <span className="text-xs">Save</span>
-                        </button>
-                        <button className="btn btn-outline btn-xs" onClick={() => setEditing(false)}>
-                            <span className="text-xs">Cancel</span>
-                        </button>
-                    </div>
+                    <>
+                        <div className={rowClass}>
+                            <input
+                                className={inputClass}
+                                value={draft}
+                                onChange={(e) => { setDraft(e.target.value); setError(null); }}
+                                onKeyDown={(e) => {
+                                    if (e.key === 'Enter') {
+                                        const t = (draft || '').trim();
+                                        if (t) {
+                                            const ok = onRenameInline(t);
+                                            if (ok) { setEditing(false); setError(null); } else { setError('That page title already exists.'); }
+                                        }
+                                    }
+                                    if (e.key === 'Escape') setEditing(false);
+                                }}
+                                autoFocus
+                                placeholder="Page name"
+                            />
+                            <button className="btn btn-accent btn-xs" onClick={() => { const t = (draft || '').trim(); if (t) { const ok = onRenameInline(t); if (ok) { setEditing(false); setError(null); } else { setError('That page title already exists.'); } } }}>
+                                <span className="text-xs">Save</span>
+                            </button>
+                            <button className="btn btn-outline btn-xs" onClick={() => { setEditing(false); setError(null); }}>
+                                <span className="text-xs">Cancel</span>
+                            </button>
+                        </div>
+                        {error && (
+                            <div className="text-sm text-red-500 mt-2">{error}</div>
+                        )}
+                    </>
                 )}
             </div>
         </div>

@@ -71,7 +71,7 @@ export default function PreviewPopup({
     // Ensure the document sets full-viewport sizing and initial theme tokens.
     doc.write(`<!doctype html><html><head><meta charset="utf-8" /><title>${title}</title>
 <style>
-  html, body { height: 100%; width: 100%; margin: 0; }
+  html, body { height: 100%; width: 100%; margin: 0; background: #0b1220; }
   body { color: #111827; font: 14px/1.4 ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, Noto Sans, "Apple Color Emoji", "Segoe UI Emoji"; overflow-x: hidden; overflow-y: auto; }
   :root {
     --bg: #ffffff;

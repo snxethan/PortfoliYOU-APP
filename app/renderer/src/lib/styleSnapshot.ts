@@ -11,7 +11,7 @@ async function extractCssFromSheet(sheet: StyleSheet): Promise<string | null> {
         const rules = cssSheet?.cssRules;
         if (!rules || rules.length === 0) return null;
         return Array.from(rules).map((rule) => rule.cssText).join('\n');
-    } catch (err) {
+    } catch {
         const owner = sheet.ownerNode as (HTMLLinkElement | HTMLStyleElement | null);
         if (owner && owner instanceof HTMLLinkElement && owner.href) {
             try {

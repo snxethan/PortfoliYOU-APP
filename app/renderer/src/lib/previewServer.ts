@@ -3,14 +3,21 @@ export type PreviewStartResult = { ok: true; localUrl: string; lanUrl: string; p
 export async function startPreviewServer(distDir: string, host?: string, port?: number): Promise<PreviewStartResult> {
     // eslint-disable-next-line @typescript-eslint/ban-ts-comment
     // @ts-ignore - window.api is exposed via preload
+    console.info('previewServer.startPreviewServer: request', { distDir, host, port });
+    const start = Date.now();
     const res = await window.api.previewStartServer({ distDir, host, port });
+    console.info('previewServer.startPreviewServer: response', { distDir, host, port, res, durationMs: Date.now() - start });
     return res as PreviewStartResult;
 }
 
 export async function stopPreviewServer(): Promise<{ ok: boolean; stopped?: boolean; error?: string }> {
     // eslint-disable-next-line @typescript-eslint/ban-ts-comment
     // @ts-ignore
-    return window.api.previewStopServer();
+    console.info('previewServer.stopPreviewServer: request');
+    const start = Date.now();
+    const res = await window.api.previewStopServer();
+    console.info('previewServer.stopPreviewServer: response', { res, durationMs: Date.now() - start });
+    return res;
 }
 
 export async function copyToClipboard(text: string): Promise<{ ok: boolean; error?: string }> {

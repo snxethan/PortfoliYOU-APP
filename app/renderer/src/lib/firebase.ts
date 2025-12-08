@@ -1,4 +1,7 @@
 // Import the functions you need from the SDKs you need
+// For Electron packaged apps: The app now uses signInWithRedirect for OAuth (not popup).
+// Firebase auth redirect works with file:// protocol. Your authDomain (portfoli-you.firebaseapp.com)
+// should already be in Firebase Console > Authentication > Authorized domains by default.
 import { initializeApp } from "firebase/app";
 import { getAuth, setPersistence, browserLocalPersistence } from "firebase/auth";
 import { getFirestore, enableIndexedDbPersistence } from "firebase/firestore";
@@ -46,8 +49,7 @@ function resolveBucketUrl(): string {
 
     // If someone provided a web download host (e.g., "project.firebasestorage.app")
     // convert it to a bucket ID. Prefer projectId mapping when available.
-    const projId = (app.options as { projectId?: string }).projectId;
-    const lower = bucket.toLowerCase();
+    // const projId = (app.options as { projectId?: string }).projectId; // not used currently
     // Buckets can be named like "<project>.appspot.com" (legacy default) or any custom string,
     // including ones that end with `.firebasestorage.app`. Treat the provided host as the bucket
     // identifier instead of forcing an appspot suffix so custom/modern buckets work out of the box.

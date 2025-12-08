@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { AlertTriangle, CheckCircle2, Info, X, XCircle, AlertOctagon, ArrowUpCircle } from "lucide-react";
 
 import { useNotifications } from "../../providers/NotificationsProvider";
+
 import NotificationsCenter from "./NotificationsCenter";
 
 function typeIcon(type: string) {
@@ -34,6 +35,7 @@ function typeClasses(type: string) {
 export function NotificationStack() {
   const { notifications, dismiss } = useNotifications();
   const [hidden, setHidden] = useState<Record<string, boolean>>({});
+  const [exiting, setExiting] = useState<Record<string, boolean>>({});
   const timers = useRef<Record<string, number>>({});
   const summaryTimer = useRef<number | null>(null);
   const summaryShownRef = useRef(false);
@@ -49,7 +51,17 @@ export function NotificationStack() {
     if (!force && timers.current[id]) return;
     clearHideTimer(id);
     timers.current[id] = window.setTimeout(() => {
-      setHidden(prev => ({ ...prev, [id]: true }));
+      // Start exit animation
+      setExiting(prev => ({ ...prev, [id]: true }));
+      // After animation completes, actually hide
+      setTimeout(() => {
+        setHidden(prev => ({ ...prev, [id]: true }));
+        setExiting(prev => {
+
+          const { [id]: _, ...rest } = prev;
+          return rest;
+        });
+      }, 200); // Match animation duration
       clearHideTimer(id);
     }, delay);
   }, [clearHideTimer]);
@@ -103,7 +115,7 @@ export function NotificationStack() {
   return (
     <div className="fixed bottom-2 right-2 z-[40000] flex flex-col gap-2 max-w-sm pointer-events-none">
       {summary.visible && summary.count > 0 ? (
-        <div className="surface py-fade-in border border-[color:var(--primary)] pointer-events-auto shadow-lg">
+        <div className="surface border border-[color:var(--primary)] pointer-events-auto shadow-lg" style={{ animation: 'py-pop 0.3s ease-out, py-slide-in-right 0.3s ease-out' }}>
           <div className="p-3 flex items-start gap-3">
             <div className="mt-0.5">
               <Info size={16} className="text-sky-400" />
@@ -159,7 +171,8 @@ export function NotificationStack() {
         return (
           <div
             key={n.id}
-            className={`surface py-fade-in border ${typeClasses(n.type)} pointer-events-auto shadow-lg`}
+            className={`surface border ${typeClasses(n.type)} pointer-events-auto shadow-lg`}
+            style={{ animation: exiting[n.id] ? 'py-pop-out 0.2s ease-in, py-slide-out-right 0.2s ease-in' : 'py-pop 0.3s ease-out, py-slide-in-right 0.3s ease-out' }}
             onMouseEnter={() => clearHideTimer(n.id)}
             onMouseLeave={() => scheduleHide(n.id, 4000, true)}
           >
@@ -185,7 +198,7 @@ export function NotificationStack() {
                           <button
                             type="button"
                             className="text-xs link-accent"
-                            onClick={async (e) => {
+                            onClick={async () => {
                               try {
                                 if ((window as any).api?.openPath) {
                                   await (window as any).api.openPath({ path: href.replace(/^file:\/\//, '') });
@@ -210,7 +223,17 @@ export function NotificationStack() {
                   </div>
                 ) : null}
               </div>
-              <button className="btn btn-ghost btn-xs" aria-label="Dismiss notification" onClick={() => dismiss(n.id)}>
+              <button className="btn btn-ghost btn-xs" aria-label="Dismiss notification" onClick={() => {
+                setExiting(prev => ({ ...prev, [n.id]: true }));
+                setTimeout(() => {
+                  dismiss(n.id);
+                  setExiting(prev => {
+
+                    const { [n.id]: _, ...rest } = prev;
+                    return rest;
+                  });
+                }, 200);
+              }}>
                 <X size={14} />
               </button>
             </div>
@@ -243,10 +266,23 @@ function usePortalContainer(id = 'py-toast-root', opts?: { pointerEvents?: 'auto
 function NotificationsPanel() {
   const { notifications, dismiss, clearAll, panelOpen, closePanel, panelPulse } = useNotifications();
   const [visible, setVisible] = useState(panelOpen);
+  const [animationState, setAnimationState] = useState<'entering' | 'entered' | 'exiting' | 'exited'>('exited');
   const panelRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    setVisible(panelOpen);
+    if (panelOpen) {
+      setVisible(true);
+      setAnimationState('entering');
+      const timer = setTimeout(() => setAnimationState('entered'), 250);
+      return () => clearTimeout(timer);
+    } else {
+      setAnimationState('exiting');
+      const timer = setTimeout(() => {
+        setAnimationState('exited');
+        setVisible(false);
+      }, 250);
+      return () => clearTimeout(timer);
+    }
   }, [panelOpen]);
 
   useEffect(() => {
@@ -263,10 +299,13 @@ function NotificationsPanel() {
 
   if (!visible) return null;
 
+  const isEntering = animationState === 'entering';
+  const isExiting = animationState === 'exiting';
+
   return (
     <div className="absolute inset-0 flex items-center justify-center p-4 pointer-events-auto">
       <div
-        className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+        className={`absolute inset-0 bg-black/60 backdrop-blur-sm transition-opacity duration-250 ${isEntering || isExiting ? 'opacity-0' : 'opacity-100'}`}
         role="presentation"
         onClick={closePanel}
       />
@@ -276,6 +315,9 @@ function NotificationsPanel() {
         aria-modal="true"
         aria-label="Notifications center"
         className={`relative w-full max-w-5xl max-h-[90vh] surface border border-[color:var(--border)] rounded-2xl bg-[color:var(--surface)]/95 shadow-2xl overflow-hidden flex flex-col gap-3 ${panelPulse ? 'highlight-pulse' : ''}`}
+        style={{
+          animation: isEntering ? 'py-pop 0.25s ease-out' : isExiting ? 'py-pop-out 0.25s ease-in' : undefined
+        }}
       >
         <div className="flex items-center justify-between px-5 pt-4">
           <p className="text-sm uppercase tracking-wide text-[color:var(--fg-muted)]">Notifications Center</p>

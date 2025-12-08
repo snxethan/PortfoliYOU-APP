@@ -1,9 +1,10 @@
-import fs from 'fs-extra';
 import path from 'path';
-import React from 'react';
+
+import fs from 'fs-extra';
+// import React from 'react';
 import ReactDOMServer from 'react-dom/server';
+
 import type { LocalProject, Widget, Page, PortfolioMeta } from '../providers/ProjectsProvider';
-import type { Theme } from '../themes/types';
 import { themeToCssVars, FALLBACK_THEME } from '../themes/utils';
 import { WidgetsRegistry } from '../widgets/registry';
 
@@ -14,6 +15,8 @@ export async function compileStaticSite(
     assets: Record<string, Buffer | Blob>,
     outputDir: string
 ): Promise<void> {
+    const startTs = Date.now();
+    console.info('compileStaticSite: Starting compile', { projectId: project.id, pages: project.pageOrder.length, assets: Object.keys(assets).length, outputDir });
     // Ensure output directory exists
     await fs.ensureDir(outputDir);
     await fs.ensureDir(path.join(outputDir, 'assets'));
@@ -39,7 +42,7 @@ export async function compileStaticSite(
         let def: any = undefined;
         try {
             def = await WidgetsRegistry.ensure(widget.type);
-        } catch (e) {
+        } catch {
             // ignore loader failures and fallback to registry.get
             def = WidgetsRegistry.get(widget.type);
         }
@@ -51,11 +54,12 @@ export async function compileStaticSite(
             const hash = props.src.slice('asset://'.length);
             props.src = `/assets/${hash}`;
         }
+        const instanceId = widget.widgetId || (widget as any)?.id || String(Math.random()).slice(2);
 
         // Ask widget for static CSS if it exposes getStaticCss
         try {
             if (def && typeof def.getStaticCss === 'function') {
-                const raw = await def.getStaticCss(props, widget.widgetId || widget.id || String(Math.random()).slice(2));
+                const raw = await def.getStaticCss(props, instanceId);
                 if (raw && typeof raw === 'string') {
                     const trimmed = raw.trim();
                     if (trimmed.length > 0) {
@@ -64,13 +68,13 @@ export async function compileStaticSite(
                         if (/[{}]/.test(trimmed)) {
                             collectedCss.push(trimmed);
                         } else {
-                            const sel = `.widget-instance-${widget.widgetId || widget.id}`;
+                            const sel = `.widget-instance-${instanceId}`;
                             collectedCss.push(`${sel} { ${trimmed} }`);
                         }
                     }
                 }
             }
-        } catch (e) {
+        } catch {
             // ignore CSS generation errors
         }
 
@@ -80,14 +84,14 @@ export async function compileStaticSite(
                 const el = def.render(props);
                 const inner = ReactDOMServer.renderToStaticMarkup(el as any);
                 // Wrap each widget with an instance-scoped class so per-instance CSS can target it
-                return `<div class="widget widget-instance-${widget.widgetId || widget.id}">${inner}</div>`;
-            } catch (e) {
-                return `<div class="widget widget-instance-${widget.widgetId || widget.id}">[render error: ${String(e)}]</div>`;
+                return `<div class="widget widget-instance-${instanceId}">${inner}</div>`;
+            } catch (err) {
+                return `<div class="widget widget-instance-${instanceId}">[render error: ${escapeHtml(String(err))}]</div>`;
             }
         }
 
         // Fallback: basic JSON dump
-        return `<div class="widget widget-instance-${widget.widgetId || widget.id}"><pre>${escapeHtml(JSON.stringify(widget.props || {}, null, 2))}</pre></div>`;
+        return `<div class="widget widget-instance-${instanceId}"><pre>${escapeHtml(JSON.stringify(widget.props || {}, null, 2))}</pre></div>`;
     }
 
     for (const pageId of project.pageOrder) {
@@ -139,17 +143,20 @@ export async function compileStaticSite(
     // Add a small set of page/grid rules so exported widgets mirror the editor's
     // behavior: each widget will be treated as a contained block and clipped to
     // avoid children rendering outside their section (matches editor preview).
-    const baseCss = `* { box-sizing: border-box; }
-body { margin: 0; font-family: system-ui, -apple-system, 'Segoe UI', Roboto, Inter, sans-serif; color: var(--fg, #0f172a); }
-.container { max-width: 1100px; margin: 0 auto; padding: 36px; }
-.page-canvas { position: relative; margin: 0 auto; }
-.page-widget-wrapper { position: absolute; will-change: transform; }
-.widget { width: 100%; height: 100%; display: block; }
-.widget img,
-.widget video { max-width: 100%; max-height: 100%; display: block; }
-.widget-unknown,
-.widget-error { font-family: monospace; background: transparent; border: 1px dashed var(--border, #d1d5db); padding: 12px; border-radius: 6px; white-space: pre-wrap; }
-`;
+    const baseCss = [
+        '* { box-sizing: border-box; }',
+        'html, body { min-height: 100%; background: var(--bg, #0f172a); }',
+        "body { margin: 0; min-height: 100vh; font-family: system-ui, -apple-system, 'Segoe UI', Roboto, Inter, sans-serif; color: var(--fg, #0f172a); }",
+        'main { min-height: 100vh; background: inherit; }',
+        '.container { max-width: 1100px; margin: 0 auto; padding: 36px; }',
+        '.page-canvas { position: relative; margin: 0 auto; width: 100%; background: inherit; }',
+        '.page-widget-wrapper { position: absolute; will-change: transform; }',
+        '.widget { width: 100%; height: 100%; display: block; }',
+        '.widget img,',
+        '.widget video { max-width: 100%; max-height: 100%; display: block; }',
+        '.widget-unknown,',
+        ".widget-error { font-family: monospace; background: transparent; border: 1px dashed var(--border, #d1d5db); padding: 12px; border-radius: 6px; white-space: pre-wrap; }",
+    ].join('\n');
     const fullCss = [baseCss, ...collectedCss].join('\n\n');
     // Also emit theme variables and global styles so static output matches preview
     // Build theme CSS from project active theme when available
@@ -160,7 +167,7 @@ body { margin: 0; font-family: system-ui, -apple-system, 'Segoe UI', Roboto, Int
         const rootLines = Object.entries(vars).map(([k, v]) => `${k}: ${v};`);
         themeCss = `:root {\n${rootLines.join('\n')}\n}\n`;
         themeCss += `body { color: var(--fg); background: var(--bg); font-family: var(--body-font); }\n`;
-    } catch (e) {
+    } catch {
         // fallback: minimal vars
         themeCss = `:root { --bg: #ffffff; --fg: #111827; --accent: #06b6d4; }\n`;
     }
@@ -182,10 +189,10 @@ body { margin: 0; font-family: system-ui, -apple-system, 'Segoe UI', Roboto, Int
                     const href = l.href;
                     if (!href) continue;
                     // attempt to fetch the stylesheet content
-                    // eslint-disable-next-line no-await-in-loop
+
                     const res = await fetch(href, { cache: 'no-store' });
                     if (res.ok) {
-                        // eslint-disable-next-line no-await-in-loop
+
                         const txt = await res.text();
                         tailwindCss += `/* source: ${href} */\n` + txt + '\n\n';
                     }
@@ -201,14 +208,14 @@ body { margin: 0; font-family: system-ui, -apple-system, 'Segoe UI', Roboto, Int
     // Write theme and tailwind aggregated assets
     try {
         await fs.writeFile(path.join(outputDir, 'assets', 'theme.css'), themeCss, 'utf8');
-    } catch (e) {
+    } catch {
         // ignore write error
     }
     try {
         if (tailwindCss.trim().length > 0) {
             await fs.writeFile(path.join(outputDir, 'assets', 'tailwind.css'), tailwindCss, 'utf8');
         }
-    } catch (e) {
+    } catch {
         // ignore
     }
 
@@ -225,28 +232,25 @@ body { margin: 0; font-family: system-ui, -apple-system, 'Segoe UI', Roboto, Int
         const firstPageId = project.pageOrder[0];
         await fs.copyFile(path.join(outputDir, `${firstPageId}.html`), path.join(outputDir, 'index.html'));
     }
+    const dur = Date.now() - startTs;
+    console.info('compileStaticSite: Completed compile', { projectId: project.id, durationMs: dur, pages: project.pageOrder.length, assets: Object.keys(assets).length, outputDir });
 }
 
-function renderWidget(widget: Widget, project: LocalProject): React.ReactElement {
-    const def = WidgetsRegistry.get(widget.type);
-    if (!def || !def.render) return React.createElement('div', {}, `[Unknown widget: ${widget.type}]`);
-    // Asset src handling
-    let props: any = {};
-    if (typeof widget.props === 'object' && widget.props !== null) {
-        props = { ...widget.props };
-    }
-    if (typeof props.src === 'string' && props.src.startsWith('asset://')) {
-        const hash = props.src.slice('asset://'.length);
-        props.src = `/assets/${hash}`;
-    }
-    // Add more asset fields as needed
-    return def.render(props);
-}
+// Note: server-side widget rendering is handled inline in renderWidgetToHtml
 
 function renderPageHtml(page: Page, widgetBodies: string, project: LocalProject, innerWidth: number, height: number): string {
     const meta = project.portfolioMeta as PortfolioMeta | undefined;
+    const pageBackground = typeof page.backgroundColor === 'string' && page.backgroundColor.trim().length > 0
+        ? page.backgroundColor.trim()
+        : null;
+    const themeBackground = project?.themes && project.themes[project.activeThemeId]?.colors?.background;
+    const effectiveBackground = pageBackground || themeBackground || '#0f172a';
+    const htmlStyle = effectiveBackground ? ` style="background:${effectiveBackground};"` : '';
+    const bodyStyle = effectiveBackground ? ` style="background:${effectiveBackground};"` : '';
+    const mainStyle = ` style="min-height:100vh;${pageBackground ? `background:${pageBackground};` : 'background:inherit;'}"`;
+    const canvasStyle = `height:${height}px;max-width:${innerWidth}px;${pageBackground ? `background:${pageBackground};` : ''}`;
     return `<!DOCTYPE html>
-<html lang="en">
+<html lang="en"${htmlStyle}>
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -255,14 +259,23 @@ function renderPageHtml(page: Page, widgetBodies: string, project: LocalProject,
     <link rel="stylesheet" href="./assets/theme.css" />
     <link rel="stylesheet" href="./site.css" />
 </head>
-<body>
-    <main>
+<body${bodyStyle}>
+    <main${mainStyle}>
         <div class="container">
-            <div class="page-canvas" style="height:${height}px;max-width:${innerWidth}px;">
+            <div class="page-canvas" style="${canvasStyle}">
                 ${widgetBodies}
             </div>
         </div>
     </main>
 </body>
 </html>`;
+}
+
+function escapeHtml(value: string): string {
+    return value
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
 }

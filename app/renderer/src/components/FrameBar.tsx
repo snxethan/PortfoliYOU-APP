@@ -42,9 +42,31 @@ function IconDevtools() {
     );
 }
 
+function IconZoomIn() {
+    return (
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="11" cy="11" r="8" />
+            <path d="m21 21-4.35-4.35" />
+            <line x1="11" y1="8" x2="11" y2="14" />
+            <line x1="8" y1="11" x2="14" y2="11" />
+        </svg>
+    );
+}
+
+function IconZoomOut() {
+    return (
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="11" cy="11" r="8" />
+            <path d="m21 21-4.35-4.35" />
+            <line x1="8" y1="11" x2="14" y2="11" />
+        </svg>
+    );
+}
+
 export default function FrameBar() {
     const [maximized, setMaximized] = useState(false);
     const [dragToTop, setDragToTop] = useState(false);
+    const [zoom, setZoom] = useState(1);
 
     useEffect(() => {
         // query initial state
@@ -58,8 +80,17 @@ export default function FrameBar() {
         // subscribe to main window events
         const unsubMax = window.api?.onWindowEvent?.('window-maximize', () => { setMaximized(true); setDragToTop(false); });
         const unsubUnmax = window.api?.onWindowEvent?.('window-unmaximize', () => { setMaximized(false); setDragToTop(false); });
-        const unsubMove = window.api?.onWindowEvent?.('window-move-top', (d: { atTop?: boolean }) => setDragToTop(Boolean(d?.atTop)));
-        const unsubState = window.api?.onWindowEvent?.('window-maximize-state', (d: { maximized?: boolean }) => { if (typeof d?.maximized === 'boolean') { setMaximized(Boolean(d.maximized)); if (d.maximized) setDragToTop(false); } });
+        const unsubMove = window.api?.onWindowEvent?.('window-move-top', (d: unknown) => {
+            const data = d as { atTop?: boolean };
+            setDragToTop(Boolean(data?.atTop));
+        });
+        const unsubState = window.api?.onWindowEvent?.('window-maximize-state', (d: unknown) => {
+            const data = d as { maximized?: boolean };
+            if (typeof data?.maximized === 'boolean') {
+                setMaximized(Boolean(data.maximized));
+                if (data.maximized) setDragToTop(false);
+            }
+        });
 
         return () => {
             try { unsubMax?.(); } catch { /* ignore */ }
@@ -67,6 +98,22 @@ export default function FrameBar() {
             try { unsubMove?.(); } catch { /* ignore */ }
             try { unsubState?.(); } catch { /* ignore */ }
         };
+    }, []);
+
+    // Sync zoom state with document.body.style.zoom (updated by Electron keyboard shortcuts)
+    useEffect(() => {
+        const syncZoom = () => {
+            const currentZoom = parseFloat(document.body.style.zoom || '1');
+            setZoom(currentZoom);
+        };
+
+        // Initial sync
+        syncZoom();
+
+        // Poll for changes (Electron's built-in zoom doesn't fire events)
+        const interval = setInterval(syncZoom, 100);
+
+        return () => clearInterval(interval);
     }, []);
 
     async function onMinimize() {
@@ -85,12 +132,26 @@ export default function FrameBar() {
         try { await window.api?.toggleDevTools?.(); } catch { /* ignore */ }
     }
 
+    function handleZoomIn() {
+        const currentZoom = parseFloat(document.body.style.zoom || '1');
+        const newZoom = Math.min(currentZoom + 0.1, 2);
+        document.body.style.zoom = String(newZoom);
+        setZoom(newZoom);
+    }
+
+    function handleZoomOut() {
+        const currentZoom = parseFloat(document.body.style.zoom || '1');
+        const newZoom = Math.max(currentZoom - 0.1, 0.8);
+        document.body.style.zoom = String(newZoom);
+        setZoom(newZoom);
+    }
+
     return (
         <div className="window-frame">
-            <div className="window-frame__left flex items-center pl-1" style={{ pointerEvents: 'auto' }}>
+            <div className="window-frame__left">
                 <button
                     type="button"
-                    className="window-control window-control--ghost"
+                    className="window-control"
                     title="Toggle DevTools"
                     onClick={onToggleDevtools}
                     onMouseDown={(e) => e.stopPropagation()}
@@ -98,16 +159,41 @@ export default function FrameBar() {
                 >
                     <IconDevtools />
                 </button>
+                <button
+                    type="button"
+                    className="window-control"
+                    title="Zoom Out"
+                    onClick={handleZoomOut}
+                    onMouseDown={(e) => e.stopPropagation()}
+                    aria-label="Zoom Out"
+                    disabled={zoom <= 0.8}
+                >
+                    <IconZoomOut />
+                </button>
+                <div className="flex items-center justify-center px-2 h-full" style={{ minWidth: '48px' }}>
+                    <span className="text-[10px] text-[color:var(--fg-muted)] select-none">{Math.round(zoom * 100)}%</span>
+                </div>
+                <button
+                    type="button"
+                    className="window-control"
+                    title="Zoom In"
+                    onClick={handleZoomIn}
+                    onMouseDown={(e) => e.stopPropagation()}
+                    aria-label="Zoom In"
+                    disabled={zoom >= 2}
+                >
+                    <IconZoomIn />
+                </button>
             </div>
             <div className="window-frame__center flex items-center justify-center gap-2" aria-hidden={false}>
                 <div className="relative flex items-center gap-2">
                     <img
-                        src="/icon.png"
+                        src="./icon.png"
                         alt="Portfoli-YOU icon"
                         className="w-5 h-5 rounded-sm object-cover"
                         onError={(e) => {
                             const t = e.currentTarget as HTMLImageElement;
-                            if (!t.dataset.fallback) { t.dataset.fallback = '1'; t.src = '/icon.svg'; }
+                            if (!t.dataset.fallback) { t.dataset.fallback = '1'; t.src = './icon.svg'; }
                         }}
                     />
                     <div className="text-[color:var(--fg-muted)] text-sm font-semibold">Portfoli-YOU</div>

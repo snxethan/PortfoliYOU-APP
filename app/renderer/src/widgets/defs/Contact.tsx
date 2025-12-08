@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useId, useMemo, useRef, useState } from 'react';
 import { z } from 'zod';
 
 import { useWidget } from '../sdk';
@@ -18,6 +18,7 @@ type ContactProps = {
     requireName?: boolean;
     requireEmail?: boolean;
     requireMessage?: boolean;
+    ariaLabel?: string;
     ariaDescription?: string;
     liveMode?: LiveMode;
     submitAction?: SubmitAction;
@@ -43,6 +44,7 @@ const def: WidgetDefinition<ContactProps> = {
         requireName: true,
         requireEmail: true,
         requireMessage: true,
+        ariaLabel: '',
         ariaDescription: '',
         liveMode: 'polite',
         submitAction: 'mailto',
@@ -68,6 +70,11 @@ const def: WidgetDefinition<ContactProps> = {
             const nameRef = useRef<HTMLInputElement | null>(null);
             const emailRef = useRef<HTMLInputElement | null>(null);
             const messageRef = useRef<HTMLTextAreaElement | null>(null);
+            const generatedId = useId();
+            const nameId = `${generatedId}-contact-name`;
+            const emailId = `${generatedId}-contact-email`;
+            const messageId = `${generatedId}-contact-message`;
+            const descId = (p.description || p.ariaDescription) ? `${generatedId}-contact-desc` : undefined;
 
             function focusFirstInvalid() {
                 if (errors.name) { nameRef.current?.focus(); return; }
@@ -110,80 +117,120 @@ const def: WidgetDefinition<ContactProps> = {
                 : p.font === 'mono' ? 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace'
                     : 'ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Helvetica Neue, Arial, "Apple Color Emoji", "Segoe UI Emoji"';
             const cardBackground = typeof p.cardBackgroundColor === 'string' && p.cardBackgroundColor.trim().length > 0 ? p.cardBackgroundColor.trim() : undefined;
+            const idSuffix = generatedId.replace(/[^a-zA-Z0-9]/g, '') || 'contact';
+
+            const renderFieldError = (field: 'name' | 'email' | 'message', errorId: string) => {
+                const messageValue = errors[field];
+                return (
+                    <div
+                        id={errorId}
+                        className="contact-error"
+                        data-error={field}
+                        role={messageValue ? 'alert' : undefined}
+                        aria-live={messageValue ? 'assertive' : undefined}
+                    >
+                        {messageValue || ''}
+                    </div>
+                );
+            };
+
             const formNode = (
                 <form
-                    className="flex flex-1 min-h-0 flex-col gap-2 overflow-auto text-xs"
+                    className="contact-form"
                     onSubmit={doSubmit}
-                    aria-describedby={p.ariaDescription ? 'contact-desc' : undefined}
+                    aria-describedby={descId}
+                    aria-label={p.ariaLabel || undefined}
                     aria-disabled={lockedUI || undefined}
                     style={{ pointerEvents: lockedUI ? 'none' : undefined, fontFamily: ff, fontSize: p.fontSize ? `${p.fontSize}px` : undefined }}
+                    data-contact-widget="true"
+                    data-submit-action={p.submitAction || 'mailto'}
+                    data-require-name={String(p.requireName !== false)}
+                    data-require-email={String(p.requireEmail !== false)}
+                    data-require-message={String(p.requireMessage !== false)}
+                    data-mailto-to={p.mailtoTo || ''}
+                    data-success-text={p.successText || 'Thanks! Your message is ready to send.'}
+                    data-error-text={p.errorText || 'Please fix the errors below.'}
                 >
-                    {p.heading && <h3 className="text-sm font-semibold text-[color:var(--fg)]">{p.heading}</h3>}
+                    {p.heading && <h3 className="contact-heading">{p.heading}</h3>}
                     {(p.description || p.ariaDescription) && (
-                        <p id="contact-desc" className={p.ariaDescription ? 'sr-only' : ''}>
-                            {p.description || p.ariaDescription}
-                        </p>
+                        p.description ? (
+                            <p id={descId} className="contact-description">{p.description}</p>
+                        ) : (
+                            <p id={descId} className="sr-only">{p.ariaDescription}</p>
+                        )
                     )}
-                    <div>
-                        <label className="block mb-1" htmlFor="contact-name">{p.nameLabel || 'Your name'}</label>
+                    <div className="contact-field">
+                        <label htmlFor={nameId}>{p.nameLabel || 'Your name'}</label>
                         <input
-                            id="contact-name"
+                            id={nameId}
+                            name={`contact-name-${idSuffix}`}
                             data-nodrag="true"
                             ref={nameRef}
-                            className={`input w-full ${errors.name ? 'ring-1 ring-red-500' : ''}`}
                             value={name}
                             onChange={(e) => setName(e.target.value)}
-                            disabled={editing || !interactive}
+                            disabled={lockedUI}
                             aria-invalid={!!errors.name}
-                            aria-errormessage={errors.name ? 'contact-name-error' : undefined}
+                            aria-errormessage={errors.name ? `${nameId}-error` : undefined}
                         />
-                        {errors.name && <div id="contact-name-error" className="mt-1 text-[11px] text-red-600" role="alert">{errors.name}</div>}
+                        {renderFieldError('name', `${nameId}-error`)}
                     </div>
-                    <div>
-                        <label className="block mb-1" htmlFor="contact-email">{p.emailLabel || 'Your email'}</label>
+                    <div className="contact-field">
+                        <label htmlFor={emailId}>{p.emailLabel || 'Your email'}</label>
                         <input
-                            id="contact-email"
+                            id={emailId}
+                            name={`contact-email-${idSuffix}`}
                             data-nodrag="true"
                             ref={emailRef}
-                            className={`input w-full ${errors.email ? 'ring-1 ring-red-500' : ''}`}
                             type="email"
                             value={email}
                             onChange={(e) => setEmail(e.target.value)}
-                            disabled={editing || !interactive}
+                            disabled={lockedUI}
                             aria-invalid={!!errors.email}
-                            aria-errormessage={errors.email ? 'contact-email-error' : undefined}
+                            aria-errormessage={errors.email ? `${emailId}-error` : undefined}
                         />
-                        {errors.email && <div id="contact-email-error" className="mt-1 text-[11px] text-red-600" role="alert">{errors.email}</div>}
+                        {renderFieldError('email', `${emailId}-error`)}
                     </div>
-                    <div>
-                        <label className="block mb-1" htmlFor="contact-message">{p.messageLabel || 'Message'}</label>
+                    <div className="contact-field">
+                        <label htmlFor={messageId}>{p.messageLabel || 'Message'}</label>
                         <textarea
-                            id="contact-message"
+                            id={messageId}
+                            name={`contact-message-${idSuffix}`}
                             data-nodrag="true"
                             ref={messageRef}
-                            className={`input w-full h-24 ${errors.message ? 'ring-1 ring-red-500' : ''}`}
                             value={message}
                             onChange={(e) => setMessage(e.target.value)}
-                            disabled={editing || !interactive}
+                            disabled={lockedUI}
                             aria-invalid={!!errors.message}
-                            aria-errormessage={errors.message ? 'contact-message-error' : undefined}
+                            aria-errormessage={errors.message ? `${messageId}-error` : undefined}
                         />
-                        {errors.message && <div id="contact-message-error" className="mt-1 text-[11px] text-red-600" role="alert">{errors.message}</div>}
+                        {renderFieldError('message', `${messageId}-error`)}
                     </div>
-                    <div className="flex items-center gap-2">
-                        <button type="submit" className="btn btn-primary btn-sm" disabled={editing || !interactive} aria-label={p.submitLabel || 'Send'}>{p.submitLabel || 'Send'}</button>
+                    <div className="contact-actions">
+                        <button
+                            type="submit"
+                            disabled={lockedUI}
+                            aria-label={p.submitLabel || 'Send'}
+                        >
+                            {p.submitLabel || 'Send'}
+                        </button>
                         {live && (
                             <span role="status" aria-live={live} className="sr-only">{status || 'Ready'}</span>
                         )}
                     </div>
-                    {!live && status && (
-                        <div className="text-[11px] text-[color:var(--fg-muted)]">{status}</div>
+                    {!live && (
+                        <div className={`contact-status${status ? ' is-visible' : ''}`} data-contact-status>
+                            {status}
+                        </div>
                     )}
                 </form>
             );
+
             return (
-                <div className="h-full w-full min-h-0">
-                    <div className="contact-card flex h-full min-h-0 w-full flex-col gap-3 overflow-hidden rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)] p-4 shadow-sm" style={{ background: cardBackground }}>
+                <div className="widget-contact h-full w-full min-h-0">
+                    <div
+                        className="contact-card"
+                        style={{ background: cardBackground || undefined }}
+                    >
                         {formNode}
                     </div>
                 </div>
@@ -202,6 +249,7 @@ const def: WidgetDefinition<ContactProps> = {
         requireName: z.boolean().optional(),
         requireEmail: z.boolean().optional(),
         requireMessage: z.boolean().optional(),
+        ariaLabel: z.string().optional(),
         ariaDescription: z.string().optional(),
         liveMode: z.enum(['off', 'polite', 'assertive']).optional(),
         submitAction: z.enum(['mailto', 'event']).optional(),

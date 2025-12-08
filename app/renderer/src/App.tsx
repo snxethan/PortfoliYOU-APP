@@ -1,9 +1,9 @@
-﻿import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
+﻿import { HashRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
 import { Suspense, lazy, useEffect, useState, useCallback, useRef } from "react";
+
 import { startPreviewServer } from "./lib/previewServer";
 import { captureGlobalStyleSnapshot } from "./lib/styleSnapshot";
 import { appendPreviewLog, setPreviewState } from "./lib/previewInterop";
-
 import Sidebar from "./components/Sidebar";
 import PortfolioIsland from "./components/portfolio-island/PortfolioIsland";
 import FrameBar from "./components/FrameBar";
@@ -50,7 +50,7 @@ export default function App() {
 
   return (
     <ErrorBoundary>
-      <BrowserRouter>
+      <HashRouter>
         <NotificationsProvider>
           <ProjectsProvider>
             <AssetsProvider>
@@ -66,7 +66,7 @@ export default function App() {
                     style={{ marginLeft: 'var(--sidebar-w, 15rem)' }}
                     className="min-h-screen flex flex-col px-8 pb-12 pt-6 transition-[margin-left] duration-200 min-w-0"
                   >
-                    <PortfolioIsland />
+                    <PortfolioIslandWrapper />
                     <main className="flex-1 min-w-0">
                       <Suspense fallback={
                         <div className="flex items-center justify-center py-16">
@@ -102,7 +102,7 @@ export default function App() {
             </AssetsProvider>
           </ProjectsProvider>
         </NotificationsProvider>
-      </BrowserRouter>
+      </HashRouter>
     </ErrorBoundary>
   );
 }
@@ -133,6 +133,12 @@ function SaveHotkeys() {
 
 const MIN_APP_ZOOM = 0.8;
 const MAX_APP_ZOOM = 1.6;
+
+function PortfolioIslandWrapper() {
+  // Show island when there's a selected project, even on home page
+  // The island itself handles its visibility state
+  return <PortfolioIsland />;
+}
 
 function GlobalZoomControls() {
   const location = useLocation();
@@ -254,6 +260,8 @@ function GlobalPreviewStarter() {
         captureGlobalStyleSnapshot(),
         Promise.resolve(getWidgetThemeSnapshot(activeTheme))
       ]);
+      console.info('App.GlobalPreviewStarter: building preview', { projectId: selectedProject?.id, reason });
+      const buildStartTs = Date.now();
       const buildRes = await (window as any).api?.buildStaticSite?.({
         project: selectedProject,
         assets: assetsBase64,
@@ -273,6 +281,7 @@ function GlobalPreviewStarter() {
         const msg = `Preview build output: ${buildRes.path}`;
         appendPreviewLog(selectedProjectCloudId, msg);
         window.dispatchEvent(new CustomEvent('py:preview:log', { detail: { line: msg, projectId: selectedProjectCloudId } }));
+        console.info('App.GlobalPreviewStarter: preview build succeeded', { projectId: selectedProject?.id, buildPath: buildRes.path, durationMs: Date.now() - buildStartTs });
       } catch { }
 
       const meta = (selectedProject as any)?.portfolioMeta?.buildSettings || {};
@@ -297,7 +306,7 @@ function GlobalPreviewStarter() {
       window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'success', message: 'Local preview started', href: startRes.localUrl, ctaLabel: 'Open', persistent: false } }));
       setPreviewState(selectedProjectCloudId, { running: true, localUrl: startRes.localUrl, lanUrl: startRes.lanUrl });
       window.dispatchEvent(new CustomEvent('py:preview:state', { detail: { projectId: selectedProjectCloudId, running: true, localUrl: startRes.localUrl, lanUrl: startRes.lanUrl } }));
-    } catch (err) {
+    } catch {
       window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'error', message: 'Preview start failed', persistent: false } }));
     } finally {
       setStarting(false);
@@ -325,8 +334,8 @@ function GlobalPreviewStarter() {
       setPreviewState(selectedProjectCloudId, { running: false });
       window.dispatchEvent(new CustomEvent('py:preview:state', { detail: { projectId: selectedProjectCloudId, running: false } }));
       return true;
-    } catch (err) {
-      const errMsg = '❌ Failed to stop preview: ' + (err instanceof Error ? err.message : String(err));
+    } catch {
+      const errMsg = '❌ Failed to stop preview.';
       appendPreviewLog(selectedProjectCloudId, errMsg);
       try { window.dispatchEvent(new CustomEvent('py:preview:log', { detail: { line: errMsg, projectId: selectedProjectCloudId } })); } catch { }
       window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'error', message: errMsg, persistent: false } }));

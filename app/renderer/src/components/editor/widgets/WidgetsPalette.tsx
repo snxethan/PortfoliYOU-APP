@@ -179,3 +179,4 @@ function WidgetsPalette() {
 }
 
 export default memo(WidgetsPalette);
+export { WidgetsPalette };

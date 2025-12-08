@@ -38,6 +38,7 @@ function NavLinkView(props: NavLinkProps) {
                 <a
                     href={href}
                     aria-label={props.ariaLabel || props.label}
+                    aria-description={props.ariaDescription || undefined}
                     aria-current={isCurrent ? 'page' : undefined}
                     title={props.label}
                     style={{
@@ -67,6 +68,7 @@ function NavLinkView(props: NavLinkProps) {
             <a
                 href={href}
                 aria-label={props.ariaLabel || props.label}
+                aria-description={props.ariaDescription || undefined}
                 aria-current={isCurrent ? 'page' : undefined}
                 title={props.label}
                 style={{
@@ -96,6 +98,7 @@ type NavLinkProps = {
     textColor?: string;      // text color when style=button
     underline?: boolean;     // underline when style=link
     ariaLabel?: string;      // optional custom accessible label
+    ariaDescription?: string;
     font?: 'system' | 'serif' | 'mono';
     fontSize?: number;
 };
@@ -125,6 +128,7 @@ const def: WidgetDefinition<NavLinkProps> = {
         textColor: z.string().regex(/^#([0-9a-fA-F]{3}){1,2}$|^[a-zA-Z]+$/).optional(),
         underline: z.boolean().optional(),
         ariaLabel: z.string().optional(),
+        ariaDescription: z.string().optional(),
         font: z.enum(['system', 'serif', 'mono']).optional(),
         fontSize: z.number().min(8).max(128).optional(),
     }),

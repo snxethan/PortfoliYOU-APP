@@ -1,4 +1,5 @@
 import { useCallback, useState } from 'react';
+
 import { startPreviewServer, stopPreviewServer, copyToClipboard } from '../lib/previewServer';
 
 export default function usePreviewServer() {
@@ -11,7 +12,10 @@ export default function usePreviewServer() {
     const start = useCallback(async (distDir: string) => {
         setError(null);
         try {
+            console.info('usePreviewServer.start: starting preview', { distDir });
+            const startTs = Date.now();
             const res = await startPreviewServer(distDir);
+            console.info('usePreviewServer.start: preview start response', { distDir, res, durationMs: Date.now() - startTs });
             if (res && (res as any).ok) {
                 setRunning(true);
                 setLocalUrl((res as any).host);
@@ -34,7 +38,10 @@ export default function usePreviewServer() {
     const stop = useCallback(async () => {
         setError(null);
         try {
+            console.info('usePreviewServer.stop: stopping preview');
+            const startTs = Date.now();
             const res = await stopPreviewServer();
+            console.info('usePreviewServer.stop: preview stop response', { res, durationMs: Date.now() - startTs });
             if (res && (res as any).ok) {
                 setRunning(false);
                 setLocalUrl(null);

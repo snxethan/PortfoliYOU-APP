@@ -1,14 +1,12 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useState, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { unlink } from "firebase/auth";
 import {
     AlertTriangle,
-    CheckCircle2,
     ChevronDown,
     ChevronRight,
     Chrome,
     Cloud,
-    Copy,
     Download,
     ExternalLink,
     Github,
@@ -21,6 +19,7 @@ import {
     X
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
+import { getFunctions, httpsCallable } from 'firebase/functions';
 
 import { auth } from "../../lib/firebase";
 import { useAuth } from "../../providers/AuthProvider";
@@ -93,25 +92,24 @@ export default function AccountSettingsModal({ open, onClose }: { open: boolean;
         projects,
         exportProject,
         deleteCloudProjectByCloudId,
-        importProjectFromCloudLocalOnly,
         cloudMaxProjects,
         cloudMaxStorageMB,
         cloudBytesUsed,
-        cloudProjectsCount
+        cloudProjectsCount,
+        recomputeCloudStorageUsage,
+        getCloudProjectTotalSizeByCloudId,
     } = useProjects();
     const [refreshVersion, setRefreshVersion] = useState(0);
     const [linkingKey, setLinkingKey] = useState<string | null>(null);
     const [unlinkingKey, setUnlinkingKey] = useState<string | null>(null);
     const [refreshing, setRefreshing] = useState(false);
+    const [deletingAccount, setDeletingAccount] = useState(false);
     const [expandedSections, setExpandedSections] = useState<Record<SectionKey, boolean>>({
         account: true,
         providers: true,
         cloud: true
     });
     const [cloudAction, setCloudAction] = useState<{ id: string; kind: CloudActionKind } | null>(null);
-    const privacyUrl = `${ACCOUNT_PORTAL_BASE}/account/privacy`;
-    const supportUrl = `${ACCOUNT_PORTAL_BASE}/support`;
-    const deleteAccountUrl = `${ACCOUNT_PORTAL_BASE}/account/delete`;
 
     const currentUser = useMemo(() => auth.currentUser ?? user, [user, refreshVersion]);
     const providerData = useMemo(() => currentUser?.providerData || [], [currentUser]);
@@ -122,12 +120,33 @@ export default function AccountSettingsModal({ open, onClose }: { open: boolean;
             .filter((project) => (project.storage ?? "local") === "cloud")
             .sort((a, b) => (b.updatedAt || "").localeCompare(a.updatedAt || ""));
     }, [projects]);
+    const [projectSizes, setProjectSizes] = useState<Record<string, number>>({});
+    // compute per-project sizes on change
+    useEffect(() => {
+        let mounted = true;
+        const run = async () => {
+            const next: Record<string, number> = {};
+            // Use provider's function to compute per-cloud size (available from top-level destructure)
+            for (const p of cloudProjects) {
+                try {
+                    const id = p._cloudId || p.id;
+                    const size = await getCloudProjectTotalSizeByCloudId(id);
+                    if (!mounted) return;
+                    next[p.id] = size;
+                } catch { /* ignore per-project */ }
+            }
+            if (mounted) setProjectSizes(next);
+        };
+        void run();
+        return () => { mounted = false; };
+    }, [cloudProjects, getCloudProjectTotalSizeByCloudId, refreshVersion]);
     const storageLimitBytes = Math.max(cloudMaxStorageMB || 0, 0) * 1024 * 1024;
     const storageUsagePercent = storageLimitBytes > 0 && cloudBytesUsed > 0 ? Math.min(100, Math.round((cloudBytesUsed / storageLimitBytes) * 100)) : 0;
     const storageUsageLabel = storageLimitBytes > 0 ? `${formatBytes(cloudBytesUsed)} / ${cloudMaxStorageMB} MB` : `${formatBytes(cloudBytesUsed)} used`;
     const normalizedProjectCap = cloudMaxProjects && cloudMaxProjects > 0 ? cloudMaxProjects : 0;
     const reachedProjectLimit = normalizedProjectCap > 0 && cloudProjectsCount >= normalizedProjectCap;
     const projectUsageLabel = normalizedProjectCap ? `${Math.min(cloudProjectsCount, normalizedProjectCap)} / ${normalizedProjectCap}` : `${cloudProjectsCount}`;
+    const storageBarClass = storageUsagePercent >= 90 ? 'bg-red-400' : storageUsagePercent >= 50 ? 'bg-amber-400' : 'bg-[color:var(--accent)]';
 
     const toggleSection = (key: SectionKey) => setExpandedSections((prev) => ({ ...prev, [key]: !prev[key] }));
     const runCloudAction = async (id: string, kind: CloudActionKind, action: () => Promise<void>) => {
@@ -150,21 +169,6 @@ export default function AccountSettingsModal({ open, onClose }: { open: boolean;
         }
     };
 
-    const handleCloudCopy = async (projectId: string, cloudId: string | undefined, projectName: string) => {
-        if (!cloudId) {
-            notify({ type: "error", message: "Cloud ID missing for this project.", persistent: false });
-            return;
-        }
-        try {
-            await runCloudAction(projectId, "copy", async () => {
-                const result = await importProjectFromCloudLocalOnly(cloudId);
-                if (!result) throw new Error("copy-failed");
-            });
-            notify({ type: "success", message: `${projectName || "Portfolio"} copied to local projects.`, persistent: false });
-        } catch {
-            notify({ type: "error", message: `Couldn't copy ${projectName || "portfolio"} locally.`, persistent: false });
-        }
-    };
 
     const handleCloudDelete = async (projectId: string, cloudId: string | undefined, projectName: string) => {
         if (!cloudId) {
@@ -272,6 +276,36 @@ export default function AccountSettingsModal({ open, onClose }: { open: boolean;
         }
     };
 
+    const handleDeleteAccount = async () => {
+        if (!auth.currentUser) { notify({ type: 'error', message: 'Sign in to delete account.', persistent: false }); return; }
+        const confirmed = window.confirm('Delete your account? This will permanently remove all portfolios, assets, and account data. This cannot be undone. Continue?');
+        if (!confirmed) return;
+        // Extra: require typed confirmation to avoid accidental deletes
+        const typed = window.prompt('Type DELETE to confirm permanent deletion. This cannot be undone.');
+        if (!typed || typed.trim().toUpperCase() !== 'DELETE') {
+            notify({ type: 'warn', message: 'Account deletion cancelled: typed confirmation failed.', persistent: false });
+            return;
+        }
+        setDeletingAccount(true);
+        try {
+            const fn = httpsCallable(getFunctions(undefined, 'us-central1'), 'deleteAccount');
+            const res = await fn({});
+            if (res?.data && (res.data as any).ok) {
+                try { notify({ type: 'success', message: 'Account deleted. Signing out…', persistent: false }); } catch { }
+                // Sign out locally and close modal
+                try { await auth.signOut(); } catch { }
+                onClose();
+            } else {
+                notify({ type: 'error', message: 'Failed to delete account.', persistent: false });
+            }
+        } catch (err) {
+            console.error('delete account failed', err);
+            notify({ type: 'error', message: 'Failed to delete account. Try again later.', persistent: false });
+        } finally {
+            setDeletingAccount(false);
+        }
+    };
+
     const renderSection = (key: SectionKey, title: string, status?: string, children?: React.ReactNode) => (
         <div className="border border-[color:var(--border)] rounded-md">
             <button
@@ -286,7 +320,7 @@ export default function AccountSettingsModal({ open, onClose }: { open: boolean;
                 {status && <span className="text-[10px] uppercase tracking-wide text-[color:var(--fg-muted)]">{status}</span>}
             </button>
             {expandedSections[key] && (
-                <div className="border-t border-[color:var(--border)] bg-[color:var(--muted)]/20 p-4 space-y-3">
+                <div className="border-t border-[color:var(--border)] bg-[color:var(--muted)]/20 p-4 space-y-3 animate-[py-fade-in_0.2s_ease-out]">
                     {children}
                 </div>
             )}
@@ -342,7 +376,7 @@ export default function AccountSettingsModal({ open, onClose }: { open: boolean;
                         </div>
                     </div>
                     <div className="flex flex-wrap gap-2">
-                        <button className="btn btn-ghost btn-sm" onClick={() => openExternal(privacyUrl)}>
+                        <button className="btn btn-ghost btn-sm" disabled title="Coming soon">
                             <ExternalLink size={14} />
                             <span className="ml-2">Privacy FAQ</span>
                         </button>
@@ -352,7 +386,7 @@ export default function AccountSettingsModal({ open, onClose }: { open: boolean;
                     <div className="rounded-lg border border-[color:var(--border)] bg-[color:var(--muted)]/20 p-4 space-y-2">
                         <p className="section-title">Security resources</p>
                         <p className="text-sm text-[color:var(--fg-muted)]">Review session history, retention policies, and best practices.</p>
-                        <button className="btn btn-ghost btn-sm" onClick={() => openExternal(privacyUrl)}>
+                        <button className="btn btn-ghost btn-sm" disabled title="Coming soon">
                             <Shield size={14} />
                             <span className="ml-2">Privacy & security portal</span>
                         </button>
@@ -360,7 +394,7 @@ export default function AccountSettingsModal({ open, onClose }: { open: boolean;
                     <div className="rounded-lg border border-[color:var(--border)] bg-[color:var(--muted)]/20 p-4 space-y-2">
                         <p className="section-title">Account help</p>
                         <p className="text-sm text-[color:var(--fg-muted)]">Browse FAQs for syncing, quotas, billing, and troubleshooting.</p>
-                        <button className="btn btn-ghost btn-sm" onClick={() => openExternal(supportUrl)}>
+                        <button className="btn btn-ghost btn-sm" disabled title="Coming soon">
                             <ExternalLink size={14} />
                             <span className="ml-2">Visit help center</span>
                         </button>
@@ -372,8 +406,8 @@ export default function AccountSettingsModal({ open, onClose }: { open: boolean;
                         <span>Delete account</span>
                     </div>
                     <p className="text-sm text-red-100">Permanently remove your account, synced portfolios, and cloud assets. This action cannot be undone.</p>
-                    <button className="btn btn-error btn-sm" onClick={() => openExternal(deleteAccountUrl)}>
-                        Delete my account
+                    <button className="btn btn-error btn-sm" onClick={async () => { if (!deletingAccount) { await handleDeleteAccount(); } }} disabled={deletingAccount}>
+                        {deletingAccount ? <Loader2 size={14} className="animate-spin" /> : 'Delete my account'}
                     </button>
                 </div>
             </div>
@@ -395,30 +429,41 @@ export default function AccountSettingsModal({ open, onClose }: { open: boolean;
                     const isLinked = providerIds.has(card.providerId);
                     const linking = linkingKey === card.key;
                     const unlinking = unlinkingKey === card.key;
+                    const isComingSoon = card.key === 'github';
                     return (
-                        <div key={card.key} className="rounded-lg border border-[color:var(--border)] bg-[color:var(--surface)]/60 p-4 space-y-3">
+                        <div key={card.key} className={`rounded-lg border border-[color:var(--border)] p-4 space-y-3 ${isComingSoon ? 'bg-[color:var(--surface)]/30 opacity-60' : 'bg-[color:var(--surface)]/60'}`}>
                             <div className="flex items-center justify-between gap-3">
-                                <div className="flex items-center gap-3">
-                                    <div className="w-10 h-10 rounded-full bg-[color:var(--muted)]/40 border border-[color:var(--border)] flex items-center justify-center">
+                                <div className="flex items-center gap-3 flex-1 min-w-0">
+                                    <div className="w-10 h-10 rounded-full bg-[color:var(--muted)]/40 border border-[color:var(--border)] flex items-center justify-center flex-shrink-0">
                                         <Icon size={18} />
                                     </div>
-                                    <div>
+                                    <div className="min-w-0 flex-1">
                                         <p className="text-sm font-semibold">{card.label}</p>
                                         <p className="text-xs text-[color:var(--fg-muted)]">{card.description}</p>
+                                        {isLinked && (() => {
+                                            const linkedAccount = providerData.find(p => p.providerId === card.providerId);
+                                            return linkedAccount?.email || linkedAccount?.displayName ? (
+                                                <p className="text-xs text-[color:var(--accent)] mt-1 truncate" title={linkedAccount.email || linkedAccount.displayName || ''}>
+                                                    {linkedAccount.email || linkedAccount.displayName}
+                                                </p>
+                                            ) : null;
+                                        })()}
                                     </div>
                                 </div>
-                                <span className={`text-xs font-semibold uppercase tracking-wide ${isLinked ? "text-emerald-300" : "text-[color:var(--fg-muted)]"}`}>
-                                    {isLinked ? "Linked" : "Not linked"}
+                                <span className={`text-xs font-semibold uppercase tracking-wide flex-shrink-0 ${isComingSoon ? "text-[color:var(--fg-muted)]" : isLinked ? "text-emerald-300" : "text-[color:var(--fg-muted)]"}`}>
+                                    {isComingSoon ? "Coming Soon" : isLinked ? "Linked" : "Not linked"}
                                 </span>
                             </div>
                             <div className="flex flex-wrap gap-2">
-                                {isLinked ? (
+                                {isComingSoon ? (
+                                    <p className="text-xs text-[color:var(--fg-muted)]">OAuth integration coming soon</p>
+                                ) : isLinked ? (
                                     <>
                                         <button className="btn btn-outline btn-sm" onClick={() => handleUnlinkProvider(card)} disabled={unlinking}>
                                             {unlinking ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
                                             <span className="ml-2">Unlink</span>
                                         </button>
-                                        <button className="btn btn-ghost btn-sm" onClick={() => handleLinkProvider(card)}>
+                                        <button className="btn btn-ghost btn-sm" disabled title="Coming soon">
                                             <Link2 size={14} />
                                             <span className="ml-2">Manage in browser</span>
                                         </button>
@@ -433,29 +478,6 @@ export default function AccountSettingsModal({ open, onClose }: { open: boolean;
                         </div>
                     );
                 })}
-            </div>
-            <div className="rounded-lg border border-[color:var(--border)] bg-[color:var(--surface)]/60 p-4 space-y-3">
-                <div className="flex items-center justify-between">
-                    <p className="section-title">Linked accounts</p>
-                    <span className="text-xs text-[color:var(--fg-muted)]">{providerData.length} connected</span>
-                </div>
-                <div className="divide-y divide-[color:var(--border)]/60">
-                    {providerData.length === 0 && (
-                        <p className="py-2 text-sm text-[color:var(--fg-muted)]">No linked providers detected.</p>
-                    )}
-                    {providerData.map((entry) => (
-                        <div key={`${entry.providerId}-${entry.uid}`} className="py-2 flex items-center justify-between gap-3 text-sm">
-                            <div>
-                                <p className="font-medium">{providerFriendlyNames[entry.providerId || ""] || entry.providerId}</p>
-                                <p className="text-xs text-[color:var(--fg-muted)]">{entry.email || entry.uid}</p>
-                            </div>
-                            <div className="text-xs text-[color:var(--fg-muted)] flex items-center gap-1">
-                                <CheckCircle2 size={14} className="text-emerald-300" />
-                                {entry.providerId}
-                            </div>
-                        </div>
-                    ))}
-                </div>
             </div>
         </div>
     );
@@ -474,7 +496,7 @@ export default function AccountSettingsModal({ open, onClose }: { open: boolean;
                     <div className="rounded-lg border border-[color:var(--border)] bg-[color:var(--surface)]/60 p-4 space-y-2">
                         <div className="flex items-center justify-between">
                             <div>
-                                <p className="text-xs uppercase tracking-[0.3em] text-[color:var(--fg-muted)]">Cloud projects</p>
+                                <p className="section-title">Cloud projects</p>
                                 <p className="text-xl font-semibold">{projectUsageLabel}</p>
                             </div>
                             <Cloud size={20} />
@@ -486,21 +508,26 @@ export default function AccountSettingsModal({ open, onClose }: { open: boolean;
                     <div className="rounded-lg border border-[color:var(--border)] bg-[color:var(--surface)]/60 p-4 space-y-2">
                         <div className="flex items-center justify-between">
                             <div>
-                                <p className="text-xs uppercase tracking-[0.3em] text-[color:var(--fg-muted)]">Data usage</p>
+                                <p className="section-title">Cloud usage</p>
                                 <p className="text-xl font-semibold">{storageUsageLabel}</p>
                             </div>
-                            <HardDrive size={20} />
+                            <div className="flex items-center gap-2">
+                                <button className="btn btn-ghost btn-xs" onClick={async () => { setRefreshing(true); try { await recomputeCloudStorageUsage(); setRefreshVersion(v => v + 1); } finally { setRefreshing(false); } }} disabled={refreshing}>
+                                    {refreshing ? <Loader2 size={14} className="animate-spin" /> : <RefreshCcw size={14} />}
+                                </button>
+                                <HardDrive size={20} />
+                            </div>
                         </div>
                         {storageLimitBytes > 0 && (
                             <div className="h-2 rounded-full bg-[color:var(--border)]/60 overflow-hidden">
-                                <div className="h-full bg-[color:var(--accent)]" style={{ width: `${storageUsagePercent}%` }}></div>
+                                <div className={`h-full ${storageBarClass}`} style={{ width: `${storageUsagePercent}%` }}></div>
                             </div>
                         )}
                         <p className="text-xs text-[color:var(--fg-muted)]">Usage updates after each sync.</p>
                     </div>
                 </div>
                 <div className="space-y-3">
-                    <p className="text-xs uppercase tracking-[0.3em] text-[color:var(--fg-muted)]">Cloud project list</p>
+                    <p className="section-title">Cloud project list</p>
                     {cloudProjects.length === 0 ? (
                         <div className="rounded-lg border border-dashed border-[color:var(--border)] p-4 text-sm text-[color:var(--fg-muted)]">
                             No cloud portfolios yet. Sync a local project from Portfolio Settings → Build to send it here.
@@ -513,34 +540,30 @@ export default function AccountSettingsModal({ open, onClose }: { open: boolean;
                                 const isBusy = cloudAction?.id === project.id;
                                 const isBusyKind = (kind: CloudActionKind) => isBusy && cloudAction?.kind === kind;
                                 const pageCount = Array.isArray(project.pageOrder) && project.pageOrder.length > 0 ? project.pageOrder.length : Object.keys(project.pages || {}).length;
+                                const totalBytes = projectSizes[project.id] || 0;
+                                const totalLabel = formatBytes(totalBytes);
                                 return (
-                                    <div key={project.id} className="rounded-lg border border-[color:var(--border)] bg-[color:var(--surface)]/60 p-4 space-y-3">
+                                    <div key={project.id} className="rounded-lg border border-[color:var(--border)] bg-[color:var(--surface)]/60 p-4 space-y-3 hover-accent transition cursor-pointer">
                                         <div className="flex flex-wrap items-start justify-between gap-3">
                                             <div>
                                                 <p className="text-sm font-semibold">{projectName}</p>
                                                 <p className="text-xs text-[color:var(--fg-muted)]">Updated {formatDate(project.updatedAt)}</p>
+                                                <p className="text-xs text-[color:var(--fg-muted)]">Storage: {totalLabel}</p>
                                             </div>
                                             <span className="text-xs text-[color:var(--fg-muted)]">{pageCount} pages</span>
                                         </div>
                                         <div className="flex flex-wrap gap-2">
                                             <button
-                                                className="btn btn-ghost btn-xs"
+                                                className="btn btn-ghost btn-xs hover-accent transition"
                                                 disabled={isBusy}
                                                 onClick={() => handleCloudExport(project.id, projectName)}
                                             >
                                                 {isBusyKind("export") ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
                                                 <span className="ml-2">{isBusyKind("export") ? "Saving…" : "Save file"}</span>
                                             </button>
+                                            {/* Save local copy button removed — 'Save file' handles saving to local disk */}
                                             <button
-                                                className="btn btn-ghost btn-xs"
-                                                disabled={isBusy}
-                                                onClick={() => handleCloudCopy(project.id, cloudId, projectName)}
-                                            >
-                                                {isBusyKind("copy") ? <Loader2 size={14} className="animate-spin" /> : <Copy size={14} />}
-                                                <span className="ml-2">{isBusyKind("copy") ? "Copying…" : "Save local copy"}</span>
-                                            </button>
-                                            <button
-                                                className="btn btn-ghost btn-xxs text-red-400 border border-red-500/40 hover:bg-red-500/10"
+                                                className="btn btn-ghost btn-xxs text-red-400 border border-red-500/40 hover:bg-red-500/10 hover-accent transition"
                                                 disabled={isBusy}
                                                 onClick={() => handleCloudDelete(project.id, cloudId, projectName)}
                                             >
@@ -575,6 +598,7 @@ export default function AccountSettingsModal({ open, onClose }: { open: boolean;
         >
             <div
                 className="surface w-full max-w-2xl border border-[color:var(--border)] rounded-md shadow-2xl"
+                style={{ animation: 'py-pop 0.25s ease-out' }}
                 onClick={(e) => e.stopPropagation()}
             >
                 <div className="flex items-center justify-between px-4 py-3 border-b border-[color:var(--border)]">

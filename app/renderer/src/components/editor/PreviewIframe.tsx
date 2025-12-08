@@ -34,10 +34,10 @@ export default function PreviewIframe({
             // Minimal blank page styles and CSS variables fallback
             doc.open();
             doc.write(`<!doctype html><html><head><meta charset="utf-8" />
-        <style>
-                    html, body { height: 100%; overflow-x: hidden; overflow-y: auto; }
-          *, *::before, *::after { box-sizing: border-box; }
-          body { margin: 0; background: #ffffff; color: #111827; font: 14px/1.4 ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, Noto Sans, "Apple Color Emoji", "Segoe UI Emoji"; }
+                <style>
+                                        html, body { height: 100%; overflow-x: hidden; overflow-y: auto; margin: 0; background: #0b1220; }
+                    *, *::before, *::after { box-sizing: border-box; }
+                    body { color: #111827; font: 14px/1.4 ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, Noto Sans, "Apple Color Emoji", "Segoe UI Emoji"; }
           :root {
             --bg: #ffffff;
             --surface: #ffffff;
@@ -88,9 +88,11 @@ export default function PreviewIframe({
         const nextTheme = theme || FALLBACK_THEME;
         applyThemeToElement(root, nextTheme);
         applyThemeToElement(body, nextTheme);
-        if (pageBackground) {
-            body.style.backgroundColor = pageBackground;
-            root.style.setProperty('--bg', pageBackground);
+        const bgColor = pageBackground || nextTheme.colors.background;
+        if (bgColor) {
+            try { body.style.backgroundColor = bgColor; } catch { /* ignore */ }
+            try { root.style.backgroundColor = bgColor; } catch { /* ignore */ }
+            try { root.style.setProperty('--bg', bgColor); } catch { /* ignore */ }
         }
     }, [docReady, theme, pageBackground]);
 

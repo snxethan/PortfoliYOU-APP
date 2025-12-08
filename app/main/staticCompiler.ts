@@ -2,9 +2,11 @@ import fs from 'node:fs/promises';
 import fsSync from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+
 import { marked } from 'marked';
 import createDOMPurify from 'dompurify';
 import { JSDOM } from 'jsdom';
+
 import { FALLBACK_WIDGET_THEME, themeSnapshotToCss, type WidgetThemeSnapshot } from '../shared/staticStyles';
 import { normalizeExternalLinkUrl } from '../shared/widgets/linkUrl';
 import {
@@ -154,7 +156,7 @@ function resolveAssetPath(value: string | undefined, assetsBase: string): string
 }
 
 const GITHUB_LAYOUTS = new Set(['cards', 'list']);
-const FALLBACK_GITHUB_USERNAME = 'vercel';
+const FALLBACK_GITHUB_USERNAME = 'snxethan';
 
 type SanitizedRepoPreview = {
     id: string;
@@ -878,7 +880,19 @@ export async function buildStaticSite(payload: ProjectPayload & { useTempOutput?
         const themeCss = providedThemeCss.length > 0 ? providedThemeCss : themeSnapshotToCss(themeSnapshot);
         const tailwindSnapshot = (payload.globalCss?.tailwind || '').trim();
 
-        const baseCss = `*{box-sizing:border-box}body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,Inter,sans-serif;color:var(--fg,#0f172a)}.container{max-width:1100px;margin:0 auto;padding:36px}.page-canvas{position:relative;margin:0 auto}.page-widget-wrapper{position:absolute;will-change:transform}.widget{width:100%;height:100%;display:block}.widget img,.widget video{max-width:100%;max-height:100%;display:block}.widget-unknown,.widget-error{font-family:monospace;background:transparent;border:1px dashed var(--border,#d1d5db);padding:12px;border-radius:6px;white-space:pre-wrap}.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}`;
+        const baseCss = [
+            '*{box-sizing:border-box}',
+            'html,body{min-height:100%;background:var(--bg,#0f172a)}',
+            "body{margin:0;min-height:100vh;font-family:system-ui,-apple-system,'Segoe UI',Roboto,Inter,sans-serif;color:var(--fg,#0f172a)}",
+            'main{min-height:100vh;background:inherit}',
+            '.container{max-width:1100px;margin:0 auto;padding:36px}',
+            '.page-canvas{position:relative;margin:0 auto;width:100%;background:inherit}',
+            '.page-widget-wrapper{position:absolute;will-change:transform}',
+            '.widget{width:100%;height:100%;display:block}',
+            '.widget img,.widget video{max-width:100%;max-height:100%;display:block}',
+            ".widget-unknown,.widget-error{font-family:monospace;background:transparent;border:1px dashed var(--border,#d1d5db);padding:12px;border-radius:6px;white-space:pre-wrap}",
+            '.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}',
+        ].join('\n');
 
         const collectedCss: string[] = [];
 
@@ -898,7 +912,7 @@ export async function buildStaticSite(payload: ProjectPayload & { useTempOutput?
         for (const pid of pages) {
             const pg = pagesMap[pid] || { title: String(pid) };
             const raw = String(pg.title || pid || 'page');
-            let base = slugify(raw) || String(pid).slice(0, 8);
+            const base = slugify(raw) || String(pid).slice(0, 8);
             // ensure uniqueness
             let candidate = base;
             let i = 1;
@@ -960,8 +974,16 @@ export async function buildStaticSite(payload: ProjectPayload & { useTempOutput?
             }).join('\n');
 
             const title = escapeHtml(String(pg.title || project.portfolioMeta?.siteTitle || 'Portfolio'));
-            const pageBg = pg.backgroundColor || themeSnapshot.background;
-            const html = `<!doctype html>\n<html lang="en">\n<head>\n  <meta charset="utf-8" />\n  <meta name="viewport" content="width=device-width,initial-scale=1" />\n  <title>${title}</title>\n  <link rel="stylesheet" href="./assets/tailwind.css" />\n  <link rel="stylesheet" href="./assets/theme.css" />\n  <link rel="stylesheet" href="./site.css" />\n</head>\n<body style="background:${pageBg};">\n  <div class="container">\n    <div class=\"page-canvas\" style=\"position:relative;height:${height}px;max-width:${innerWidth}px;margin:0 auto;\">\n      ${widgetBodies}\n    </div>\n  </div>\n  <script src="./site.js"></script>\n</body>\n</html>`;
+            const pageBackground = typeof pg.backgroundColor === 'string' && pg.backgroundColor.trim().length > 0
+                ? pg.backgroundColor.trim()
+                : null;
+            const themeBackground = themeSnapshot.background || '#0f172a';
+            const effectiveBackground = pageBackground || themeBackground;
+            const htmlStyle = ` style="background:${effectiveBackground};"`;
+            const bodyStyle = ` style="background:${effectiveBackground};"`;
+            const mainStyle = ` style="min-height:100vh;${pageBackground ? `background:${pageBackground};` : 'background:inherit;'}"`;
+            const canvasStyle = `position:relative;height:${height}px;max-width:${innerWidth}px;margin:0 auto;${pageBackground ? `background:${pageBackground};` : ''}`;
+            const html = `<!doctype html>\n<html lang="en"${htmlStyle}>\n<head>\n  <meta charset="utf-8" />\n  <meta name="viewport" content="width=device-width,initial-scale=1" />\n  <title>${title}</title>\n  <link rel="stylesheet" href="./assets/tailwind.css" />\n  <link rel="stylesheet" href="./assets/theme.css" />\n  <link rel="stylesheet" href="./site.css" />\n</head>\n<body${bodyStyle}>\n  <main${mainStyle}>\n    <div class="container">\n      <div class="page-canvas" style="${canvasStyle}">\n        ${widgetBodies}\n      </div>\n    </div>\n  </main>\n  <script src="./site.js"></script>\n</body>\n</html>`;
 
             // Use slugified filename
             await fs.writeFile(path.join(out, pageFilenameMap[pid]), html, 'utf8');
@@ -994,7 +1016,7 @@ export async function buildStaticSite(payload: ProjectPayload & { useTempOutput?
         slides.forEach(function(s,i){s.style.display=(i===0?'block':'none');});
         setInterval(function(){slides[idx].style.display='none';idx=(idx+1)%slides.length;slides[idx].style.display='block';},3500);
     });
-    const emailPattern=/^.+@.+\..+$/;
+    const emailPattern=/^.+@.+[.].+$/;
     document.querySelectorAll('.widget-contact form[data-contact-widget]').forEach(function(form){
         const nameInput=form.querySelector('input[name="contact-name"]');
         const emailInput=form.querySelector('input[name="contact-email"]');

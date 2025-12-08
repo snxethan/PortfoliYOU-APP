@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useLayoutEffect, lazy, Suspense } from "react";
 import type { CSSProperties } from "react";
-import { ChevronsLeft, ChevronsRight, ChevronDown, ChevronRight, GripVertical, Settings, Palette } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { ChevronsLeft, ChevronsRight, ChevronDown, ChevronRight, GripVertical, Settings } from "lucide-react";
 import { DndContext, PointerSensor, MouseSensor, TouchSensor, useSensor, useSensors, DragEndEvent, DragStartEvent, rectIntersection, DragOverlay, type Modifier } from "@dnd-kit/core";
 
 import { useProjects } from "../providers/ProjectsProvider";
+import { applyRenameMapToItems, applyRenameMapToIdList } from '../lib/renameUtils';
 import { useNotifications } from '../providers/NotificationsProvider';
 import { usePortfolioSettings } from "../providers/PortfolioSettingsProvider";
 import type { GridItem } from "../components/editor/canvas/GridCanvas";
@@ -21,6 +23,8 @@ import { usePersistentFlag } from "../hooks/usePersistentFlag";
 import { getWidgetThemeSnapshot } from "../widgets/theme";
 import type { SelectionChangeOptions, MarqueeSelectionOptions } from "../components/editor/selection";
 import { WidgetsRegistry } from "../widgets/registry";
+
+import CanvasFullscreen from "./CanvasFullscreen";
 
 const COLS = 12;
 const DEFAULT_ROW_H = 32; // px height per row (content area)
@@ -57,8 +61,32 @@ function serializeGridItems(list: GridItem[]) {
   }));
 }
 
+function IconFullscreen() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M8 3H5a2 2 0 0 0-2 2v3" />
+      <path d="M16 3h3a2 2 0 0 1 2 2v3" />
+      <path d="M8 21H5a2 2 0 0 1-2-2v-3" />
+      <path d="M16 21h3a2 2 0 0 0 2-2v-3" />
+    </svg>
+  );
+}
+// function IconExitFullscreen() {
+//   return (
+//     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+//       <path d="M9 9L3 3" />
+//       <path d="M15 9l6-6" />
+//       <path d="M9 15l-6 6" />
+//       <path d="M15 15l6 6" />
+//     </svg>
+//   );
+// }
+
 export default function EditorPage() {
-  const { selectedProject, createPage, deletePage, renamePage, getPageItems, setPageItems, setPageStarter, setPageBackground, activeTheme, updateTheme } = useProjects();
+  // Fullscreen state for canvas
+  const [isCanvasFullscreen, setIsCanvasFullscreen] = useState(false);
+  const [isClosingFullscreen, setIsClosingFullscreen] = useState(false);
+  const { selectedProject, selectProject, createPage, duplicatePage, deletePage, renamePage, getPageItems, setPageItems, setPageStarter, setPageBackground, activeTheme, updateTheme } = useProjects();
   const { add: notify } = useNotifications();
   const { openSettings } = usePortfolioSettings();
 
@@ -72,14 +100,14 @@ export default function EditorPage() {
   // Track current page within the selected project
   const [currentPageId, setCurrentPageId] = useState<string | null>(null);
   useEffect(() => {
-    if (!selectedProject) { setCurrentPageId(null); return; }
+    if (!selectedProject) { selectPage(null); return; }
     try {
       const stored = localStorage.getItem(`py_current_page_${selectedProject.id}`);
       const fallback = selectedProject.pageOrder?.[0] || null;
-      setCurrentPageId(stored || fallback || null);
+      selectPage(stored || fallback || null);
     } catch {
       const fallback = selectedProject.pageOrder?.[0] || null;
-      setCurrentPageId(fallback || null);
+      selectPage(fallback || null);
     }
   }, [selectedProject?.id]);
 
@@ -91,7 +119,7 @@ export default function EditorPage() {
     const idx = (selectedProject.pageOrder || []).indexOf(currentPageId);
     if (idx >= 10) {
       const fallback = selectedProject.pageOrder?.[0] || null;
-      setCurrentPageId(fallback);
+      selectPage(fallback);
       try { if (fallback) localStorage.setItem(`py_current_page_${selectedProject.id}`, fallback); } catch { /* ignore */ }
       window.dispatchEvent(new CustomEvent('py:notify', { detail: { type: 'warn', message: 'Cloud projects support up to 10 pages. Showing first page.' } }));
     }
@@ -114,31 +142,85 @@ export default function EditorPage() {
   // Demo items to drag around the canvas
   const [items, setItems] = useState<GridItem[]>([]);
   const itemsRef = useRef<GridItem[]>([]);
+  const itemsPageRef = useRef<string | null>(null);
   const lastPersistedSignatureRef = useRef<string | null>(null);
-  const snapshotSignature = useCallback((list: GridItem[]) => JSON.stringify(serializeGridItems(list)), []);
   const suppressHydrateRef = useRef(false);
   const dragInProgressRef = useRef(false);
   const autoPersistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const replaceItems = useCallback((next: GridItem[]) => {
+  const lastLoadedSignatureRef = useRef<string>('');
+  const replaceItems = useCallback((next: GridItem[], pageId?: string | null) => {
+    const targetPageId = typeof pageId === 'undefined' ? currentPageId : pageId;
+    itemsPageRef.current = targetPageId ?? null;
     itemsRef.current = next;
     setItems(next);
-    lastPersistedSignatureRef.current = snapshotSignature(next);
-  }, [snapshotSignature]);
+    lastLoadedSignatureRef.current = JSON.stringify(serializeGridItems(next));
+    if (process.env.NODE_ENV === 'development') {
+      try { console.debug('[Editor] replaceItems: page=', targetPageId, 'items=', next.map(i => i.id).join(', ')); } catch { /* ignore */ }
+    }
+    if (process.env.NODE_ENV === 'development') {
+      try {
+        console.debug('[Editor] replaceItems: page=', targetPageId, 'items=', next.map(i => i.id).join(', '));
+      } catch { /* ignore */ }
+    }
+  }, [currentPageId]);
   const persistItems = useCallback((snapshot?: GridItem[]) => {
     if (!selectedProject || !currentPageId) return;
-    try {
-      suppressHydrateRef.current = true;
-      const source = snapshot ?? itemsRef.current;
-      const serialized = serializeGridItems(source);
-      const signature = JSON.stringify(serialized);
-      if (lastPersistedSignatureRef.current === signature) {
-        suppressHydrateRef.current = false;
-        return;
+    if (!itemsPageRef.current || itemsPageRef.current !== currentPageId) {
+      if (process.env.NODE_ENV === 'development') {
+        try {
+          console.warn('[Editor] persistItems: skipped save due to page mismatch', {
+            projectId: selectedProject.id,
+            currentPageId,
+            itemsPageRef: itemsPageRef.current,
+          });
+        } catch {
+          /* noop */
+        }
       }
-      setPageItems(selectedProject.id, currentPageId, serialized);
+      return;
+    }
+    const source = snapshot ?? itemsRef.current;
+    const serialized = serializeGridItems(source);
+    const signature = JSON.stringify(serialized);
+
+    if (lastPersistedSignatureRef.current === signature) {
+      // Already persisted, but ensure loaded signature matches
+      lastLoadedSignatureRef.current = signature;
+      return;
+    }
+
+    suppressHydrateRef.current = true;
+    if (process.env.NODE_ENV === 'development') {
+      try { console.debug('[Editor] persistItems: scheduling save', { projectId: selectedProject?.id, pageId: currentPageId, items: source.map(i => i.id), signature }); } catch { /* ignore */ }
+    }
+    try {
+      try { cancelAutoPersist(); } catch { /* noop */ }
+      // Autosave should not clear widgets unintentionally. Do not pass allowClear here.
+      const saved = setPageItems(selectedProject.id, currentPageId, serialized) as any;
+      if (process.env.NODE_ENV === 'development') {
+        try { console.debug('[Editor] persistItems: setPageItems returned', { projectId: selectedProject?.id, pageId: currentPageId, savedPages: (saved && saved.pages && saved.pages[currentPageId] && saved.pages[currentPageId].widgets ? saved.pages[currentPageId].widgets.length : 0) }); } catch { /* ignore */ }
+      }
       lastPersistedSignatureRef.current = signature;
-    } catch {
-      suppressHydrateRef.current = false;
+      // If provider returns a project snapshot, compute the saved signature from it
+      try {
+        if (saved && saved.pages && saved.pages[currentPageId]) {
+          const savedIds = saved.pages[currentPageId].widgets || [];
+          const savedItems = savedIds.map((wid: string) => {
+            const w = saved.widgets[wid];
+            const layout = (w.layout || {}) as any;
+            return { id: w.widgetId, x: Number(layout.x ?? 0), y: Number(layout.y ?? 0), w: Number(layout.w ?? 1), h: Number(layout.h ?? 1), z: Number(layout.z ?? 0), title: layout.title || undefined, type: w.type || undefined, props: w.props, schemaVersion: typeof w.schemaVersion === 'number' ? w.schemaVersion : 1, pinned: Boolean(layout.pinned), locked: Boolean(layout.locked) } as GridItem;
+          });
+          lastLoadedSignatureRef.current = JSON.stringify(serializeGridItems(savedItems));
+        } else {
+          // fallback to signature of what we sent
+          lastLoadedSignatureRef.current = signature;
+        }
+      } catch {
+        lastLoadedSignatureRef.current = signature;
+      }
+    } finally {
+      // Keep suppress flag set; it will be cleared by the load effect after comparing signatures
+      // This prevents the effect from re-rendering unnecessarily when the provider updates
     }
   }, [selectedProject?.id, currentPageId, setPageItems]);
   const cancelAutoPersist = useCallback(() => {
@@ -151,6 +233,9 @@ export default function EditorPage() {
     cancelAutoPersist();
     autoPersistTimerRef.current = setTimeout(() => {
       autoPersistTimerRef.current = null;
+      if (process.env.NODE_ENV === 'development') {
+        try { console.debug('[Editor] scheduleAutoPersist: running scheduled persist', { projectId: selectedProject?.id, pageId: currentPageId }); } catch { /* ignore */ }
+      }
       persistItems();
     }, 600);
   }, [cancelAutoPersist, persistItems]);
@@ -179,26 +264,86 @@ export default function EditorPage() {
   const getPageItemsRef = useRef(getPageItems);
   useEffect(() => { getPageItemsRef.current = getPageItems; }, [getPageItems]);
 
-  const currentPageRevision = selectedProject && currentPageId
-    ? (selectedProject.pages?.[currentPageId]?.updatedAt ?? null)
-    : null;
 
-  // Load items from provider whenever project/page changes or page data updates
+
+  // Load items from provider only when project/page selection changes, not on every update
+  // The local state is the source of truth; suppressHydrateRef prevents unnecessary reloads
+  // when we've just persisted changes and the provider state updates as a result.
   useEffect(() => {
     if (!selectedProject || !currentPageId) {
-      suppressHydrateRef.current = false;
-      replaceItems([]);
-      return;
-    }
-    if (suppressHydrateRef.current) {
-      suppressHydrateRef.current = false;
+      lastLoadedSignatureRef.current = '';
+      replaceItems([], null);
       return;
     }
     const getter = getPageItemsRef.current;
     if (!getter) return;
     const loaded = getter(selectedProject.id, currentPageId) as GridItem[];
-    replaceItems(loaded);
-  }, [selectedProject?.id, currentPageId, currentPageRevision, replaceItems]);
+    const loadedSignature = JSON.stringify(serializeGridItems(loaded));
+    if (process.env.NODE_ENV === 'development') {
+      try {
+        console.debug('[Editor] hydrate: project=', selectedProject.id, 'page=', currentPageId, 'loaded=', loaded.map(i => i.id).join(', '), 'sig=', loadedSignature.slice(0, 64));
+      } catch { /* noop */ }
+    }
+
+    // Skip if we're in the middle of persisting AND the data hasn't changed
+    if (suppressHydrateRef.current && loadedSignature === lastLoadedSignatureRef.current) {
+      suppressHydrateRef.current = false;
+      return;
+    }
+
+    suppressHydrateRef.current = false;
+
+    // Only replace if the data actually changed from what we last loaded
+    if (loadedSignature !== lastLoadedSignatureRef.current) {
+      replaceItems(loaded, currentPageId);
+    } else {
+      // Even if we skip, ensure the signature is updated
+      lastLoadedSignatureRef.current = loadedSignature;
+    }
+  }, [selectedProject?.id, currentPageId]);
+
+  // Synchronously select a page and hydrate items to reduce race conditions where the
+  // UI updates current page id before the items state has been updated.
+  const selectPage = useCallback((id: string | null) => {
+    // Persist current page's items before switching to avoid losing recent edits
+    try { persistItems(); } catch { /* noop */ }
+    if (process.env.NODE_ENV === 'development') {
+      try { console.debug('[Editor] selectPage: switching from', { projectId: selectedProject?.id, currentPageId, to: id }); } catch { /* ignore */ }
+    }
+    setCurrentPageId(id);
+    if (!id || !selectedProject) {
+      lastLoadedSignatureRef.current = '';
+      replaceItems([], null);
+      return;
+    }
+    try {
+      const items = getPageItems(selectedProject.id, id) as GridItem[];
+      // Defensive: sometimes pages reference widget ids that aren't present in the project's widgets mapping
+      // In that case, rebuild items from project's widget mapping if possible so the canvas shows something
+      if ((!items || items.length === 0) && selectedProject) {
+        const page = selectedProject.pages[id];
+        if (page && Array.isArray(page.widgets) && page.widgets.length > 0) {
+          const rebuilt = page.widgets.map(wid => {
+            const w = selectedProject.widgets[wid] as any;
+            if (!w) return null;
+            const layout = (w.layout || {}) as any;
+            return { id: w.widgetId, x: Number(layout.x ?? 0), y: Number(layout.y ?? 0), w: Number(layout.w ?? 1), h: Number(layout.h ?? 1), z: Number(layout.z ?? 0), title: layout.title || undefined, type: w.type || undefined, props: w.props, schemaVersion: typeof w.schemaVersion === 'number' ? w.schemaVersion : 1, pinned: Boolean(layout.pinned), locked: Boolean(layout.locked) } as GridItem;
+          }).filter(Boolean) as GridItem[];
+          if (rebuilt.length > 0) {
+            if (process.env.NODE_ENV === 'development') console.warn('[Editor] selectPage: rebuilt items from project.widgets because getPageItems returned empty', { projectId: selectedProject.id, pageId: id, rebuiltCount: rebuilt.length });
+            lastLoadedSignatureRef.current = JSON.stringify(serializeGridItems(rebuilt));
+            replaceItems(rebuilt, id);
+            return;
+          }
+        }
+      }
+      lastLoadedSignatureRef.current = JSON.stringify(serializeGridItems(items));
+      replaceItems(items, id);
+    } catch {
+      lastLoadedSignatureRef.current = '';
+      replaceItems([], null);
+    }
+  }, [selectedProject, setCurrentPageId, getPageItems, replaceItems, persistItems, currentPageId]);
 
   const presentWidgetTypes = useMemo(() => {
     const set = new Set<string>();
@@ -219,7 +364,7 @@ export default function EditorPage() {
 
   // Simple undo/redo stacks (keep last 50 operations)
   type ItemsUpdater = (prev: GridItem[]) => GridItem[];
-  type HistoryEntry = { label: string; undo: ItemsUpdater; redo: ItemsUpdater; onUndo?: () => void; onRedo?: () => void };
+  type HistoryEntry = { label: string; projectId?: string | null; pageId?: string | null; prevItems?: GridItem[]; nextItems?: GridItem[]; undo: ItemsUpdater; redo: ItemsUpdater; onUndo?: () => void; onRedo?: () => void };
   const MAX_HISTORY = 50;
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [redoStack, setRedoStack] = useState<HistoryEntry[]>([]);
@@ -229,7 +374,15 @@ export default function EditorPage() {
       const next = makeNext(prev);
       itemsRef.current = next;
       setHistory(h => {
-        const entry: HistoryEntry = { label, undo: () => prev, redo: () => next };
+        const entry: HistoryEntry = {
+          label,
+          projectId: selectedProject?.id ?? null,
+          pageId: currentPageId ?? null,
+          prevItems: prev,
+          nextItems: next,
+          undo: () => prev,
+          redo: () => next,
+        };
         const nh = [...h, entry];
         return nh.length > MAX_HISTORY ? nh.slice(nh.length - MAX_HISTORY) : nh;
       });
@@ -240,35 +393,78 @@ export default function EditorPage() {
   }, [persistItems]);
 
   function undo() {
-    setItems(prev => {
-      if (history.length === 0) return prev;
-      const entry = history[history.length - 1];
-      const undone = entry.undo(prev);
-      itemsRef.current = undone;
-      persistItems(undone);
-      setHistory(h => h.slice(0, -1));
-      setRedoStack(r => [...r, entry]);
-      // Run side-effect for page-level actions (create/delete/rename)
-      entry.onUndo?.();
-      // notify user of successful undo
-      try { notify({ type: 'info', message: `Undid: ${entry.label}`, title: selectedProject?.name, persistent: false }); } catch { /* noop */ }
-      return undone;
-    });
+    console.log('UNDO called. History length:', history.length);
+    if (history.length === 0) return;
+    const entry = history[history.length - 1];
+    console.log('Undoing:', entry.label);
+
+    // If this entry has a recorded project/page snapshot, apply it via setPageItems for those IDs
+    if (entry.projectId && entry.pageId && entry.prevItems) {
+      try {
+        setPageItems(entry.projectId, entry.pageId, serializeGridItems(entry.prevItems), { allowClear: true, force: true });
+      } catch { /* noop */ }
+      // Ensure the editor selects the correct project/page so the items display correctly
+      try {
+        if (selectedProject?.id !== entry.projectId) selectProject(entry.projectId);
+        // Defer selectPage slightly to allow provider writes to propagate
+        queueMicrotask(() => selectPage(entry.pageId!));
+      } catch { /* noop */ }
+      // Update local state to the snapshot so the visual tree updates correctly
+      setItems(prev => {
+        const undone = entry.prevItems || prev;
+        itemsRef.current = undone;
+        return undone;
+      });
+    } else {
+      setItems(prev => {
+        const undone = entry.undo(prev);
+        itemsRef.current = undone;
+        void persistItems(undone);
+        return undone;
+      });
+    }
+
+    setHistory(h => h.slice(0, -1));
+    setRedoStack(r => [...r, entry]);
+
+    // Run side-effect for page-level actions (create/delete/rename) after state updates
+    entry.onUndo?.();
+
+    // notify user of successful undo
+    try { notify({ type: 'info', message: `Undid: ${entry.label}`, title: selectedProject?.name, persistent: false }); } catch { /* noop */ }
   }
 
   function redo() {
-    setItems(prev => {
-      if (redoStack.length === 0) return prev;
-      const entry = redoStack[redoStack.length - 1];
-      const redone = entry.redo(prev);
-      itemsRef.current = redone;
-      persistItems(redone);
-      setRedoStack(r => r.slice(0, -1));
-      setHistory(h => [...h, entry]);
-      entry.onRedo?.();
-      try { notify({ type: 'info', message: `Redid: ${entry.label}`, title: selectedProject?.name, persistent: false }); } catch { /* noop */ }
-      return redone;
-    });
+    if (redoStack.length === 0) return;
+    const entry = redoStack[redoStack.length - 1];
+
+    if (entry.projectId && entry.pageId && entry.nextItems) {
+      try { setPageItems(entry.projectId, entry.pageId, serializeGridItems(entry.nextItems), { allowClear: true, force: true }); } catch { /* noop */ }
+      try {
+        if (selectedProject?.id !== entry.projectId) selectProject(entry.projectId);
+        queueMicrotask(() => selectPage(entry.pageId!));
+      } catch { /* noop */ }
+      setItems(prev => {
+        const redone = entry.nextItems || prev;
+        itemsRef.current = redone;
+        return redone;
+      });
+    } else {
+      setItems(prev => {
+        const redone = entry.redo(prev);
+        itemsRef.current = redone;
+        persistItems(redone);
+        return redone;
+      });
+    }
+
+    setRedoStack(r => r.slice(0, -1));
+    setHistory(h => [...h, entry]);
+
+    // Run side-effect for page-level actions after state updates
+    entry.onRedo?.();
+
+    try { notify({ type: 'info', message: `Redid: ${entry.label}`, title: selectedProject?.name, persistent: false }); } catch { /* noop */ }
   }
 
   const canUndo = history.length > 0;
@@ -302,9 +498,17 @@ export default function EditorPage() {
     dragInProgressRef.current = false;
   }, [persistItems, setHistory, setRedoStack]);
 
+  // Navigation
+  const navigate = useNavigate();
+  function openWebpage() {
+    navigate('/deploy');
+    setTimeout(() => {
+      window.dispatchEvent(new CustomEvent('py:highlight-preview'));
+    }, 100);
+  }
+
   // Standalone popup preview state
   const [popupOpen, setPopupOpen] = useState<boolean>(false);
-  function openWebpage() { setPopupOpen(true); }
   function closeWebpage() { setPopupOpen(false); }
 
   const [zoom, setZoom] = useState<number>(() => {
@@ -383,12 +587,13 @@ export default function EditorPage() {
   // Adjust this value if you want a different minimum width.
   // NOTE: keep in sync with UI expectations.
 
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+
   const _paletteMinHint = 200;
   function togglePalette() {
     setPaletteCollapsed(prev => !prev);
   }
   const paletteRef = useRef<HTMLDivElement | null>(null);
+  const gridContainerRef = useRef<HTMLDivElement | null>(null);
 
   const beginResizePalette = useCallback((event: React.PointerEvent | PointerEvent) => {
     const ev = event as PointerEvent;
@@ -400,11 +605,26 @@ export default function EditorPage() {
     }
     const startX = ev.clientX;
     const startWidth = Math.max(paletteMinWidth, paletteWidth || 200);
+
+    // Get the grid container to calculate total available space
+    const gridEl = gridContainerRef.current;
+    const gridRect = gridEl?.getBoundingClientRect();
+
     const handleMove = (move: PointerEvent) => {
       // For a right-side sidebar, moving pointer left should increase palette width,
       // so compute delta relative to the startX accordingly.
       const delta = startX - move.clientX;
-      const next = Math.min(paletteMaxWidth, Math.max(paletteMinWidth, Math.round(startWidth + delta)));
+
+      // Calculate dynamic max width based on available space
+      let effectiveMaxWidth = paletteMaxWidth;
+      if (gridRect) {
+        // The grid container width is the total space available
+        // Leave at least 300px for the canvas area
+        const availableForPalette = gridRect.width - 300;
+        effectiveMaxWidth = Math.min(paletteMaxWidth, Math.max(paletteMinWidth, availableForPalette));
+      }
+
+      const next = Math.min(effectiveMaxWidth, Math.max(paletteMinWidth, Math.round(startWidth + delta)));
       setPaletteWidth(next);
       try { localStorage.setItem('py_palette_w', String(Math.round(next))); } catch { /* ignore */ }
     };
@@ -452,8 +672,9 @@ export default function EditorPage() {
 
   // Selection + keyboard shortcuts
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  // In-memory clipboard as fallback; cross-page copy/paste works via system clipboard
   const [clipboard, setClipboard] = useState<GridItem[] | null>(null);
-  const primarySelectedId = selectedIds.length ? selectedIds[selectedIds.length - 1] : null;
+  const _primarySelectedId = selectedIds.length ? selectedIds[selectedIds.length - 1] : null;
 
   const handleSelect = useCallback((id: string | null, opts?: SelectionChangeOptions) => {
     setSelectedIds((prev) => {
@@ -490,18 +711,19 @@ export default function EditorPage() {
     });
   }, []);
 
-  function withSelected(mut: (it: GridItem) => GridItem | GridItem[] | null, label: string) {
-    if (!primarySelectedId) return;
-    const src = items.find(i => i.id === primarySelectedId);
-    if (!src) return;
-    const result = mut(src);
-    if (!result) return;
-    if (Array.isArray(result)) {
-      commitUpdate(label, () => result);
-    } else {
-      commitUpdate(label, (prev) => prev.map(i => i.id === primarySelectedId ? result : i));
-    }
-  }
+  // Helper for selected item mutations (currently unused)
+  // function withSelected(mut: (it: GridItem) => GridItem | GridItem[] | null, label: string) {
+  //   if (!primarySelectedId) return;
+  //   const src = items.find(i => i.id === primarySelectedId);
+  //   if (!src) return;
+  //   const result = mut(src);
+  //   if (!result) return;
+  //   if (Array.isArray(result)) {
+  //     commitUpdate(label, () => result);
+  //   } else {
+  //     commitUpdate(label, (prev) => prev.map(i => i.id === primarySelectedId ? result : i));
+  //   }
+  // }
 
   useEffect(() => {
     setSelectedIds((prev) => {
@@ -511,6 +733,207 @@ export default function EditorPage() {
       return next.length === prev.length ? prev : next;
     });
   }, [items]);
+
+  // Reconcile runtime widget id renames emitted by ProjectsProvider
+  useEffect(() => {
+    const onPageItemsRenamed = (ev: Event) => {
+      try {
+        const detail = (ev as CustomEvent)?.detail as { projectId: string; pageId: string; renameMap: Record<string, string> } | undefined;
+        if (!detail || !detail.projectId || !detail.pageId || !detail.renameMap) return;
+        if (!selectedProject || selectedProject.id !== detail.projectId) return;
+        if (!currentPageId || currentPageId !== detail.pageId) return;
+        const map = detail.renameMap;
+        const keys = Object.keys(map);
+        if (!keys.length) return;
+        const impacted = itemsRef.current.some(it => !!map[it.id]);
+        if (!impacted) return;
+        if (process.env.NODE_ENV === 'development') console.debug('[Editor] page-items-renamed', { projectId: detail.projectId, pageId: detail.pageId, renameMap: map });
+        const nextItems = applyRenameMapToItems(itemsRef.current, map);
+        itemsRef.current = nextItems;
+        setItems(nextItems);
+        setSelectedIds(prev => applyRenameMapToIdList(prev, map));
+        setClipboard(prev => (prev ? applyRenameMapToItems(prev, map) : prev));
+        try {
+          const sig = JSON.stringify(serializeGridItems(nextItems));
+          lastLoadedSignatureRef.current = sig;
+          lastPersistedSignatureRef.current = sig;
+        } catch { /* ignore */ }
+      } catch { /* ignore */ }
+    };
+    window.addEventListener('py:page-items-renamed', onPageItemsRenamed as EventListener);
+    return () => { window.removeEventListener('py:page-items-renamed', onPageItemsRenamed as EventListener); };
+  }, [selectedProject?.id, currentPageId]);
+
+  // Global keyboard shortcuts for copy/paste/cut/duplicate/undo/redo
+  useEffect(() => {
+    async function handleGlobalKeyboard(e: KeyboardEvent) {
+      // Do not interfere with typing in inputs/textareas
+      const t = e.target as HTMLElement;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.getAttribute('contenteditable') === 'true')) return;
+
+      const meta = e.ctrlKey || e.metaKey;
+
+      // Undo (Ctrl/Cmd+Z)
+      if (meta && !e.shiftKey && e.key.toLowerCase() === 'z') {
+        e.preventDefault();
+        if (canUndo) {
+          undo();
+        }
+        return;
+      }
+
+      // Redo (Ctrl/Cmd+Y or Ctrl/Cmd+Shift+Z)
+      if ((meta && e.key.toLowerCase() === 'y') || (meta && e.shiftKey && e.key.toLowerCase() === 'z')) {
+        e.preventDefault();
+        if (canRedo) {
+          redo();
+        }
+        return;
+      }
+
+      // Copy (Ctrl/Cmd+C)
+      if (meta && e.key.toLowerCase() === 'c' && selectedIds.length) {
+        e.preventDefault();
+        const selectedSet = new Set(selectedIds);
+        const snapshot = items.filter((it) => selectedSet.has(it.id)).map((it) => ({ ...it }));
+        if (!snapshot.length) return;
+        setClipboard(snapshot);
+        try {
+          const payload = serializeClipboardItems(snapshot);
+          if (payload !== null) {
+            if (window.api?.clipboardWrite) {
+              void window.api.clipboardWrite({ text: CLIPBOARD_MARKER_MULTI + payload });
+            } else {
+              try { navigator.clipboard?.writeText(CLIPBOARD_MARKER_MULTI + payload); } catch { /* ignore */ }
+            }
+          }
+        } catch { /* ignore */ }
+        return;
+      }
+
+      // Cut (Ctrl/Cmd+X)
+      if (meta && e.key.toLowerCase() === 'x' && selectedIds.length) {
+        e.preventDefault();
+        const selectedSet = new Set(selectedIds);
+        const snapshot = items.filter((it) => selectedSet.has(it.id)).map((it) => ({ ...it }));
+        if (!snapshot.length) return;
+        setClipboard(snapshot);
+        try {
+          const payload = serializeClipboardItems(snapshot);
+          if (payload !== null) {
+            if (window.api?.clipboardWrite) {
+              void window.api.clipboardWrite({ text: CLIPBOARD_MARKER_MULTI + payload });
+            } else {
+              try { navigator.clipboard?.writeText(CLIPBOARD_MARKER_MULTI + payload); } catch { /* ignore */ }
+            }
+          }
+        } catch { /* ignore */ }
+        const removedTitles: string[] = [];
+        commitUpdate('Cut items', (prev) => {
+          prev.forEach((item) => { if (selectedSet.has(item.id)) removedTitles.push(item.title); });
+          if (!removedTitles.length) return prev;
+          return prev.filter((item) => !selectedSet.has(item.id));
+        });
+        removedTitles.forEach((title) => notifyWidgetChange('delete', title));
+        setSelectedIds([]);
+        return;
+      }
+
+      // Paste (Ctrl/Cmd+V)
+      if (meta && e.key.toLowerCase() === 'v') {
+        e.preventDefault();
+        // Try system clipboard first
+        let payloadText: string | null = null;
+        try {
+          if (window.api?.clipboardRead) {
+            const res = await window.api.clipboardRead();
+            if (res && res.ok && typeof res.text === 'string') payloadText = res.text;
+          } else {
+            try { payloadText = await navigator.clipboard?.readText(); } catch { payloadText = null; }
+          }
+        } catch { payloadText = null; }
+
+        let clipboardItems: GridItem[] | null = null;
+        if (payloadText && payloadText.startsWith(CLIPBOARD_MARKER_MULTI)) {
+          try { clipboardItems = JSON.parse(payloadText.slice(CLIPBOARD_MARKER_MULTI.length)); } catch { clipboardItems = null; }
+        } else if (payloadText && payloadText.startsWith(CLIPBOARD_MARKER_SINGLE)) {
+          try {
+            const legacy = JSON.parse(payloadText.slice(CLIPBOARD_MARKER_SINGLE.length));
+            clipboardItems = legacy ? [legacy] : null;
+          } catch { clipboardItems = null; }
+        }
+        // Fallback to in-memory clipboard state
+        if (!clipboardItems || clipboardItems.length === 0) {
+          clipboardItems = clipboard ? clipboard.map((it) => ({ ...it })) : null;
+        }
+        if (!clipboardItems || clipboardItems.length === 0) return;
+        const createdIds: string[] = [];
+        const clones = clipboardItems.map((item, idx) => {
+          const nid = typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : Math.random().toString(36).slice(2, 9);
+          createdIds.push(nid);
+          const width = Math.max(1, item.w ?? 1);
+          const height = Math.max(1, item.h ?? 1);
+          const offset = idx + 1;
+          const nx = Math.max(0, Math.min((item.x ?? 0) + offset, COLS - width));
+          const ny = Math.max(0, (item.y ?? 0) + offset);
+          return { ...item, id: nid, x: nx, y: ny, w: width, h: height, title: ((item.title || 'Widget') + ' copy') };
+        });
+        commitUpdate(clones.length > 1 ? 'Paste items' : 'Paste item', (prev) => {
+          const norm = normalizeZ(prev);
+          let nextZ = norm.length;
+          const stamped = clones.map((clone) => ({ ...clone, z: nextZ++ }));
+          return [...norm, ...stamped];
+        });
+        clones.forEach((clone) => notifyWidgetChange('create', clone.title));
+        setSelectedIds(createdIds);
+        return;
+      }
+
+      // Duplicate (Ctrl/Cmd+D)
+      if (meta && e.key.toLowerCase() === 'd' && selectedIds.length) {
+        e.preventDefault();
+        const selectedSet = new Set(selectedIds);
+        const sourceItems = items.filter((it) => selectedSet.has(it.id));
+        if (!sourceItems.length) return;
+        const duplicatedIds: string[] = [];
+        const duplicates = sourceItems.map((src, idx) => {
+          const nid = typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : Math.random().toString(36).slice(2, 9);
+          duplicatedIds.push(nid);
+          const nx = Math.min(COLS - src.w, src.x + 1 + idx);
+          const ny = src.y + 1 + idx;
+          return { ...src, id: nid, x: Math.max(0, nx), y: Math.max(0, ny), title: `${src.title} copy` };
+        });
+        commitUpdate(duplicates.length > 1 ? 'Duplicate items' : 'Duplicate item', (prev) => {
+          const norm = normalizeZ(prev);
+          let nextZ = norm.length;
+          const stamped = duplicates.map((dup) => ({ ...dup, z: nextZ++ }));
+          return [...norm, ...stamped];
+        });
+        duplicates.forEach((dup) => notifyWidgetChange('create', dup.title));
+        setSelectedIds(duplicatedIds);
+        return;
+      }
+
+      // Delete (Delete or Backspace key)
+      if (selectedIds.length && (e.key === 'Delete' || e.key === 'Backspace')) {
+        e.preventDefault();
+        const selectedSet = new Set(selectedIds);
+        const removed: GridItem[] = [];
+        commitUpdate('Delete items', (prev) => {
+          prev.forEach((item) => { if (selectedSet.has(item.id)) removed.push(item); });
+          if (!removed.length) return prev;
+          return prev.filter((item) => !selectedSet.has(item.id));
+        });
+        removed.forEach((item) => notifyWidgetChange('delete', item.title));
+        setSelectedIds([]);
+        return;
+      }
+    }
+
+    window.addEventListener('keydown', handleGlobalKeyboard, true);
+    return () => window.removeEventListener('keydown', handleGlobalKeyboard, true);
+  }, [selectedIds, items, clipboard, commitUpdate, notifyWidgetChange, undo, redo, canUndo, canRedo]);
+
   async function onKeyDown(e: React.KeyboardEvent<HTMLDivElement>) {
     // Do not interfere with typing in inputs/textareas
     const t = e.target as HTMLElement;
@@ -549,129 +972,7 @@ export default function EditorPage() {
       setSelectedIds([]);
       return;
     }
-    // Copy/Cut/Paste/Duplicate
-    const meta = e.ctrlKey || e.metaKey;
-    if (meta && e.key.toLowerCase() === 'c' && selectedIds.length) {
-      e.preventDefault();
-      const selectedSet = new Set(selectedIds);
-      const snapshot = items.filter((it) => selectedSet.has(it.id)).map((it) => ({ ...it }));
-      if (!snapshot.length) return;
-      setClipboard(snapshot);
-      try {
-        const payload = serializeClipboardItems(snapshot);
-        if (payload !== null) {
-          if (window.api?.clipboardWrite) {
-            void window.api.clipboardWrite({ text: CLIPBOARD_MARKER_MULTI + payload });
-          } else {
-            try { navigator.clipboard?.writeText(CLIPBOARD_MARKER_MULTI + payload); } catch { /* ignore */ }
-          }
-        }
-      } catch { /* ignore */ }
-      return;
-    }
-    if (meta && e.key.toLowerCase() === 'x' && selectedIds.length) {
-      e.preventDefault();
-      const selectedSet = new Set(selectedIds);
-      const snapshot = items.filter((it) => selectedSet.has(it.id)).map((it) => ({ ...it }));
-      if (!snapshot.length) return;
-      setClipboard(snapshot);
-      try {
-        const payload = serializeClipboardItems(snapshot);
-        if (payload !== null) {
-          if (window.api?.clipboardWrite) {
-            void window.api.clipboardWrite({ text: CLIPBOARD_MARKER_MULTI + payload });
-          } else {
-            try { navigator.clipboard?.writeText(CLIPBOARD_MARKER_MULTI + payload); } catch { /* ignore */ }
-          }
-        }
-      } catch { /* ignore */ }
-      const removedTitles: string[] = [];
-      commitUpdate('Cut items', (prev) => {
-        prev.forEach((item) => { if (selectedSet.has(item.id)) removedTitles.push(item.title); });
-        if (!removedTitles.length) return prev;
-        return prev.filter((item) => !selectedSet.has(item.id));
-      });
-      removedTitles.forEach((title) => notifyWidgetChange('delete', title));
-      setSelectedIds([]);
-      return;
-    }
-    if (meta && e.key.toLowerCase() === 'v') {
-      e.preventDefault();
-      // Delegate to async paste handler so we can await clipboard in a safe scope
-      void handlePasteFromClipboard();
-      return;
-    }
-    // Async paste helper (declared just before next keyboard cases)
-    async function handlePasteFromClipboard() {
-      // Try system clipboard first
-      let payloadText: string | null = null;
-      try {
-        if (window.api?.clipboardRead) {
-          const res = await window.api.clipboardRead();
-          if (res && res.ok && typeof res.text === 'string') payloadText = res.text;
-        } else {
-          try { payloadText = await navigator.clipboard?.readText(); } catch { payloadText = null; }
-        }
-      } catch { payloadText = null; }
-
-      let clipboardItems: GridItem[] | null = null;
-      if (payloadText && payloadText.startsWith(CLIPBOARD_MARKER_MULTI)) {
-        try { clipboardItems = JSON.parse(payloadText.slice(CLIPBOARD_MARKER_MULTI.length)); } catch { clipboardItems = null; }
-      } else if (payloadText && payloadText.startsWith(CLIPBOARD_MARKER_SINGLE)) {
-        try {
-          const legacy = JSON.parse(payloadText.slice(CLIPBOARD_MARKER_SINGLE.length));
-          clipboardItems = legacy ? [legacy] : null;
-        } catch { clipboardItems = null; }
-      }
-      // Fallback to in-memory clipboard state
-      if (!clipboardItems || clipboardItems.length === 0) {
-        clipboardItems = clipboard ? clipboard.map((it) => ({ ...it })) : null;
-      }
-      if (!clipboardItems || clipboardItems.length === 0) return;
-      const createdIds: string[] = [];
-      const clones = clipboardItems.map((item, idx) => {
-        const nid = typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : Math.random().toString(36).slice(2, 9);
-        createdIds.push(nid);
-        const width = Math.max(1, item.w ?? 1);
-        const height = Math.max(1, item.h ?? 1);
-        const offset = idx + 1;
-        const nx = Math.max(0, Math.min((item.x ?? 0) + offset, COLS - width));
-        const ny = Math.max(0, (item.y ?? 0) + offset);
-        return { ...item, id: nid, x: nx, y: ny, w: width, h: height, title: ((item.title || 'Widget') + ' copy') };
-      });
-      commitUpdate(clones.length > 1 ? 'Paste items' : 'Paste item', (prev) => {
-        const norm = normalizeZ(prev);
-        let nextZ = norm.length;
-        const stamped = clones.map((clone) => ({ ...clone, z: nextZ++ }));
-        return [...norm, ...stamped];
-      });
-      clones.forEach((clone) => notifyWidgetChange('create', clone.title));
-      setSelectedIds(createdIds);
-    }
-
-    if (meta && e.key.toLowerCase() === 'd' && selectedIds.length) {
-      e.preventDefault();
-      const selectedSet = new Set(selectedIds);
-      const sourceItems = items.filter((it) => selectedSet.has(it.id));
-      if (!sourceItems.length) return;
-      const duplicatedIds: string[] = [];
-      const duplicates = sourceItems.map((src, idx) => {
-        const nid = typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : Math.random().toString(36).slice(2, 9);
-        duplicatedIds.push(nid);
-        const nx = Math.min(COLS - src.w, src.x + 1 + idx);
-        const ny = src.y + 1 + idx;
-        return { ...src, id: nid, x: Math.max(0, nx), y: Math.max(0, ny), title: `${src.title} copy` };
-      });
-      commitUpdate(duplicates.length > 1 ? 'Duplicate items' : 'Duplicate item', (prev) => {
-        const norm = normalizeZ(prev);
-        let nextZ = norm.length;
-        const stamped = duplicates.map((dup) => ({ ...dup, z: nextZ++ }));
-        return [...norm, ...stamped];
-      });
-      duplicates.forEach((dup) => notifyWidgetChange('create', dup.title));
-      setSelectedIds(duplicatedIds);
-      return;
-    }
+    // Note: Copy/Cut/Paste/Duplicate are now handled by global keyboard shortcuts (see useEffect above)
   }
 
   // Active drag preview for palette items
@@ -867,201 +1168,256 @@ export default function EditorPage() {
         </div>
       )}
 
-      <section className="surface border border-[color:var(--border)] rounded-2xl p-6 shadow-lg shadow-black/20 overflow-hidden">
+      <section className="surface border border-[color:var(--border)] rounded-2xl p-6 shadow-lg shadow-black/20 overflow-hidden overflow-x-hidden" style={{ animation: 'py-pop 0.4s ease-out' }}>
         {/* Workspace label */}
         <p className="section-title">Portfolio Editor workspace</p>
         <p className="text-sm text-[color:var(--fg-muted)]">Edit, manage and build your portfolio in a single workspace.</p>
 
         <div className="mt-4 space-y-4">
           {/* Editor Settings subsection */}
-          <div className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)]/90 p-4">
+          <div className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)]/90 p-4 flex flex-col gap-4 overflow-x-hidden">
             <div>
               <p className="text-xs uppercase tracking-wide text-[color:var(--fg-muted)]">Editor Settings</p>
               <p className="text-sm text-[color:var(--fg-muted)]">Controls for canvas, zoom and editor preferences.</p>
             </div>
-            <div className="mt-4">
-              <div className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)]/90 p-4">
-                <div className="w-full">
-                  <EditorSettings
-                    previewMode={previewMode}
-                    togglePreviewMode={togglePreviewMode}
-                    gap={gap}
-                    setGap={setGap}
-                    showGrid={showGrid}
-                    toggleGrid={toggleGrid}
-                    activeView={activeView}
-                    setDesktopView={setDesktopView}
-                    setMobileView={setMobileView}
-                    pageWidth={pageWidth}
-                    pageHeight={pageHeight}
-                    heightMode={heightMode}
-                    setHeightMode={applyHeightMode}
-                    zoom={zoom}
-                    onZoomIn={zoomIn}
-                    onZoomOut={zoomOut}
-                    onResetZoom={resetZoom}
-                    canUndo={canUndo}
-                    canRedo={canRedo}
-                    undo={undo}
-                    redo={redo}
-                    onOpenWebpage={openWebpage}
-                  />
-                </div>
-              </div>
+            <div className="rounded-2xl p-6 bg-[color:var(--surface)] flex flex-col gap-4 w-full overflow-hidden">
+              <EditorSettings
+                previewMode={previewMode}
+                togglePreviewMode={togglePreviewMode}
+                gap={gap}
+                setGap={setGap}
+                showGrid={showGrid}
+                toggleGrid={toggleGrid}
+                activeView={activeView}
+                setDesktopView={setDesktopView}
+                setMobileView={setMobileView}
+                pageWidth={pageWidth}
+                pageHeight={pageHeight}
+                heightMode={heightMode}
+                setHeightMode={applyHeightMode}
+                zoom={zoom}
+                onZoomIn={zoomIn}
+                onZoomOut={zoomOut}
+                onResetZoom={resetZoom}
+                canUndo={canUndo}
+                canRedo={canRedo}
+                undo={undo}
+                redo={redo}
+                onOpenWebpage={openWebpage}
+              />
             </div>
           </div>
 
           {/* Page Settings subsection */}
           {selectedProject && (
-            <div className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)]/90 p-4">
+            <div className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)]/90 p-4 flex flex-col gap-4 overflow-x-hidden min-w-0">
               <div>
                 <p className="text-xs uppercase tracking-wide text-[color:var(--fg-muted)]">Page Settings</p>
                 <p className="text-sm text-[color:var(--fg-muted)]">Manage pages, backgrounds and quick page actions.</p>
               </div>
-              <div className="mt-4">
-                <div className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)]/90 p-4">
-                  <div className="w-full">
-                    <PageSettings
-                      isCloud={!!(selectedProject as unknown as { _cloudId?: string })._cloudId}
-                      pageOrder={selectedProject.pageOrder || []}
-                      pages={selectedProject.pages}
-                      currentPageId={currentPageId}
-                      pageBackground={pageBackground}
-                      themeBackground={themeBackground}
-                      onQuickBackgroundChange={(color) => {
-                        if (!selectedProject || !currentPageId) return;
-                        setPageBackground(selectedProject.id, currentPageId, color);
-                      }}
-                      onOpenThemeSettings={selectedProject ? () => openSettings({ projectId: selectedProject.id, section: "theme" }) : undefined}
-                      onSelectPage={(id) => {
-                        setCurrentPageId(id);
-                        if (selectedProject && id) {
-                          try { localStorage.setItem(`py_current_page_${selectedProject.id}`, id); } catch { /* ignore */ }
-                          replaceItems(getPageItems(selectedProject.id, id) as GridItem[]);
-                        } else {
-                          replaceItems([]);
-                        }
-                      }}
-                      onCreatePage={() => {
-                        if (!selectedProject) return;
-                        const prevId = currentPageId;
-                        const id = createPage(selectedProject.id) || null;
-                        if (id) {
-                          setCurrentPageId(id);
-                          try { localStorage.setItem(`py_current_page_${selectedProject.id}`, id); } catch { /* ignore */ }
-                          replaceItems([]);
-                          setHistory(h => {
-                            const entry: HistoryEntry = {
-                              label: 'Create page',
-                              undo: (items) => items,
-                              redo: (items) => items,
-                              onUndo: () => {
-                                deletePage(selectedProject.id, id);
-                                const backId = prevId || (selectedProject.pageOrder?.[0] || null);
-                                if (backId) {
-                                  setCurrentPageId(backId);
-                                  const loaded = getPageItems(selectedProject.id, backId) as GridItem[];
-                                  replaceItems(loaded);
-                                }
-                              },
-                              onRedo: () => {
-                                const newId = createPage(selectedProject.id);
-                                if (newId) {
-                                  setCurrentPageId(newId);
-                                  replaceItems([]);
-                                }
-                              }
-                            };
-                            return [...h, entry];
-                          });
-                          setRedoStack([]);
-                        }
-                      }}
-                      onRenameInline={(newName: string) => {
-                        if (!selectedProject || !currentPageId) return;
-                        const oldTitle = selectedProject.pages[currentPageId]?.title || 'Untitled';
-                        const trimmed = (newName || '').trim();
-                        if (!trimmed || trimmed === oldTitle) return;
-                        // history entry
-                        setHistory(h => {
-                          const entry: HistoryEntry = {
-                            label: 'Rename page',
-                            undo: (items) => items,
-                            redo: (items) => items,
-                            onUndo: () => { renamePage(selectedProject.id, currentPageId, oldTitle); },
-                            onRedo: () => { renamePage(selectedProject.id, currentPageId, trimmed); },
-                          } as HistoryEntry;
-                          return [...h, entry];
-                        });
-                        setRedoStack([]);
-                        renamePage(selectedProject.id, currentPageId, trimmed);
-                        try { localStorage.setItem(`py_current_page_${selectedProject.id}`, currentPageId); } catch { /* ignore */ }
-                        try { replaceItems(getPageItems(selectedProject.id, currentPageId) as GridItem[]); } catch { /* ignore */ }
-                      }}
-                      onOpenSettings={() => {
-                        if (!selectedProject || !currentPageId) return;
-                        const oldTitle = selectedProject.pages[currentPageId]?.title || 'Untitled';
-                        setRenameOldTitle(oldTitle);
-                        setRenameInitialStarter(Boolean(selectedProject.pages[currentPageId]?.starter));
-                        setRenameModalOpen(true);
-                      }}
-                      onDeleteCurrentPage={() => {
-                        if (!selectedProject || !currentPageId) return;
-                        const total = selectedProject.pageOrder?.length ?? 0;
-                        if (total <= 1) return;
-                        const title = selectedProject.pages[currentPageId]?.title || 'Untitled';
-                        const ok = window.confirm(`Delete page "${title}"? This cannot be undone.`);
-                        if (!ok) return;
-                        const snapItems = getPageItems(selectedProject.id, currentPageId) as GridItem[];
-                        const removedId = currentPageId;
-                        const remaining = (selectedProject.pageOrder || []).filter(id => id !== currentPageId);
-                        const nextId = remaining[0] || null;
-                        deletePage(selectedProject.id, removedId);
-                        setCurrentPageId(nextId);
-                        if (nextId) replaceItems(getPageItems(selectedProject.id, nextId) as GridItem[]); else replaceItems([]);
-                        setHistory(h => {
-                          let restoredId: string | null = null;
-                          const entry: HistoryEntry = {
-                            label: 'Delete page',
-                            undo: (items) => items,
-                            redo: (items) => items,
-                            onUndo: () => {
-                              const nid = createPage(selectedProject.id);
-                              if (nid) {
-                                restoredId = nid;
-                                renamePage(selectedProject.id, nid, title);
-                                setPageItems(selectedProject.id, nid, serializeGridItems(snapItems));
-                                setCurrentPageId(nid);
-                                replaceItems(getPageItems(selectedProject.id, nid) as GridItem[]);
-                              }
-                            },
-                            onRedo: () => {
-                              const target = restoredId || removedId;
-                              if (target) {
-                                deletePage(selectedProject.id, target);
-                                const fallback = (selectedProject.pageOrder?.[0]) || null;
-                                setCurrentPageId(fallback);
-                                if (fallback) replaceItems(getPageItems(selectedProject.id, fallback) as GridItem[]);
-                              }
-                            },
-                          };
-                          return [...h, entry];
-                        });
-                        setRedoStack([]);
-                      }}
-                    />
-                  </div>
-                </div>
+              <div className="rounded-2xl p-6 bg-[color:var(--surface)] flex flex-col gap-4 w-full overflow-x-hidden min-w-0">
+                <PageSettings
+                  isCloud={!!(selectedProject as unknown as { _cloudId?: string })._cloudId}
+                  pageOrder={selectedProject.pageOrder || []}
+                  pages={selectedProject.pages}
+                  currentPageId={currentPageId}
+                  pageBackground={pageBackground}
+                  themeBackground={themeBackground}
+                  onQuickBackgroundChange={(color) => {
+                    if (!selectedProject || !currentPageId) return;
+                    setPageBackground(selectedProject.id, currentPageId, color);
+                  }}
+                  onOpenThemeSettings={selectedProject ? () => openSettings({ projectId: selectedProject.id, section: "theme" }) : undefined}
+                  onSelectPage={(id) => {
+                    selectPage(id);
+                    if (selectedProject && id) {
+                      try { localStorage.setItem(`py_current_page_${selectedProject.id}`, id); } catch { /* ignore */ }
+                      replaceItems(getPageItems(selectedProject.id, id) as GridItem[], id);
+                    } else {
+                      replaceItems([], null);
+                    }
+                  }}
+                  onCreatePage={() => {
+                    if (!selectedProject) return;
+                    const projectId = selectedProject.id;
+                    const prevPageId = currentPageId;
+                    const newPageId = createPage(projectId) || null;
+                    if (newPageId) {
+                      selectPage(newPageId);
+                      try { localStorage.setItem(`py_current_page_${projectId}`, newPageId); } catch { /* ignore */ }
+                      replaceItems([], newPageId);
+                      setHistory(h => {
+                        const entry: HistoryEntry = {
+                          label: 'Create page',
+                          undo: (items) => items,
+                          redo: (items) => items,
+                          onUndo: () => {
+                            console.log('UNDO: Create page');
+                            deletePage(projectId, newPageId);
+                            // Get fresh page order after deletion
+                            const proj = selectedProject;
+                            const backId = prevPageId && proj?.pages[prevPageId] ? prevPageId : (proj?.pageOrder?.[0] || null);
+                            if (backId) {
+                              selectPage(backId);
+                              const loaded = getPageItems(projectId, backId) as GridItem[];
+                              replaceItems(loaded, backId);
+                            }
+                          },
+                          onRedo: () => {
+                            console.log('REDO: Create page');
+                            const redoPageId = createPage(projectId);
+                            if (redoPageId) {
+                              selectPage(redoPageId);
+                              replaceItems([], redoPageId);
+                            }
+                          }
+                        };
+                        console.log('Adding Create page to history. New length:', h.length + 1);
+                        return [...h, entry];
+                      });
+                      setRedoStack([]);
+                    }
+                  }}
+                  onDuplicatePage={() => {
+                    if (!selectedProject || !currentPageId) return;
+                    const projectId = selectedProject.id;
+                    const sourcePageId = currentPageId;
+                    const sourcePageItems = getPageItems(projectId, sourcePageId) as GridItem[];
+                    const newPageId = duplicatePage(projectId, sourcePageId);
+                    if (newPageId) {
+                      selectPage(newPageId);
+                      try { localStorage.setItem(`py_current_page_${projectId}`, newPageId); } catch { /* ignore */ }
+                      replaceItems(getPageItems(projectId, newPageId) as GridItem[], newPageId);
+                      setHistory(h => {
+                        const entry: HistoryEntry = {
+                          label: 'Duplicate page',
+                          undo: (items) => items,
+                          redo: (items) => items,
+                          onUndo: () => {
+                            deletePage(projectId, newPageId);
+                            selectPage(sourcePageId);
+                            replaceItems(sourcePageItems, sourcePageId);
+                          },
+                          onRedo: () => {
+                            const redoPageId = duplicatePage(projectId, sourcePageId);
+                            if (redoPageId) {
+                              selectPage(redoPageId);
+                              replaceItems(getPageItems(projectId, redoPageId) as GridItem[], redoPageId);
+                            }
+                          }
+                        };
+                        return [...h, entry];
+                      });
+                      setRedoStack([]);
+                    }
+                  }}
+                  onRenameInline={(newName: string) => {
+                    if (!selectedProject || !currentPageId) return false;
+                    const projectId = selectedProject.id;
+                    const pageId = currentPageId;
+                    const oldTitle = selectedProject.pages[pageId]?.title || 'Untitled';
+                    const trimmed = (newName || '').trim();
+                    if (!trimmed || trimmed === oldTitle) return false;
+                    // history entry
+                    setHistory(h => {
+                      const entry: HistoryEntry = {
+                        label: 'Rename page',
+                        undo: (items) => items,
+                        redo: (items) => items,
+                        onUndo: () => { renamePage(projectId, pageId, oldTitle); },
+                        onRedo: () => { renamePage(projectId, pageId, trimmed); },
+                      } as HistoryEntry;
+                      return [...h, entry];
+                    });
+                    setRedoStack([]);
+                    const renameOk = renamePage(projectId, pageId, trimmed);
+                    if (!renameOk) return false;
+                    try { localStorage.setItem(`py_current_page_${projectId}`, pageId); } catch { /* ignore */ }
+                    try { replaceItems(getPageItems(projectId, pageId) as GridItem[], pageId); } catch { /* ignore */ }
+                    return true;
+                  }}
+                  onOpenSettings={() => {
+                    if (!selectedProject || !currentPageId) return;
+                    const oldTitle = selectedProject.pages[currentPageId]?.title || 'Untitled';
+                    setRenameOldTitle(oldTitle);
+                    setRenameInitialStarter(Boolean(selectedProject.pages[currentPageId]?.starter));
+                    setRenameModalOpen(true);
+                  }}
+                  onDeleteCurrentPage={() => {
+                    if (!selectedProject || !currentPageId) return;
+                    const total = selectedProject.pageOrder?.length ?? 0;
+                    if (total <= 1) return;
+                    const projectId = selectedProject.id;
+                    const deletedPageId = currentPageId;
+                    const title = selectedProject.pages[deletedPageId]?.title || 'Untitled';
+                    const ok = window.confirm(`Delete page "${title}"? This cannot be undone.`);
+                    if (!ok) return;
+                    const snapItems = getPageItems(projectId, deletedPageId) as GridItem[];
+                    const snapBackground = selectedProject.pages[deletedPageId]?.backgroundColor;
+                    const snapStarter = Boolean(selectedProject.pages[deletedPageId]?.starter);
+                    const remaining = (selectedProject.pageOrder || []).filter(id => id !== deletedPageId);
+                    const nextId = remaining[0] || null;
+                    deletePage(projectId, deletedPageId);
+                    selectPage(nextId);
+                    if (nextId) replaceItems(getPageItems(projectId, nextId) as GridItem[], nextId); else replaceItems([], null);
+                    setHistory(h => {
+                      let restoredId: string | null = null;
+                      const entry: HistoryEntry = {
+                        label: 'Delete page',
+                        undo: (items) => items,
+                        redo: (items) => items,
+                        onUndo: async () => {
+                          const nid = createPage(projectId, title);
+                          if (nid) {
+                            restoredId = nid;
+                            await setPageItems(projectId, nid, serializeGridItems(snapItems), { allowClear: true, force: true });
+                            if (snapBackground) setPageBackground(projectId, nid, snapBackground);
+                            if (snapStarter) setPageStarter(projectId, nid, true);
+                            selectPage(nid);
+                            replaceItems(getPageItems(projectId, nid) as GridItem[], nid);
+                          }
+                        },
+                        onRedo: async () => {
+                          const target = restoredId || deletedPageId;
+                          if (target) {
+                            deletePage(projectId, target);
+                            // Get fresh project state after deletion
+                            const proj = selectedProject;
+                            const fallback = proj?.pageOrder?.[0] || null;
+                            selectPage(fallback);
+                            if (fallback) replaceItems(getPageItems(projectId, fallback) as GridItem[], fallback);
+                          }
+                        },
+                      };
+                      return [...h, entry];
+                    });
+                    setRedoStack([]);
+                  }}
+                />
               </div>
             </div>
           )}
 
 
           {/* Portfolio Canvas subsection (contains canvas and dashboard) */}
-          <div className="mt-4 rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)]/90 p-4">
-            <div className="flex flex-col gap-1">
-              <p className="text-xs uppercase tracking-wide text-[color:var(--fg-muted)]">Portfolio Canvas</p>
-              <p className="text-sm text-[color:var(--fg-muted)]">Canvas and dashboard for arranging pages and widgets.</p>
+          <div
+            className="mt-4 rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)]/90 p-4 flex flex-col"
+            style={{ overflowX: 'hidden', overflowY: 'visible' }}
+          >
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex flex-col gap-1">
+                <p className="text-xs uppercase tracking-wide text-[color:var(--fg-muted)]">Portfolio Canvas</p>
+                <p className="text-sm text-[color:var(--fg-muted)]">Canvas and dashboard for arranging pages and widgets.</p>
+              </div>
+              <button
+                type="button"
+                className="ml-auto btn btn-ghost flex items-center gap-1 rounded-full"
+                title="Fullscreen Canvas"
+                onClick={() => setIsCanvasFullscreen(true)}
+                style={{ minWidth: 36, minHeight: 36 }}
+              >
+                <IconFullscreen />
+              </button>
             </div>
             <div className="mt-4">
               <DndContext
@@ -1177,7 +1533,8 @@ export default function EditorPage() {
                   <DragOverlayPreview activeDrag={activeDrag} onMeasure={(size) => { dragOverlaySize.current = size; }} />
                 </DragOverlay>
                 <div
-                  className="h-full grid gap-0 min-h-[28rem] items-stretch"
+                  ref={gridContainerRef}
+                  className="grid gap-0 items-stretch"
                   style={{
                     gridTemplateColumns: paletteCollapsed ? 'minmax(0,1fr) 32px' : `minmax(0,1fr) ${Math.round(paletteWidth)}px`,
                   }}
@@ -1185,95 +1542,98 @@ export default function EditorPage() {
                   tabIndex={0}
                 >
                   {/* Canvas or Preview inside a page-like viewport */}
-                  <div
-                    className="h-full min-h-0"
-                    ref={canvasWrapperRef}
-                    onPointerDown={(e) => {
-                      // allow starting a resize when clicking on the canvas near the right edge
-                      try {
-                        const el = canvasWrapperRef.current;
-                        if (!el) return;
-                        const rect = el.getBoundingClientRect();
-                        const distFromRight = rect.right - e.clientX;
-                        // if pointer is within 48px of the canvas right edge, start resize
-                        if (distFromRight <= 48 && distFromRight >= 0) {
-                          beginResizePalette(e as unknown as PointerEvent);
-                        }
-                      } catch { /* ignore */ }
-                    }}
-                  >
-                    <ViewportSurface
-                      pageWidth={pageWidth}
-                      pageHeight={pageHeight}
-                      setPageWidth={setPageWidth}
-                      setPageHeight={setPageHeight}
-                      heightMode={heightMode}
-                      previewMode={previewMode}
-                      cols={COLS}
-                      rowH={DEFAULT_ROW_H}
-                      gap={gap}
-                      items={items}
-                      onItemsChange={replaceItems}
-                      showGrid={showGrid}
-                      selectedIds={selectedIds}
-                      onSelect={handleSelect}
-                      onMarqueeSelect={handleMarqueeSelect}
-                      onDelete={(id) => {
-                        let removedTitle: string | undefined;
-                        commitUpdate("Delete item", (prev) => {
-                          const tgt = prev.find(i => i.id === id);
-                          if (!tgt) return prev;
-                          removedTitle = tgt.title;
-                          return prev.filter((it) => it.id !== id);
-                        });
-                        if (removedTitle) notifyWidgetChange('delete', removedTitle);
+                  <div style={{ width: '100%', overflow: 'auto', position: 'relative', minWidth: 0 }}>
+                    {/* Fluid wrapper, no fixed pixel width. Canvas content handles its own width. */}
+                    <div
+                      style={{ position: 'relative' }}
+                      ref={canvasWrapperRef}
+                      onPointerDown={(e) => {
+                        // allow starting a resize when clicking on the canvas near the right edge
+                        try {
+                          const el = canvasWrapperRef.current;
+                          if (!el) return;
+                          const rect = el.getBoundingClientRect();
+                          const distFromRight = rect.right - e.clientX;
+                          // if pointer is within 48px of the canvas right edge, start resize
+                          if (distFromRight <= 48 && distFromRight >= 0) {
+                            beginResizePalette(e as unknown as PointerEvent);
+                          }
+                        } catch { /* ignore */ }
                       }}
-                      onDuplicate={(id) => {
-                        let duplicateTitle: string | undefined;
-                        commitUpdate("Duplicate item", (prev) => {
-                          const src = prev.find((it) => it.id === id);
-                          if (!src) return prev;
-                          duplicateTitle = src.title + " copy";
-                          const nid = typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : Math.random().toString(36).slice(2, 9);
-                          const nx = Math.min(COLS - src.w, src.x + 1);
-                          const ny = src.y + 1;
-                          const norm = normalizeZ(prev);
-                          const maxZ = norm.length; // place duplicate on top
-                          return [...norm, { ...src, id: nid, x: nx, y: ny, title: duplicateTitle, z: maxZ }];
-                        });
-                        if (duplicateTitle) notifyWidgetChange('create', duplicateTitle);
-                      }}
-                      onMoveStart={handleItemMoveStart}
-                      onMoveEnd={handleItemMoveEnd}
-                      onBringToFront={bringToFront}
-                      onSendToBack={sendToBack}
-                      onBringForward={bringForward}
-                      onSendBackward={sendBackward}
-                      onTogglePin={togglePin}
-                      onOpenModify={openModify}
-                      onDropAsset={(id, hash) => {
-                        // Only handle for Image widgets: set src to asset://hash
-                        commitUpdate('Set image from asset', (prev) => prev.map(it => it.id === id && it.type === 'image' ? { ...it, props: { ...(it.props as Record<string, unknown>), src: `asset://${hash}` } } : it));
-                      }}
-                      onNavigatePage={(pid) => {
-                        if (!selectedProject) return;
-                        setCurrentPageId(pid);
-                        try { localStorage.setItem(`py_current_page_${selectedProject.id}`, pid); } catch { /* ignore */ }
-                      }}
-                      currentPageId={currentPageId || undefined}
-                      zoom={zoom}
-                      minZoom={MIN_ZOOM}
-                      maxZoom={MAX_ZOOM}
-                      onZoomChange={applyZoom}
-                      pageBackground={effectivePageBackground}
-                      theme={activeTheme}
-                      themeSnapshot={widgetThemeSnapshot}
-                    />
+                    >
+                      <ViewportSurface
+                        pageWidth={pageWidth}
+                        pageHeight={pageHeight}
+                        setPageWidth={setPageWidth}
+                        setPageHeight={setPageHeight}
+                        heightMode={heightMode}
+                        previewMode={previewMode}
+                        cols={COLS}
+                        rowH={DEFAULT_ROW_H}
+                        gap={gap}
+                        items={items}
+                        onItemsChange={replaceItems}
+                        showGrid={showGrid}
+                        selectedIds={selectedIds}
+                        onSelect={handleSelect}
+                        onMarqueeSelect={handleMarqueeSelect}
+                        onDelete={(id) => {
+                          let removedTitle: string | undefined;
+                          commitUpdate("Delete item", (prev) => {
+                            const tgt = prev.find(i => i.id === id);
+                            if (!tgt) return prev;
+                            removedTitle = tgt.title;
+                            return prev.filter((it) => it.id !== id);
+                          });
+                          if (removedTitle) notifyWidgetChange('delete', removedTitle);
+                        }}
+                        onDuplicate={(id) => {
+                          let duplicateTitle: string | undefined;
+                          commitUpdate("Duplicate item", (prev) => {
+                            const src = prev.find((it) => it.id === id);
+                            if (!src) return prev;
+                            duplicateTitle = src.title + " copy";
+                            const nid = typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : Math.random().toString(36).slice(2, 9);
+                            const nx = Math.min(COLS - src.w, src.x + 1);
+                            const ny = src.y + 1;
+                            const norm = normalizeZ(prev);
+                            const maxZ = norm.length; // place duplicate on top
+                            return [...norm, { ...src, id: nid, x: nx, y: ny, title: duplicateTitle, z: maxZ }];
+                          });
+                          if (duplicateTitle) notifyWidgetChange('create', duplicateTitle);
+                        }}
+                        onMoveStart={handleItemMoveStart}
+                        onMoveEnd={handleItemMoveEnd}
+                        onBringToFront={bringToFront}
+                        onSendToBack={sendToBack}
+                        onBringForward={bringForward}
+                        onSendBackward={sendBackward}
+                        onTogglePin={togglePin}
+                        onOpenModify={openModify}
+                        onDropAsset={(id, hash) => {
+                          // Only handle for Image widgets: set src to asset://hash
+                          commitUpdate('Set image from asset', (prev) => prev.map(it => it.id === id && it.type === 'image' ? { ...it, props: { ...(it.props as Record<string, unknown>), src: `asset://${hash}` } } : it));
+                        }}
+                        onNavigatePage={(pid) => {
+                          if (!selectedProject) return;
+                          selectPage(pid);
+                          try { localStorage.setItem(`py_current_page_${selectedProject.id}`, pid); } catch { /* ignore */ }
+                        }}
+                        currentPageId={currentPageId || undefined}
+                        zoom={zoom}
+                        minZoom={MIN_ZOOM}
+                        maxZoom={MAX_ZOOM}
+                        onZoomChange={applyZoom}
+                        pageBackground={effectivePageBackground}
+                        theme={activeTheme}
+                        themeSnapshot={widgetThemeSnapshot}
+                      />
+                    </div>
                   </div>
 
                   {/* Widget Sidebar (collapsible) */}
                   <aside
-                    className={`relative surface p-4 border border-[color:var(--border)] rounded-2xl shadow-lg bg-[color:var(--surface)]/80 overflow-hidden ${previewMode ? 'opacity-50 pointer-events-none' : ''} flex flex-col palette-full-height`}
+                    className={`relative surface p-4 border border-[color:var(--border)] rounded-2xl shadow-lg bg-[color:var(--surface)]/80 overflow-hidden ${previewMode ? 'opacity-50 pointer-events-none' : ''} flex flex-col palette-full-height transition-all duration-300 ease-in-out`}
                     style={palettePanelStyle}
                     onPointerDown={(e) => {
                       // allow starting a resize when pointer is near the left edge of the aside
@@ -1303,7 +1663,7 @@ export default function EditorPage() {
                         <div
                           ref={paletteRef}
                           className="absolute top-0 bottom-0 w-10 cursor-ew-resize z-10 flex items-center justify-center text-[color:var(--fg-muted)] no-touch-action"
-                          style={{ left: '-12px' }}
+                          style={{ left: '-28px' }}
                           onPointerDown={beginResizePalette}
                           role="presentation"
                           title="Resize dashboard"
@@ -1314,7 +1674,7 @@ export default function EditorPage() {
                           </div>
                         </div>
                         <div
-                          className="px-3 pt-4 pb-3 relative palette-header"
+                          className="px-3 pt-4 pb-3 flex items-start justify-between gap-2"
                           onPointerDown={(e) => {
                             // start resize when pointer is near the left edge (wider hit area)
                             const el = paletteRef.current || (e.currentTarget && (e.currentTarget as HTMLElement).closest('.palette-full-height') as HTMLElement | null);
@@ -1327,9 +1687,9 @@ export default function EditorPage() {
                             }
                           }}
                         >
-                          <p className="text-xs uppercase tracking-wide text-[color:var(--fg-muted)]">Canvas Dashboard</p>
+                          <p className="text-xs uppercase tracking-wide text-[color:var(--fg-muted)] flex-shrink-0">Canvas Dashboard</p>
                           <button
-                            className="absolute right-2 top-1 btn btn-ghost btn-xs p-1"
+                            className="btn btn-ghost btn-xs p-1 flex-shrink-0"
                             title="Collapse palette"
                             onClick={togglePalette}
                             aria-label="Collapse widget palette"
@@ -1338,7 +1698,7 @@ export default function EditorPage() {
                           </button>
                         </div>
                         <div className="p-2 overflow-auto grow space-y-3 scrollable scrollable-container">
-                          <section className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)]/90 shadow-sm">
+                          <section className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)]/90 shadow-sm transition-all duration-200 ease-in-out">
                             <div className="px-4 pt-1 pb-1">
                               <button
                                 className="w-full flex items-center justify-between gap-2 px-4 py-2 text-left"
@@ -1353,7 +1713,7 @@ export default function EditorPage() {
                               </button>
                             </div>
                             {widgetsOpen && (
-                              <div className="p-3 pt-0">
+                              <div className="p-3 pt-0 animate-[py-fade-in_0.2s_ease-out]">
                                 <Suspense fallback={<div className="text-xs text-[color:var(--fg-muted)] p-2">Loading widgets…</div>}>
                                   <WidgetsPalette />
                                 </Suspense>
@@ -1361,7 +1721,7 @@ export default function EditorPage() {
                             )}
                           </section>
 
-                          <section className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)]/90 shadow-sm">
+                          <section className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)]/90 shadow-sm transition-all duration-200 ease-in-out">
                             <div className="px-4 pt-1 pb-1">
                               <button
                                 className="w-full flex items-center justify-between gap-2 px-4 py-2 text-left"
@@ -1376,7 +1736,7 @@ export default function EditorPage() {
                               </button>
                             </div>
                             {assetsOpen && (
-                              <div className="p-3 pt-0">
+                              <div className="p-3 pt-0 animate-[py-fade-in_0.2s_ease-out]">
                                 <AssetsPanel hideHeader />
                               </div>
                             )}
@@ -1393,7 +1753,7 @@ export default function EditorPage() {
       </section>
 
       {/* Theme subsection under Portfolio Canvas */}
-      <div className="mt-4 relative surface rounded-2xl border border-[color:var(--border)] shadow-lg bg-[color:var(--surface)]/80 p-4 overflow-hidden">
+      <div className="mt-4 surface rounded-2xl border border-[color:var(--border)] shadow-lg shadow-black/20 bg-[color:var(--surface)] p-4" style={{ animation: 'py-pop 0.4s ease-out' }}>
         <div className="w-full">
           <div>
             <p className="section-title">Theme</p>
@@ -1401,55 +1761,66 @@ export default function EditorPage() {
           </div>
 
           {/* Current theme + settings subsection */}
-          <div className="mt-4 flex flex-wrap items-center gap-3">
-            <div className="flex items-center gap-3 px-3 py-2 rounded-lg border border-[color:var(--border)] bg-[color:var(--surface)]/70 shadow-sm">
-              <div>
-                <p className="text-[10px] uppercase tracking-wide text-[color:var(--fg-muted)]">Current theme</p>
-                <p className="mt-1 text-sm">{activeTheme?.name ?? 'Default'}</p>
+          <div className="mt-4 flex flex-col gap-4 md:flex-row md:items-stretch">
+            <div className="flex-1 min-w-0 rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface-soft)]/60 p-4 shadow-sm">
+              <p className="text-[10px] uppercase tracking-wide text-[color:var(--fg-muted)]">Current theme</p>
+              <p className="mt-2 text-base font-medium text-[color:var(--fg)] whitespace-normal break-words">{activeTheme?.name ?? 'Default'}</p>
+              <div className="mt-4 flex flex-wrap items-center gap-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="w-10 h-10 rounded-md border border-[color:var(--border)] flex-shrink-0" style={{ background: activeTheme?.colors?.primary || '#111827' }} title="Primary color" />
+                  <div className="w-10 h-10 rounded-md border border-[color:var(--border)] flex-shrink-0" style={{ background: activeTheme?.colors?.secondary || '#f3f4f6' }} title="Secondary color" />
+                </div>
               </div>
             </div>
-
-            <div className="flex items-center gap-3 px-3 py-2 rounded-lg border border-[color:var(--border)] bg-[color:var(--surface)]/70 shadow-sm">
-              <div className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-md border border-[color:var(--border)]" style={{ background: activeTheme?.colors?.primary || '#111827' }} title="Primary color" />
-                <div className="w-8 h-8 rounded-md border border-[color:var(--border)]" style={{ background: activeTheme?.colors?.secondary || '#f3f4f6' }} title="Secondary color" />
-              </div>
-              <div>
-                <button
-                  className="btn btn-ghost btn-sm flex items-center gap-2"
-                  onClick={() => { if (selectedProject) openSettings({ projectId: selectedProject.id, section: 'theme' }); }}
-                  title="Open theme settings"
-                >
-                  <Settings size={14} />
-                  <span>Theme settings</span>
-                </button>
-              </div>
+            <div className="min-w-0 w-full md:w-auto flex items-start md:items-center justify-end">
+              <button
+                className="btn btn-ghost btn-sm flex items-center gap-2 w-full md:w-auto justify-center"
+                onClick={() => { if (selectedProject) openSettings({ projectId: selectedProject.id, section: 'theme' }); }}
+                title="Open theme settings"
+              >
+                <Settings size={14} />
+                <span>Theme settings</span>
+              </button>
             </div>
           </div>
 
           {/* Color hex controls subsection */}
           {activeTheme && selectedProject && (
             <div className="mt-4 px-3 py-2 rounded-lg border border-[color:var(--border)] bg-[color:var(--surface)]/70 shadow-sm">
-              <p className="text-[10px] uppercase tracking-wide text-[color:var(--fg-muted)]">Colors</p>
-              <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="flex flex-col gap-1">
+                <p className="text-xs uppercase tracking-wide text-[color:var(--fg-muted)]">Colors</p>
+                <p className="text-sm text-[color:var(--fg-muted)]">Adjust theme palette values applied across the editor.</p>
+              </div>
+              <div className="mt-4 grid gap-4 md:grid-cols-2">
                 {Object.keys(activeTheme.colors).map((k) => {
                   const key = k as keyof typeof activeTheme.colors;
                   const val = activeTheme.colors[key] as string;
+                  const inputId = `theme-color-${key}`;
                   return (
-                    <label key={k} className="flex items-center gap-3 text-xs">
-                      <span className="w-28 text-[10px] uppercase tracking-wide text-[color:var(--fg-muted)]">{key}</span>
+                    <div key={k} className="flex flex-col gap-3">
+                      <div className="flex flex-wrap items-center gap-3">
+                        <span className="text-xs font-medium uppercase tracking-wide text-[color:var(--fg-muted)]">{key}</span>
+                        <button
+                          type="button"
+                          className="w-10 h-10 rounded-md border border-[color:var(--border)]"
+                          style={{ background: val }}
+                          aria-label={`Select ${key} color`}
+                          onClick={() => document.getElementById(inputId)?.click()}
+                        />
+                        <input
+                          id={inputId}
+                          type="color"
+                          className="sr-only"
+                          value={val}
+                          onChange={(e) => updateTheme(selectedProject.id, activeTheme.themeId, { colors: { [key]: e.target.value } as any })}
+                        />
+                      </div>
                       <input
-                        type="color"
-                        className="w-9 h-9 rounded border border-[color:var(--border)]"
+                        className="input text-sm w-full"
                         value={val}
                         onChange={(e) => updateTheme(selectedProject.id, activeTheme.themeId, { colors: { [key]: e.target.value } as any })}
                       />
-                      <input
-                        className="input text-sm w-auto max-w-[10rem]"
-                        value={val}
-                        onChange={(e) => updateTheme(selectedProject.id, activeTheme.themeId, { colors: { [key]: e.target.value } as any })}
-                      />
-                    </label>
+                    </div>
                   );
                 })}
               </div>
@@ -1473,7 +1844,7 @@ export default function EditorPage() {
             background={effectivePageBackground}
             onNavigatePage={(pid) => {
               if (!selectedProject) return;
-              setCurrentPageId(pid);
+              selectPage(pid);
               try { localStorage.setItem(`py_current_page_${selectedProject.id}`, pid); } catch { /* ignore */ }
             }}
             themeSnapshot={widgetThemeSnapshot}
@@ -1492,6 +1863,8 @@ export default function EditorPage() {
           onSave={({ name, starter, backgroundColor }) => {
             const trimmed = (name || '').trim();
             if (!trimmed) { setRenameModalOpen(false); return; }
+            const projectId = selectedProject.id;
+            const pageId = currentPageId;
             const oldTitle = renameOldTitle || 'Untitled';
             // Add history entry
             setHistory(h => {
@@ -1499,20 +1872,21 @@ export default function EditorPage() {
                 label: 'Rename page',
                 undo: (items) => items,
                 redo: (items) => items,
-                onUndo: () => { renamePage(selectedProject.id, currentPageId, oldTitle); },
-                onRedo: () => { renamePage(selectedProject.id, currentPageId, trimmed); },
+                onUndo: () => { renamePage(projectId, pageId, oldTitle); },
+                onRedo: () => { renamePage(projectId, pageId, trimmed); },
               } as HistoryEntry;
               return [...h, entry];
             });
             setRedoStack([]);
-            renamePage(selectedProject.id, currentPageId, trimmed);
-            setPageBackground(selectedProject.id, currentPageId, backgroundColor);
+            const ok = renamePage(projectId, pageId, trimmed);
+            if (!ok) { return; }
+            setPageBackground(projectId, pageId, backgroundColor);
             // Update starter setting
-            try { setPageStarter(selectedProject.id, currentPageId, Boolean(starter)); } catch { /* ignore */ }
+            try { setPageStarter(projectId, pageId, Boolean(starter)); } catch { /* ignore */ }
             try {
-              try { localStorage.setItem(`py_current_page_${selectedProject.id}`, currentPageId); } catch { /* ignore */ }
-              setCurrentPageId(currentPageId);
-              replaceItems(getPageItems(selectedProject.id, currentPageId) as GridItem[]);
+              try { localStorage.setItem(`py_current_page_${projectId}`, pageId); } catch { /* ignore */ }
+              selectPage(pageId);
+              replaceItems(getPageItems(projectId, pageId) as GridItem[], pageId);
             } catch { /* ignore */ }
             setRenameModalOpen(false);
           }}
@@ -1525,12 +1899,80 @@ export default function EditorPage() {
               notify({ type: 'warn', message: 'A portfolio needs at least one page.', title: selectedProject.name, persistent: false });
               return;
             }
-            deletePage(selectedProject.id, currentPageId);
-            // pick next page
-            const remaining = (selectedProject.pageOrder || []).filter(id => id !== currentPageId);
+            const projectId = selectedProject.id;
+            const deletedPageId = currentPageId;
+            const title = selectedProject.pages[deletedPageId]?.title || 'Untitled';
+            const snapItems = getPageItems(projectId, deletedPageId) as GridItem[];
+            const snapBackground = selectedProject.pages[deletedPageId]?.backgroundColor;
+            const snapStarter = Boolean(selectedProject.pages[deletedPageId]?.starter);
+            const remaining = (selectedProject.pageOrder || []).filter(id => id !== deletedPageId);
             const nextId = remaining[0] || null;
-            setCurrentPageId(nextId);
-            if (nextId) replaceItems(getPageItems(selectedProject.id, nextId) as GridItem[]); else replaceItems([]);
+
+            deletePage(projectId, deletedPageId);
+            selectPage(nextId);
+            if (nextId) replaceItems(getPageItems(projectId, nextId) as GridItem[], nextId); else replaceItems([], null);
+
+            setHistory(h => {
+              const entry: HistoryEntry = {
+                label: 'Delete page',
+                undo: (items) => items,
+                redo: (items) => items,
+                onUndo: async () => {
+                  const nid = createPage(projectId, title);
+                  if (nid) {
+                    await setPageItems(projectId, nid, serializeGridItems(snapItems), { allowClear: true, force: true });
+                    if (snapBackground) setPageBackground(projectId, nid, snapBackground);
+                    if (snapStarter) setPageStarter(projectId, nid, true);
+                    selectPage(nid);
+                    replaceItems(getPageItems(projectId, nid) as GridItem[], nid);
+                  }
+                },
+                onRedo: () => {
+                  const target = deletedPageId;
+                  if (target) {
+                    deletePage(projectId, target);
+                    const remaining = (selectedProject.pageOrder || []).filter(id => id !== target);
+                    const fallback = remaining[0] || null;
+                    selectPage(fallback);
+                    if (fallback) replaceItems(getPageItems(projectId, fallback) as GridItem[], fallback); else replaceItems([], null);
+                  }
+                }
+              };
+              return [...h, entry];
+            });
+            setRedoStack([]);
+          }}
+          onDuplicate={() => {
+            const projectId = selectedProject.id;
+            const sourcePageId = currentPageId;
+            const sourcePageItems = getPageItems(projectId, sourcePageId) as GridItem[];
+            const newPageId = duplicatePage(projectId, sourcePageId);
+            if (newPageId) {
+              selectPage(newPageId);
+              try { localStorage.setItem(`py_current_page_${projectId}`, newPageId); } catch { /* ignore */ }
+              replaceItems(getPageItems(projectId, newPageId) as GridItem[], newPageId);
+              setHistory(h => {
+                const entry: HistoryEntry = {
+                  label: 'Duplicate page',
+                  undo: (items) => items,
+                  redo: (items) => items,
+                  onUndo: () => {
+                    deletePage(projectId, newPageId);
+                    selectPage(sourcePageId);
+                    replaceItems(sourcePageItems, sourcePageId);
+                  },
+                  onRedo: () => {
+                    const redoPageId = duplicatePage(projectId, sourcePageId);
+                    if (redoPageId) {
+                      selectPage(redoPageId);
+                      replaceItems(getPageItems(projectId, redoPageId) as GridItem[], redoPageId);
+                    }
+                  }
+                };
+                return [...h, entry];
+              });
+              setRedoStack([]);
+            }
           }}
         />
       )}
@@ -1556,6 +1998,108 @@ export default function EditorPage() {
             onApplyProps={(parsed) => commitUpdate("Update widget settings", (prev) => prev.map(it => it.id === editingItem!.id ? { ...it, props: parsed } : it))}
           />
         </Suspense>
+      )}
+
+      {/* Fullscreen Canvas Page */}
+      {(isCanvasFullscreen || isClosingFullscreen) && (
+        <CanvasFullscreen
+          isClosing={isClosingFullscreen}
+          pageWidth={pageWidth}
+          pageHeight={pageHeight}
+          setPageWidth={setPageWidth}
+          setPageHeight={setPageHeight}
+          heightMode={heightMode}
+          setHeightMode={applyHeightMode}
+          zoom={zoom}
+          onZoomIn={zoomIn}
+          onZoomOut={zoomOut}
+          onResetZoom={resetZoom}
+          applyZoom={applyZoom}
+          gap={gap}
+          setGap={setGap}
+          showGrid={showGrid}
+          toggleGrid={toggleGrid}
+          items={items}
+          replaceItems={replaceItems}
+          selectedIds={selectedIds}
+          handleSelect={handleSelect}
+          handleMarqueeSelect={handleMarqueeSelect}
+          commitUpdate={commitUpdate}
+          notifyWidgetChange={notifyWidgetChange}
+          normalizeZ={normalizeZ}
+          handleItemMoveStart={handleItemMoveStart}
+          handleItemMoveEnd={handleItemMoveEnd}
+          bringToFront={bringToFront}
+          sendToBack={sendToBack}
+          bringForward={bringForward}
+          sendBackward={sendBackward}
+          togglePin={togglePin}
+          openModify={openModify}
+          previewMode={previewMode}
+          togglePreviewMode={togglePreviewMode}
+          activeView={activeView}
+          setDesktopView={setDesktopView}
+          setMobileView={setMobileView}
+          canUndo={canUndo}
+          canRedo={canRedo}
+          undo={undo}
+          redo={redo}
+          onOpenWebpage={openWebpage}
+          selectedProject={selectedProject}
+          currentPageId={currentPageId}
+          setCurrentPageId={selectPage}
+          createPage={() => {
+            if (selectedProject) {
+              createPage(selectedProject.id);
+            }
+          }}
+          duplicatePage={() => {
+            if (selectedProject && currentPageId) {
+              const newId = duplicatePage(selectedProject.id, currentPageId);
+              if (newId) {
+                selectPage(newId);
+                replaceItems(getPageItems(selectedProject.id, newId) as GridItem[], newId);
+              }
+            }
+          }}
+          renamePage={(name: string) => {
+            if (selectedProject && currentPageId) {
+              renamePage(selectedProject.id, currentPageId, name);
+            }
+          }}
+          deletePage={deletePage}
+          openSettings={openSettings}
+          pageBackground={pageBackground}
+          themeBackground={themeBackground}
+          setPageBackground={setPageBackground}
+          activeTheme={activeTheme}
+          widgetThemeSnapshot={widgetThemeSnapshot}
+          effectivePageBackground={effectivePageBackground}
+          canvasWrapperRef={canvasWrapperRef as React.RefObject<HTMLDivElement>}
+          beginResizePalette={beginResizePalette}
+          paletteCollapsed={paletteCollapsed}
+          togglePalette={togglePalette}
+          paletteWidth={paletteWidth}
+          paletteRef={paletteRef}
+          widgetsOpen={widgetsOpen}
+          toggleWidgetsOpen={toggleWidgetsOpen}
+          assetsOpen={assetsOpen}
+          toggleAssetsOpen={toggleAssetsOpen}
+          activeDrag={activeDrag}
+          setActiveDrag={setActiveDrag}
+          dragPointerStart={dragPointerStart}
+          dragPointerLast={dragPointerLast}
+          dragOverlaySize={dragOverlaySize}
+          dragPointerOffset={dragPointerOffset}
+          onKeyDown={onKeyDown}
+          onExit={() => {
+            setIsClosingFullscreen(true);
+            setTimeout(() => {
+              setIsClosingFullscreen(false);
+              setIsCanvasFullscreen(false);
+            }, 300);
+          }}
+        />
       )}
     </div>
   );

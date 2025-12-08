@@ -1,9 +1,10 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { onAuthStateChanged } from 'firebase/auth';
-import { ref as storageRef, getDownloadURL, uploadBytes } from 'firebase/storage';
+import { ref as storageRef, getDownloadURL, uploadBytes, deleteObject } from 'firebase/storage';
+import { doc, updateDoc, deleteField } from 'firebase/firestore';
 
 import { AssetMeta, computeHash, getImageSize, idbAllMeta, idbDelete, idbGet, idbPut, stores } from '../lib/assetsStore';
-import { auth, storage } from '../lib/firebase';
+import { auth, db, storage } from '../lib/firebase';
 
 import { useNotifications } from './NotificationsProvider';
 import { useProjects, buildProjectAssetPath } from './ProjectsProvider';
@@ -26,7 +27,7 @@ export function AssetsProvider({ children }: { children: React.ReactNode }) {
     const [list, setList] = useState<AssetMeta[]>([]);
     const urlsRef = useRef<Record<string, string>>({});
     const { add: notify } = useNotifications();
-    const { selectedProject } = useProjects();
+    const { selectedProject, projects, recomputeCloudStorageUsage } = useProjects();
     const LARGE_IMAGE_THRESHOLD = 2 * 1024 * 1024; // 2MB
     function formatBytes(bytes: number) {
         if (bytes < 1024) return bytes + ' B';
@@ -40,8 +41,10 @@ export function AssetsProvider({ children }: { children: React.ReactNode }) {
         const items = await idbAllMeta();
         // Only show assets that belong to the currently selected project
         const pid = selectedProject?.id ?? null;
+        console.info('AssetsProvider.refresh: pid=', pid, 'totalAssets=', items.length);
         if (pid) {
             setList(items.filter(it => it.projectId === pid));
+            console.info('AssetsProvider.refresh: matched=', items.filter(it => it.projectId === pid).length);
         } else {
             // If no project selected, show no assets
             setList([]);
@@ -54,10 +57,28 @@ export function AssetsProvider({ children }: { children: React.ReactNode }) {
         const results: AssetMeta[] = [];
         if (!files || (Array.isArray(files) && files.length === 0) || ('length' in (files as FileList) && (files as FileList).length === 0)) return results;
         const arr = Array.from(files as File[]);
+        console.info('AssetsProvider.addFiles: selectedProjectId=', selectedProject?.id, 'fileCount=', arr.length);
         for (const file of arr) {
             const hash = await computeHash(file);
             const existing = await idbGet<AssetMeta>(stores.STORE_META, hash);
-            if (existing) { results.push(existing); continue; }
+            if (existing) {
+                // If an existing meta exists but isn't attached to the current project,
+                // attach it so it's visible in the current project's Assets list. When moving
+                // between projects we clear any cloud-specific fields so we don't imply this
+                // new project already has a synced copy.
+                const currentPid = selectedProject?.id ?? undefined;
+                if (currentPid && existing.projectId !== currentPid) {
+                    const patched: AssetMeta = { ...existing, projectId: currentPid };
+                    if (existing.projectId && existing.projectId !== currentPid) {
+                        delete patched.cloudPath;
+                        delete patched.cloudUrl;
+                        delete patched.syncedAt;
+                    }
+                    try { await idbPut(stores.STORE_META, hash, patched); results.push(patched); continue; } catch { /* ignore */ }
+                }
+                results.push(existing);
+                continue;
+            }
             const dim = await getImageSize(file);
             const meta: AssetMeta = {
                 hash,
@@ -89,12 +110,42 @@ export function AssetsProvider({ children }: { children: React.ReactNode }) {
             }
         }
         await refresh();
+        console.info('AssetsProvider.addFiles: stored assets', results.map(r => ({ hash: r.hash, projectId: r.projectId, cloudUrl: r.cloudUrl })));
+        // Auto-sync to cloud if this is a cloud project
+        try {
+            const isCloudProject = !!(selectedProject as unknown as { _cloudId?: string })?._cloudId;
+            const user = auth.currentUser;
+            if (isCloudProject && user && results.length) {
+                for (const m of results) {
+                    void (async () => {
+                        try {
+                            await syncToCloud(m.hash);
+                        } catch (err) {
+                            console.warn('Automatic syncToCloud failed for asset', m.hash, err);
+                        }
+                    })();
+                }
+            }
+        } catch { /* ignore */ }
         return results;
     }, [refresh, selectedProject?.id]);
 
     const getUrl = useCallback(async (hash: string) => {
         if (urlsRef.current[hash]) return urlsRef.current[hash];
-        const blob = await idbGet<Blob>(stores.STORE_BLOBS, hash);
+        let blob = await idbGet<Blob>(stores.STORE_BLOBS, hash);
+        if (!blob) {
+            // Try to fetch the blob from cloud and store locally
+            try {
+                const meta = await idbGet<AssetMeta>(stores.STORE_META, hash);
+                if (meta?.cloudUrl) {
+                    const resp = await fetch(meta.cloudUrl);
+                    if (resp.ok) {
+                        blob = await resp.blob();
+                        await idbPut(stores.STORE_BLOBS, hash, blob);
+                    }
+                }
+            } catch { /* ignore */ }
+        }
         if (!blob) return null;
         const url = URL.createObjectURL(blob);
         urlsRef.current[hash] = url;
@@ -102,11 +153,54 @@ export function AssetsProvider({ children }: { children: React.ReactNode }) {
     }, []);
 
     const remove = useCallback(async (hash: string) => {
+        // Revoke any blob object URL
         try { if (urlsRef.current[hash]) { URL.revokeObjectURL(urlsRef.current[hash]); delete urlsRef.current[hash]; } } catch { /* noop */ }
-        await idbDelete(stores.STORE_BLOBS, hash);
-        await idbDelete(stores.STORE_META, hash);
-        await refresh();
-    }, [refresh]);
+
+        const meta = await idbGet<AssetMeta>(stores.STORE_META, hash);
+        // If the asset has a cloudPath, attempt removal from Firebase Storage
+        if (meta?.cloudPath) {
+            try {
+                await deleteObject(storageRef(storage, meta.cloudPath));
+            } catch (err) {
+                console.warn('AssetsProvider.remove: failed to delete cloud object', { hash, cloudPath: meta.cloudPath, err });
+            }
+        }
+
+        // If this asset belongs to a cloud project, attempt to remove manifest entry in Firestore
+        try {
+            const pid = meta?.projectId;
+            if (pid) {
+                const proj = projects?.find(p => p.id === pid);
+                // Prefer Firestore project id stored in project doc as _cloudId
+                const cloudId = (proj as any)?._cloudId as string | undefined;
+                if (cloudId) {
+                    try {
+                        await updateDoc(doc(db, 'projects', cloudId), { [`assetManifest.${hash}`]: deleteField() });
+                        try { notify({ type: 'success', title: 'Cloud asset removed', message: `${meta?.name || 'Asset'} removed from cloud project`, persistent: false }); } catch { /* noop */ }
+                    } catch (err) {
+                        console.warn('AssetsProvider.remove: failed to remove assetManifest entry from project', { cloudId, hash, err });
+                        try { notify({ type: 'warning', title: 'Cloud asset removed', message: `${meta?.name || 'Asset'} removed from cloud but manifest update failed`, persistent: false }); } catch { /* noop */ }
+                    }
+                }
+            }
+        } catch (err) {
+            console.warn('AssetsProvider.remove: failed to update project manifest', err);
+        }
+
+        // Remove blolb and meta from idb finally
+        try {
+            await idbDelete(stores.STORE_BLOBS, hash);
+            await idbDelete(stores.STORE_META, hash);
+            await refresh();
+            try { notify({ type: 'success', message: `${meta?.name || 'Asset'} removed.`, persistent: false }); } catch { /* noop */ }
+        } catch (err) {
+            console.error('AssetsProvider.remove: failed to cleanup local IDB', { hash, err });
+            try { notify({ type: 'error', message: `Failed to remove asset ${meta?.name || hash}`, persistent: false }); } catch { /* noop */ }
+        }
+
+        // Recompute cloud usage for app-wide accuracy
+        try { if (recomputeCloudStorageUsage) await recomputeCloudStorageUsage(); } catch { /* ignore */ }
+    }, [refresh, projects, recomputeCloudStorageUsage]);
 
     const syncToCloud = useCallback(async (hash: string): Promise<AssetMeta | null> => {
         const user = auth.currentUser; if (!user) return null;
@@ -122,7 +216,17 @@ export function AssetsProvider({ children }: { children: React.ReactNode }) {
             try { notify({ type: 'error', title: selectedProject?.name, message: 'Select a portfolio before syncing assets to the cloud.', persistent: false }); } catch { /* noop */ }
             return meta;
         }
+        // Ensure selectedProject ownership when syncing to cloud; only the owner can upload assets to the project's cloud path
+        try {
+            const proj = projects?.find(p => p.id === projectId);
+            if (proj && typeof proj.ownerUid === 'string' && proj.ownerUid !== user.uid) {
+                try { notify({ type: 'error', title: proj.name, message: 'Unable to sync assets: you are not the owner of this cloud project.', persistent: false }); } catch { /* noop */ }
+                console.warn('syncToCloud: user is not owner of project', { projectId, ownerUid: proj.ownerUid, currentUid: user.uid });
+                return meta;
+            }
+        } catch { /* ignore */ }
         const path = buildProjectAssetPath(user.uid, projectId, hash);
+        console.info('syncToCloud: uploading asset', { hash, projectId, path });
         try {
             // Try to get an existing URL (dedupe)
             let url: string | null = null;
@@ -134,6 +238,8 @@ export function AssetsProvider({ children }: { children: React.ReactNode }) {
             const next: AssetMeta = { ...meta, cloudPath: path, cloudUrl: url || undefined, syncedAt: new Date().toISOString() };
             await idbPut(stores.STORE_META, hash, next);
             await refresh();
+            try { notify({ type: 'success', title: selectedProject?.name, message: 'Asset uploaded to cloud', persistent: false }); } catch { /* noop */ }
+            console.info('syncToCloud: upload complete', { hash, cloudUrl: url });
             return next;
         } catch {
             return meta;

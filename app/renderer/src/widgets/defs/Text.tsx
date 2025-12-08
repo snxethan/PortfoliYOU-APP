@@ -103,7 +103,7 @@ const def: WidgetDefinition<{ text: string; variant?: TextVariant; align?: TextA
     label: 'Text Block',
     version: 1,
     defaultProps: { text: 'Edit me', variant: 'paragraph', align: 'left', font: 'system', color: undefined, fontSize: undefined, weight: 'normal', italic: false, format: 'plain' },
-    grid: { w: 4, h: 3 },
+    grid: { w: 3, h: 1 },
     render: (props) => {
         return <TextViewComp {...props} />;
     },

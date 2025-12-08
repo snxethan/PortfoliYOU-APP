@@ -1,16 +1,17 @@
 // this file is main process of Electron, started as first thing when the  app starts
 // https://www.electronjs.org/docs/latest/api/app
 
-
-
 import path from "node:path";
-import fsSync from "node:fs";
 import os from 'node:os';
 import https from "node:https";
 import http from "node:http";
 import fs from "node:fs/promises";
 
 import { app, BrowserWindow, shell, ipcMain, dialog, Menu, clipboard } from "electron";
+import { autoUpdater } from 'electron-updater';
+
+import { APP_NAME, APP_ID, resolveAppIconPath, brandTitle } from "../shared/brand";
+
 import { startStaticServer, stopStaticServer, isServerRunning } from './staticServer';
 
 const isDev = !!process.env.VITE_DEV_SERVER_URL;
@@ -20,28 +21,19 @@ let flashTimer: NodeJS.Timeout | null = null;
 
 // creates a BrowserWindow and loads index.html in the window
 // https://www.electronjs.org/docs/latest/api/browser-window
-function resolveIconPath(): string | undefined {
-  // Prefer PNG; fallback to SVG. In dev, read from Vite public; in prod, from dist output.
-  const candidates = ["icon.png", "icon.svg"];
-  for (const name of candidates) {
-    const devPath = path.join(process.cwd(), "app", "renderer", "public", name);
-    if (fsSync.existsSync(devPath)) return devPath;
-    const prodPath = path.join(__dirname, "../../dist", name);
-    if (fsSync.existsSync(prodPath)) return prodPath;
-  }
-  return undefined;
-}
 
 function create() {
+  // Ensure app identity (useful for Windows taskbar grouping/notifications)
+  try { app.setAppUserModelId(APP_ID); } catch { /* ignore */ }
 
-  const iconPath = resolveIconPath();
+  const iconPath = resolveAppIconPath();
   win = new BrowserWindow({
     width: 1200,
     height: 800,
     minWidth: 900,
     minHeight: 600,
     frame: false,
-    title: "Portfoli-YOU",
+    title: APP_NAME,
     icon: iconPath,
     webPreferences: {
       preload: path.join(__dirname, "../preload/index.js"),
@@ -50,7 +42,7 @@ function create() {
     },
   });
   if (isDev) win!.loadURL(process.env.VITE_DEV_SERVER_URL!);
-  else win!.loadFile(path.join(__dirname, "../renderer/index.html"));
+  else win!.loadFile(path.join(__dirname, "../../dist/index.html"));
 
   // Emit window state events to renderer for live UI updates
   win.webContents.once('did-finish-load', () => {
@@ -58,6 +50,10 @@ function create() {
       win!.webContents.send('window-maximize-state', { maximized: win!.isMaximized() });
       const b = win!.getBounds();
       win!.webContents.send('window-move-top', { atTop: typeof b.y === 'number' && b.y <= 0 });
+      // Set zoom limits to match custom controls: 0.8 (80%) to 2.0 (200%)
+      // Electron uses logarithmic zoom levels: zoomFactor = 1.2^zoomLevel
+      // For 80%: log(0.8)/log(1.2) ≈ -1.2, for 200%: log(2.0)/log(1.2) ≈ 3.8
+      win!.webContents.setVisualZoomLevelLimits(1, 5);
     } catch { /* ignore */ }
   });
 
@@ -83,7 +79,7 @@ function create() {
     const template: any = [
       // App menu (macOS)
       ...(isMac ? [{
-        label: app.name,
+        label: APP_NAME,
         submenu: [
           { role: 'about' },
           { type: 'separator' },
@@ -150,19 +146,28 @@ function create() {
     // rely on default behavior.
   }
 
-  // Ensure Windows Taskbar grouping and notifications show proper identity
-  try { app.setAppUserModelId("dev.snxethan.portfoliyou"); } catch { /* ignore */ }
+  // App identity already set above via APP_ID
+  // Auto-update: check on startup in production
+  try {
+    if (!isDev) {
+      autoUpdater.autoDownload = true;
+      autoUpdater.checkForUpdatesAndNotify();
+    }
+  } catch { /* ignore auto-update errors in dev */ }
 
   // Handle new window requests (popups)
   win.webContents.setWindowOpenHandler(({ url }) => {
     // Allow Firebase/Google auth URLs to open in a popup window
     if (url.includes("accounts.google.com") || url.includes("firebaseapp.com")) {
+      const popupIcon = resolveAppIconPath();
       return {
         action: "allow",
         overrideBrowserWindowOptions: {
           width: 600,
           height: 700,
           center: true,
+          title: APP_NAME,
+          icon: popupIcon,
           webPreferences: {
             nodeIntegration: false,
             contextIsolation: true,
@@ -304,7 +309,7 @@ process.on('unhandledRejection', async (reason) => {
 ipcMain.handle("py:saveFile", async (_event, opts: { defaultPath?: string; data: string; encoding?: 'utf8' | 'base64' }) => {
   const { defaultPath, data, encoding } = opts || {};
   const result = await dialog.showSaveDialog({
-    title: "Save PortfoliYOU file",
+    title: brandTitle("Save file"),
     defaultPath: defaultPath || "project.portfoliyou",
     filters: [{ name: "PortfoliYOU", extensions: ["portfoliyou", "json"] }],
   });
@@ -317,7 +322,7 @@ ipcMain.handle("py:saveFile", async (_event, opts: { defaultPath?: string; data:
 ipcMain.handle("py:saveFileBytes", async (_event, opts: { defaultPath?: string; dataBase64: string }) => {
   const { defaultPath, dataBase64 } = opts || {};
   const result = await dialog.showSaveDialog({
-    title: "Save PortfoliYOU file",
+    title: brandTitle("Save file"),
     defaultPath: defaultPath || "project.portfoliyou",
     filters: [{ name: "PortfoliYOU", extensions: ["portfoliyou", "zip"] }],
   });
@@ -329,7 +334,7 @@ ipcMain.handle("py:saveFileBytes", async (_event, opts: { defaultPath?: string; 
 // IPC: Open file dialog and read file contents
 ipcMain.handle("py:openFileDialog", async (_event, opts: { filters?: { name: string; extensions: string[] }[] }) => {
   const result = await dialog.showOpenDialog({
-    title: "Open PortfoliYOU file",
+    title: brandTitle("Open file"),
     filters: opts?.filters || [{ name: "PortfoliYOU", extensions: ["portfoliyou", "json"] }],
     properties: ["openFile"],
   });
@@ -342,7 +347,7 @@ ipcMain.handle("py:openFileDialog", async (_event, opts: { filters?: { name: str
 // IPC: Open file dialog and read file as base64 bytes
 ipcMain.handle("py:openFileDialogBytes", async (_event, opts: { filters?: { name: string; extensions: string[] }[] }) => {
   const result = await dialog.showOpenDialog({
-    title: "Open PortfoliYOU file",
+    title: brandTitle("Open file"),
     filters: opts?.filters || [{ name: "PortfoliYOU", extensions: ["portfoliyou", "zip"] }],
     properties: ["openFile"],
   });
@@ -356,7 +361,7 @@ ipcMain.handle("py:openFileDialogBytes", async (_event, opts: { filters?: { name
 // IPC: Open folder picker (select or create a directory)
 ipcMain.handle('py:openFolderDialog', async () => {
   const result = await dialog.showOpenDialog({
-    title: 'Select export folder',
+    title: brandTitle('Select export folder'),
     properties: ['openDirectory', 'createDirectory'],
   });
   if (result.canceled || !result.filePaths?.[0]) return { canceled: true };
@@ -548,7 +553,7 @@ ipcMain.handle('py:embedDistIntoProject', async (_event, opts?: { projectFilePat
           }
         });
         targetPath = projectFilePath;
-      } catch (e) {
+      } catch {
         // If loading fails, continue with empty zip and allow save-as
         targetPath = undefined;
       }
@@ -646,7 +651,7 @@ ipcMain.handle('py:buildExportFolder', async (_event, opts?: { distDir?: string;
 
             // If the HTML references '/assets/...' but was served with a leading slash, the above ensures it points to local assets/
             // Ensure a <base href="./"> exists to make relative links work when opening files from disk and when served from a subpath
-            if (!/\<base\s+href=/i.test(txt)) {
+            if (!/< base\s+href=/i.test(txt)) {
               txt = txt.replace(/(<head[^>]*>)/i, `$1\n  <base href="./">`);
             }
 
