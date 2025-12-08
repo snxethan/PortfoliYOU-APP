@@ -64,10 +64,17 @@ export function AssetsProvider({ children }: { children: React.ReactNode }) {
             const existing = await idbGet<AssetMeta>(stores.STORE_META, hash);
             if (existing) {
                 // If an existing meta exists but isn't attached to the current project,
-                // attach it so it's visible in the current project's Assets list.
+                // attach it so it's visible in the current project's Assets list. When moving
+                // between projects we clear any cloud-specific fields so we don't imply this
+                // new project already has a synced copy.
                 const currentPid = selectedProject?.id ?? undefined;
                 if (currentPid && existing.projectId !== currentPid) {
                     const patched: AssetMeta = { ...existing, projectId: currentPid };
+                    if (existing.projectId && existing.projectId !== currentPid) {
+                        delete patched.cloudPath;
+                        delete patched.cloudUrl;
+                        delete patched.syncedAt;
+                    }
                     try { await idbPut(stores.STORE_META, hash, patched); results.push(patched); continue; } catch { /* ignore */ }
                 }
                 results.push(existing);

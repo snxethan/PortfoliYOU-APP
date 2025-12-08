@@ -4,7 +4,10 @@ import { z } from 'zod';
 import type { WidgetDefinition } from '../types';
 import { useAssets } from '../../providers/AssetsProvider';
 
-function ResolveAssetImg({ src, alt, fit, scale }: { src: string; alt: string; fit?: React.CSSProperties['objectFit']; scale?: number }) {
+const ALT_CHAR_LIMIT = 160;
+const ARIA_DESCRIPTION_CHAR_LIMIT = 320;
+
+function ResolveAssetImg({ src, alt, ariaDescription, fit, scale }: { src: string; alt: string; ariaDescription?: string; fit?: React.CSSProperties['objectFit']; scale?: number }) {
     const { getUrl, get } = useAssets();
     const [resolved, setResolved] = useState<string | null>(null);
     useEffect(() => {
@@ -59,6 +62,7 @@ function ResolveAssetImg({ src, alt, fit, scale }: { src: string; alt: string; f
             alt={alt}
             loading="lazy"
             decoding="async"
+            aria-description={ariaDescription || undefined}
             style={{ width: '100%', height: '100%', display: 'block', objectFit: fit || 'contain', objectPosition: 'center center', transform: scale && scale !== 1 ? `scale(${scale})` : undefined, transformOrigin: 'center center' }}
         />
     );
@@ -66,7 +70,7 @@ function ResolveAssetImg({ src, alt, fit, scale }: { src: string; alt: string; f
 
 type Shape = 'rectangle' | 'rounded' | 'circle';
 
-const def: WidgetDefinition<{ src: string; alt: string; fit?: React.CSSProperties['objectFit']; radius?: number; scale?: number; shape?: Shape; borderWidth?: number; borderColor?: string; borderStyle?: 'solid' | 'dashed' | 'dotted' }> = {
+const def: WidgetDefinition<{ src: string; alt: string; ariaDescription?: string; fit?: React.CSSProperties['objectFit']; radius?: number; scale?: number; shape?: Shape; borderWidth?: number; borderColor?: string; borderStyle?: 'solid' | 'dashed' | 'dotted' }> = {
     type: 'image',
     label: 'Image',
     version: 1,
@@ -82,7 +86,7 @@ const def: WidgetDefinition<{ src: string; alt: string; fit?: React.CSSPropertie
         const bs = (props.borderStyle || 'solid') as 'solid' | 'dashed' | 'dotted';
         return hasSrc ? (
             <div style={{ width: '100%', height: '100%', overflow: 'hidden', borderRadius: radius as number | string, borderWidth: bw, borderColor: bc, borderStyle: bw > 0 ? bs : undefined, boxSizing: 'border-box' }}>
-                <ResolveAssetImg src={props.src} alt={props.alt} fit={props.fit} scale={props.scale} />
+                <ResolveAssetImg src={props.src} alt={props.alt} ariaDescription={props.ariaDescription} fit={props.fit} scale={props.scale} />
             </div>
         ) : (
             <div style={{ width: '100%', height: '100%' }} />
@@ -95,7 +99,8 @@ const def: WidgetDefinition<{ src: string; alt: string; fit?: React.CSSPropertie
             if (v.startsWith('asset://') || v.startsWith('assets/')) return true;
             try { const u = new URL(v); return u.protocol === 'http:' || u.protocol === 'https:' || u.protocol === 'data:'; } catch { return false; }
         }, { message: 'Enter a valid URL or choose an image.' }).transform((v) => v),
-        alt: z.string().min(1, 'Alt text is required'),
+        alt: z.string().min(1, 'Alt text is required').max(ALT_CHAR_LIMIT, `Alt text should stay under ${ALT_CHAR_LIMIT} characters`),
+        ariaDescription: z.string().max(ARIA_DESCRIPTION_CHAR_LIMIT, `Long descriptions should stay under ${ARIA_DESCRIPTION_CHAR_LIMIT} characters`).optional(),
         fit: z.enum(['contain', 'cover', 'fill', 'none', 'scale-down']).optional(),
         radius: z.number().min(0).optional(),
         scale: z.number().min(0.1).max(4).optional(),

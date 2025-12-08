@@ -23,7 +23,7 @@ import { FOCUS_RING, SR_ONLY } from '../utils/a11y';
 const LAYOUTS = ['cards', 'list'] as const;
 type Layout = (typeof LAYOUTS)[number];
 
-const FALLBACK_USERNAME = 'vercel';
+const FALLBACK_USERNAME = 'snxethan';
 const DEFAULT_MAX_ITEMS = 6;
 
 class RateLimitError extends Error {

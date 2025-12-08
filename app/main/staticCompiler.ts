@@ -156,7 +156,7 @@ function resolveAssetPath(value: string | undefined, assetsBase: string): string
 }
 
 const GITHUB_LAYOUTS = new Set(['cards', 'list']);
-const FALLBACK_GITHUB_USERNAME = 'vercel';
+const FALLBACK_GITHUB_USERNAME = 'snxethan';
 
 type SanitizedRepoPreview = {
     id: string;

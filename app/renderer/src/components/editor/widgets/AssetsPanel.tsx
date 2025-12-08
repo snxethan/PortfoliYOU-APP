@@ -166,6 +166,7 @@ const AssetItem: React.FC<AssetItemProps> = ({ hash, name, type, onRemove, onSyn
     const [url, setUrl] = useState<string | null>(null);
     React.useEffect(() => { let alive = true; getUrl(hash).then(u => { if (alive) setUrl(u); }); return () => { alive = false; }; }, [hash, getUrl]);
     const isVideo = (type || '').startsWith('video/');
+    const hasCloudCopy = Boolean(cloudUrl && isCloudProject);
     return (
         <div
             className="border border-[color:var(--border)] rounded-md overflow-hidden transition hover-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-[color:var(--accent)]"
@@ -195,15 +196,15 @@ const AssetItem: React.FC<AssetItemProps> = ({ hash, name, type, onRemove, onSyn
             <div className="flex items-center gap-2 px-2 py-2 border-t border-[color:var(--border)] bg-[color:var(--surface)]/60">
                 <div className="flex-1 min-w-0">
                     <p className="text-[11px] font-medium truncate" title={name || hash}>{name || hash}</p>
-                    <p className="text-[10px] uppercase tracking-wide text-[color:var(--fg-muted)]">{cloudUrl ? 'Cloud copy' : 'Local only'}</p>
+                    <p className="text-[10px] uppercase tracking-wide text-[color:var(--fg-muted)]">{hasCloudCopy ? 'Cloud copy' : 'Local only'}</p>
                 </div>
                 <div className="flex items-center gap-1">
                     {onSync && isCloudProject && (
                         <button
                             type="button"
-                            className={`inline-flex h-7 w-7 items-center justify-center rounded-md border ${cloudUrl ? 'border-[color:var(--accent)]/50 text-[color:var(--accent)] bg-[color:var(--accent)]/10' : 'border-[color:var(--border)] text-[color:var(--fg-muted)] hover:border-[color:var(--accent)] hover:text-[color:var(--accent)]'} transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-[color:var(--accent)]`}
-                            title={cloudUrl ? 'Asset synced to cloud' : 'Sync asset to cloud'}
-                            aria-label={cloudUrl ? 'Asset synced to cloud' : 'Sync asset to cloud'}
+                            className={`inline-flex h-7 w-7 items-center justify-center rounded-md border ${hasCloudCopy ? 'border-[color:var(--accent)]/50 text-[color:var(--accent)] bg-[color:var(--accent)]/10' : 'border-[color:var(--border)] text-[color:var(--fg-muted)] hover:border-[color:var(--accent)] hover:text-[color:var(--accent)]'} transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-[color:var(--accent)]`}
+                            title={hasCloudCopy ? 'Asset synced to cloud' : 'Sync asset to cloud'}
+                            aria-label={hasCloudCopy ? 'Asset synced to cloud' : 'Sync asset to cloud'}
                             onClick={async () => {
                                 if (syncing) return;
                                 setSyncing(true);

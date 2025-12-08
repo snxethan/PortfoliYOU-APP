@@ -2,6 +2,8 @@ export type VideoWidgetProps = {
     src: string;
     poster?: string;
     title?: string;
+    ariaLabel?: string;
+    ariaDescription?: string;
     autoplay?: boolean;
     muted?: boolean;
     loop?: boolean;
@@ -38,6 +40,8 @@ export const VIDEO_BASE_FALLBACK = 'Video is unavailable. Please check the link 
 export const defaultVideoProps: VideoWidgetProps = {
     src: '',
     title: VIDEO_BASE_TITLE,
+    ariaLabel: undefined,
+    ariaDescription: undefined,
     autoplay: false,
     muted: true,
     loop: false,
@@ -107,6 +111,10 @@ export function sanitizeVideoProps(raw?: Partial<VideoWidgetProps>): VideoWidget
     const poster = sanitizeUrlish(input.poster);
     safe.poster = poster || undefined;
     safe.title = sanitizeText(input.title, defaultVideoProps.title || VIDEO_BASE_TITLE);
+    const ariaLabel = sanitizeText(input.ariaLabel, '', 160);
+    safe.ariaLabel = ariaLabel ? ariaLabel : undefined;
+    const ariaDescription = sanitizeText(input.ariaDescription, '', 320);
+    safe.ariaDescription = ariaDescription ? ariaDescription : undefined;
     safe.fallbackText = sanitizeText(input.fallbackText, defaultVideoProps.fallbackText || VIDEO_BASE_FALLBACK);
     safe.autoplay = coerceBoolean(input.autoplay, defaultVideoProps.autoplay ?? false);
     safe.muted = coerceBoolean(input.muted, defaultVideoProps.muted ?? true);

@@ -83,7 +83,7 @@ const def: WidgetDefinition<ProjectWidgetProps> = {
     label: 'Project Card',
     version: 1,
     defaultProps: { title: 'My Project', description: 'Short description', headingLevel: 'h3', font: 'system', fontSize: undefined, link: undefined, image: undefined },
-    grid: { w: 6, h: 4 },
+    grid: { w: 3, h: 2 },
     render: (props) => <ProjectView {...props} />,
     getStaticCss: (props) => {
         const font = props?.font === 'serif' ? 'serif' : props?.font === 'mono' ? 'monospace' : 'system-ui, -apple-system, Segoe UI, Roboto, Inter, sans-serif';
