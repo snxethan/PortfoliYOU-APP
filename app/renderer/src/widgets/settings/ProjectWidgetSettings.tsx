@@ -3,6 +3,7 @@ import { Briefcase, ChevronDown, ChevronRight, Image as ImageIcon, Link as LinkI
 import { z } from 'zod';
 
 import { useAssets } from '../../providers/AssetsProvider';
+
 import { SchemaAssetField, SchemaUrlField } from './SchemaFields';
 import { deriveNumberBounds, HEX_COLOR_RE, isTextFontValue, type TextFontOption } from './shared';
 import type { WidgetSettingsComponentProps } from './types';

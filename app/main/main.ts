@@ -1,10 +1,7 @@
 // this file is main process of Electron, started as first thing when the  app starts
 // https://www.electronjs.org/docs/latest/api/app
 
-
-
 import path from "node:path";
-import fsSync from "node:fs";
 import os from 'node:os';
 import https from "node:https";
 import http from "node:http";
@@ -12,6 +9,7 @@ import fs from "node:fs/promises";
 
 import { app, BrowserWindow, shell, ipcMain, dialog, Menu, clipboard } from "electron";
 import { autoUpdater } from 'electron-updater';
+
 import { APP_NAME, APP_ID, resolveAppIconPath, brandTitle } from "../shared/brand";
 
 import { startStaticServer, stopStaticServer, isServerRunning } from './staticServer';

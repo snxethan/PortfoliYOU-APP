@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Pin, PinOff, Lock, Unlock, ChevronsUp, ChevronsDown, ChevronUp, ChevronDown, ChevronRight, X, Trash2, AlignLeft, AlignCenter, AlignRight, Bold as BoldIcon, Italic as ItalicIcon, Type, Link as LinkIcon } from "lucide-react";
+import { Pin, PinOff, Lock, Unlock, ChevronsUp, ChevronsDown, ChevronUp, ChevronDown, ChevronRight, X, Trash2 } from "lucide-react";
 import { z } from "zod";
 
 import { useAssets } from "../../../providers/AssetsProvider";
@@ -10,8 +10,6 @@ import type { CarouselItem } from "../../../widgets/defs/Carousel";
 import { ALLOWED_HTTP_SCHEME_LABEL } from "../../../../../shared/widgets/linkUrl";
 import type { GridItem } from "../canvas/DraggableItem";
 import { useScrollLock } from "../../../hooks/useScrollLock";
-
-import LinkPreviewPanel from "../../../widgets/settings/LinkPreviewPanel";
 import { SchemaAssetField, SchemaNumberField, SchemaUrlField, type AssetKind } from "../../../widgets/settings/SchemaFields";
 import { ContactWidgetSettings } from "../../../widgets/settings/ContactWidgetSettings";
 import { ImageWidgetSettings } from "../../../widgets/settings/ImageWidgetSettings";

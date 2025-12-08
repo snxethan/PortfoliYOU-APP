@@ -72,7 +72,6 @@ const toMetadataPayload = (draft: Draft): Partial<PortfolioMeta> => {
 
 const validateDraft = (draft: Draft) => {
     const errors: Record<string, string> = {};
-    const title = draft.siteTitle.trim();
     if (!title) errors.siteTitle = "Portfolio name is required";
     if (title && (title.length < 2 || title.length > 80)) errors.siteTitle = "Name must be 2-80 characters";
     if (title && INVALID_FILENAME.test(title)) errors.siteTitle = "Remove special characters such as / : * ? \" < > |";
@@ -125,8 +124,6 @@ export default function PortfolioSettingsModal({ open, mode, projectId, cloudId,
         saveProject,
         syncProject,
         deleteProject,
-        cloudMaxProjects,
-        cloudProjectsCount,
         cloudMaxStorageMB,
         cloudBytesUsed
     } = useProjects();
@@ -275,7 +272,6 @@ export default function PortfolioSettingsModal({ open, mode, projectId, cloudId,
         const current = (project?.portfolioMeta as any)?.buildSettings || {};
         return !!(current.preview && current.preview.openOnStart);
     });
-    const [syncingBuild, setSyncingBuild] = useState(false);
     const [cloudSyncing, setCloudSyncing] = useState(false);
     const [cloudToggleTouched, setCloudToggleTouched] = useState(false);
     const [createCloudEnabled, setCreateCloudEnabled] = useState<boolean>(() => Boolean(user && isCreateMode));
@@ -331,18 +327,7 @@ export default function PortfolioSettingsModal({ open, mode, projectId, cloudId,
     const _showCreateCloudToggle = isCreateMode && !!user;
     const showCloudSection = isCreateMode || (!!user && !isCreateMode);
     const storageLimitBytes = Math.max(cloudMaxStorageMB || 0, 0) * 1024 * 1024;
-    const normalizedProjectCap = cloudMaxProjects && cloudMaxProjects > 0 ? cloudMaxProjects : 0;
-    const reachedProjectLimit = normalizedProjectCap > 0 ? cloudProjectsCount >= normalizedProjectCap : false;
-    const reachedStorageLimit = storageLimitBytes > 0 ? cloudBytesUsed >= storageLimitBytes : false;
     const activeIsCloudProject = Boolean(project && (project.storage ?? "local") === "cloud");
-    const showBuildSyncCta = Boolean(!isCreateMode && project && !activeIsCloudProject);
-    const syncDisabledReason = !user
-        ? "Sign in to sync this portfolio."
-        : reachedProjectLimit
-            ? "Cloud project limit reached. Delete older cloud portfolios or upgrade."
-            : reachedStorageLimit
-                ? "Cloud storage is full. Clear space before syncing."
-                : null;
     const storageUsageLabel = storageLimitBytes > 0
         ? `${formatBytes(cloudBytesUsed)} / ${cloudMaxStorageMB} MB`
         : `${formatBytes(cloudBytesUsed)} used`;
@@ -566,16 +551,6 @@ export default function PortfolioSettingsModal({ open, mode, projectId, cloudId,
         try {
             await updateProjectMetadata(project.id, { metadata: ({ ...(project.portfolioMeta || {}), buildSettings: { ...(project.portfolioMeta as any)?.buildSettings, includeAssets: includeAssetsState, basePath: v || undefined } } as any) });
         } catch { /* ignore */ }
-    };
-
-    const handleSyncFromBuildSection = async () => {
-        if (!project) return;
-        setSyncingBuild(true);
-        try {
-            await syncProject(project.id);
-        } finally {
-            setSyncingBuild(false);
-        }
     };
 
     const handleCloudSync = useCallback(async () => {

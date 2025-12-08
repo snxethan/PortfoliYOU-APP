@@ -135,8 +135,6 @@ const MIN_APP_ZOOM = 0.8;
 const MAX_APP_ZOOM = 1.6;
 
 function PortfolioIslandWrapper() {
-  const location = useLocation();
-  const { selectedProjectId } = useProjects();
   // Show island when there's a selected project, even on home page
   // The island itself handles its visibility state
   return <PortfolioIsland />;

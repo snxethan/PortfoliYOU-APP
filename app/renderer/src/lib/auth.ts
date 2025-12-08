@@ -1,16 +1,10 @@
 import {
-  GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult,
+  GoogleAuthProvider, signInWithPopup, getRedirectResult,
   createUserWithEmailAndPassword, signInWithEmailAndPassword,
   sendEmailVerification, signOut
 } from "firebase/auth";
 
 import { auth } from "./firebase";
-
-// Detect if we're in an Electron production build (file:// protocol)
-const isElectronProduction = () => {
-  if (typeof window === 'undefined') return false;
-  return window.location.protocol === 'file:';
-};
 
 export const signInGoogle = async () => {
   const provider = new GoogleAuthProvider();

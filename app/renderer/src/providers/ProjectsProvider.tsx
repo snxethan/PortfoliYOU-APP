@@ -1,13 +1,13 @@
 import '../types/electron.d.ts';
 import React, { createContext, useContext, useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { onAuthStateChanged } from "firebase/auth";
-import { auth, db, storage } from "../lib/firebase";
 import { collection, doc, getDoc, getDocs, setDoc, serverTimestamp, query, where, orderBy, onSnapshot, writeBatch, deleteDoc } from "firebase/firestore";
 import type { FirestoreError, Unsubscribe } from "firebase/firestore";
 import { ref as storageRef, uploadBytes, getDownloadURL, getMetadata, getBytes, deleteObject } from "firebase/storage";
-import { idbGet, idbPut, stores, computeHash, type AssetMeta } from "../lib/assetsStore";
 import JSZip from "jszip";
 
+import { auth, db, storage } from "../lib/firebase";
+import { idbGet, idbPut, stores, computeHash, type AssetMeta } from "../lib/assetsStore";
 import type { VideoWidgetProps } from "../../../shared/widgets/videoProps";
 import { sanitizeVideoProps } from "../widgets/videoProps";
 import type { Theme, ThemePatch } from "../themes/types";
@@ -377,7 +377,7 @@ export function normalizeProjectWidgetReferences(proj: LocalProject): LocalProje
 		}
 		if (!changed) return proj;
 		return { ...proj, widgets: nextWidgets, pages: nextPages, updatedAt: new Date().toISOString() } as LocalProject;
-	} catch (e) {
+	} catch {
 		return proj;
 	}
 }
@@ -419,7 +419,7 @@ export function normalizeProjectPageTitles(proj: LocalProject): LocalProject {
 		for (const pid of proj.pageOrder || []) {
 			const page = nextPages[pid]; if (!page) continue;
 			const base = (page.title || '').trim() || 'Untitled';
-			let t = base;
+			const t = base;
 			let low = t.toLowerCase();
 			if (!low) low = 'untitled';
 			if (seen[low] === undefined) {
@@ -448,7 +448,7 @@ export function normalizeProjectPageTitles(proj: LocalProject): LocalProject {
 		}
 		if (!changed) return proj;
 		return { ...proj, pages: nextPages, updatedAt: new Date().toISOString() } as LocalProject;
-	} catch (e) {
+	} catch {
 		return proj;
 	}
 }
@@ -474,7 +474,7 @@ export function resolveIncomingWidgetIds(proj: LocalProject, pageId: string, ite
 				try { console.error('[ProjectsProvider] resolveIncomingWidgetIds: incoming wid used by other pages', { projectId: proj.id, pageId, wid }); } catch { /* noop */ }
 			}
 			// If a clone already exists for this original widget within the project, reuse it
-			const existingCloneId = Object.entries(nextWidgets).find(([k, w]) => (w as any).originWidgetId === wid)?.[0];
+			const existingCloneId = Object.entries(nextWidgets).find(([, w]) => (w as any).originWidgetId === wid)?.[0];
 			if (existingCloneId) {
 				if (process.env.NODE_ENV === 'development') {
 					try { console.error('[ProjectsProvider] resolveIncomingWidgetIds: reusing existing clone', { projectId: proj.id, pageId, originalWid: wid, cloneId: existingCloneId }); } catch { /* noop */ }
@@ -551,6 +551,7 @@ export function applySetPageItemsToProject(proj: LocalProject, pageId: string, i
 			schemaVersion,
 			createdAt,
 			updatedAt: nowStr,
+			originWidgetId: existing?.originWidgetId,
 		} as Widget;
 	}
 	const updatedPage: Page = { ...proj.pages[pageId], widgets: resolvedItems.map(it => it.id), order: proj.pages[pageId].order, updatedAt: nowStr } as Page;
@@ -2058,7 +2059,7 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 								refCount[wid] = (refCount[wid] || 0) + 1;
 							}
 						}
-						const shared = Object.entries(refCount).filter(([wid, count]) => count > 1);
+						const shared = Object.entries(refCount).filter(([, count]) => count > 1);
 						if (shared.length > 0) {
 							// Print a compact mapping for debugging. Only warn once per project
 							if (!devWarnedWidgetSharedProjectIds.has(projectId)) {
@@ -2077,7 +2078,7 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
 							} catch { /* ignore normalization failures */ }
 						}
 					}
-				} catch (e) {
+				} catch {
 					// ignore diagnostics failure
 				}
 				if (process.env.NODE_ENV === 'development') {

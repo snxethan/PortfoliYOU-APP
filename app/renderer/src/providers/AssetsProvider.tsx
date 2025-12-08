@@ -2,10 +2,9 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useR
 import { onAuthStateChanged } from 'firebase/auth';
 import { ref as storageRef, getDownloadURL, uploadBytes, deleteObject } from 'firebase/storage';
 import { doc, updateDoc, deleteField } from 'firebase/firestore';
-import { db } from '../lib/firebase';
 
 import { AssetMeta, computeHash, getImageSize, idbAllMeta, idbDelete, idbGet, idbPut, stores } from '../lib/assetsStore';
-import { auth, storage } from '../lib/firebase';
+import { auth, db, storage } from '../lib/firebase';
 
 import { useNotifications } from './NotificationsProvider';
 import { useProjects, buildProjectAssetPath } from './ProjectsProvider';
@@ -127,7 +126,7 @@ export function AssetsProvider({ children }: { children: React.ReactNode }) {
                     })();
                 }
             }
-        } catch (err) { /* ignore */ }
+        } catch { /* ignore */ }
         return results;
     }, [refresh, selectedProject?.id]);
 
@@ -159,11 +158,9 @@ export function AssetsProvider({ children }: { children: React.ReactNode }) {
 
         const meta = await idbGet<AssetMeta>(stores.STORE_META, hash);
         // If the asset has a cloudPath, attempt removal from Firebase Storage
-        let deletedCloudObject = false;
         if (meta?.cloudPath) {
             try {
                 await deleteObject(storageRef(storage, meta.cloudPath));
-                deletedCloudObject = true;
             } catch (err) {
                 console.warn('AssetsProvider.remove: failed to delete cloud object', { hash, cloudPath: meta.cloudPath, err });
             }
@@ -202,7 +199,7 @@ export function AssetsProvider({ children }: { children: React.ReactNode }) {
         }
 
         // Recompute cloud usage for app-wide accuracy
-        try { if (recomputeCloudStorageUsage) await recomputeCloudStorageUsage(); } catch (err) { /* ignore */ }
+        try { if (recomputeCloudStorageUsage) await recomputeCloudStorageUsage(); } catch { /* ignore */ }
     }, [refresh, projects, recomputeCloudStorageUsage]);
 
     const syncToCloud = useCallback(async (hash: string): Promise<AssetMeta | null> => {

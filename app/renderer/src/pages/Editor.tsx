@@ -144,7 +144,6 @@ export default function EditorPage() {
   const itemsRef = useRef<GridItem[]>([]);
   const itemsPageRef = useRef<string | null>(null);
   const lastPersistedSignatureRef = useRef<string | null>(null);
-  const snapshotSignature = useCallback((list: GridItem[]) => JSON.stringify(serializeGridItems(list)), []);
   const suppressHydrateRef = useRef(false);
   const dragInProgressRef = useRef(false);
   const autoPersistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -301,7 +300,6 @@ export default function EditorPage() {
       // Even if we skip, ensure the signature is updated
       lastLoadedSignatureRef.current = loadedSignature;
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedProject?.id, currentPageId]);
 
   // Synchronously select a page and hydrate items to reduce race conditions where the
@@ -341,7 +339,7 @@ export default function EditorPage() {
       }
       lastLoadedSignatureRef.current = JSON.stringify(serializeGridItems(items));
       replaceItems(items, id);
-    } catch (e) {
+    } catch {
       lastLoadedSignatureRef.current = '';
       replaceItems([], null);
     }

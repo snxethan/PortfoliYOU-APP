@@ -1,3 +1,6 @@
+import path from "node:path";
+import fs from "node:fs";
+
 // Centralized brand constants and helpers used across main, preload, and renderer
 
 export const APP_NAME = "Portfoli-YOU";
@@ -6,8 +9,6 @@ export const APP_TAGLINE = "A Portfolio for you, by you.";
 
 // Prefer PNG; fallback to SVG/ICO. In dev, use Vite public; in prod, use built dist files.
 export function resolveAppIconPath(): string | undefined {
-    const path = require("node:path");
-    const fs = require("node:fs");
     const candidates = ["icon.png", "icon.svg", "favicon.ico", "icon.ico"];
     for (const name of candidates) {
         const devPath = path.join(process.cwd(), "app", "renderer", "public", name);

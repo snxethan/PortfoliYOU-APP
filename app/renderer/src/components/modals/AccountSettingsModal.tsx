@@ -7,7 +7,6 @@ import {
     ChevronRight,
     Chrome,
     Cloud,
-    Copy,
     Download,
     ExternalLink,
     Github,
@@ -20,9 +19,9 @@ import {
     X
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
+import { getFunctions, httpsCallable } from 'firebase/functions';
 
 import { auth } from "../../lib/firebase";
-import { getFunctions, httpsCallable } from 'firebase/functions';
 import { useAuth } from "../../providers/AuthProvider";
 import { useNotifications } from "../../providers/NotificationsProvider";
 import { useProjects } from "../../providers/ProjectsProvider";
@@ -93,7 +92,6 @@ export default function AccountSettingsModal({ open, onClose }: { open: boolean;
         projects,
         exportProject,
         deleteCloudProjectByCloudId,
-        importProjectFromCloudLocalOnly,
         cloudMaxProjects,
         cloudMaxStorageMB,
         cloudBytesUsed,
@@ -112,7 +110,6 @@ export default function AccountSettingsModal({ open, onClose }: { open: boolean;
         cloud: true
     });
     const [cloudAction, setCloudAction] = useState<{ id: string; kind: CloudActionKind } | null>(null);
-    const deleteAccountUrl = `${ACCOUNT_PORTAL_BASE}/account/delete`;
 
     const currentUser = useMemo(() => auth.currentUser ?? user, [user, refreshVersion]);
     const providerData = useMemo(() => currentUser?.providerData || [], [currentUser]);
@@ -172,21 +169,6 @@ export default function AccountSettingsModal({ open, onClose }: { open: boolean;
         }
     };
 
-    const handleCloudCopy = async (projectId: string, cloudId: string | undefined, projectName: string) => {
-        if (!cloudId) {
-            notify({ type: "error", message: "Cloud ID missing for this project.", persistent: false });
-            return;
-        }
-        try {
-            await runCloudAction(projectId, "copy", async () => {
-                const result = await importProjectFromCloudLocalOnly(cloudId);
-                if (!result) throw new Error("copy-failed");
-            });
-            notify({ type: "success", message: `${projectName || "Portfolio"} copied to local projects.`, persistent: false });
-        } catch {
-            notify({ type: "error", message: `Couldn't copy ${projectName || "portfolio"} locally.`, persistent: false });
-        }
-    };
 
     const handleCloudDelete = async (projectId: string, cloudId: string | undefined, projectName: string) => {
         if (!cloudId) {

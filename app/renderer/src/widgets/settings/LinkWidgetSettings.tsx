@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { AlignLeft, Bold as BoldIcon, ChevronDown, ChevronRight, Italic as ItalicIcon, Link as LinkIcon, Sparkles } from 'lucide-react';
 
 import { ALLOWED_HTTP_SCHEME_LABEL } from '../../../../shared/widgets/linkUrl';
+
 import LinkPreviewPanel from './LinkPreviewPanel';
 import { deriveNumberBounds, isLinkFontValue, isLinkVariantValue, isLinkWeightValue, TEXT_WEIGHTS } from './shared';
 import type { LinkFontOption, LinkVariantOption, LinkWeightOption } from './shared';
