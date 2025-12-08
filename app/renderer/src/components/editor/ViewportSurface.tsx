@@ -138,10 +138,12 @@ export default function ViewportSurface(props: ViewportSurfaceProps) {
     const outerClass = heightMode === 'fixed'
         ? 'p-2 min-w-0 h-full overflow-hidden'
         : 'p-2 min-w-0 overflow-auto scrollable scrollable-container';
-    const canvasBackground = pageBackground || '#ffffff';
+    const themeBackground = theme?.colors.background || '#ffffff';
+    const canvasBackground = pageBackground || themeBackground;
+    const viewportBackground = canvasBackground;
 
     return (
-        <div ref={scrollRef} className={outerClass} onWheel={handleWheel}>
+        <div ref={scrollRef} className={outerClass} onWheel={handleWheel} style={{ backgroundColor: viewportBackground }}>
             <div className="flex justify-center">
                 <div
                     className={"min-h-[28rem] border border-[color:var(--border)] shadow-sm rounded-md relative " + (heightMode === 'fixed' ? 'overflow-y-auto overflow-x-hidden' : 'overflow-visible')}

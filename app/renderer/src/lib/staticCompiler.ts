@@ -54,11 +54,12 @@ export async function compileStaticSite(
             const hash = props.src.slice('asset://'.length);
             props.src = `/assets/${hash}`;
         }
+        const instanceId = widget.widgetId || (widget as any)?.id || String(Math.random()).slice(2);
 
         // Ask widget for static CSS if it exposes getStaticCss
         try {
             if (def && typeof def.getStaticCss === 'function') {
-                const raw = await def.getStaticCss(props, widget.widgetId || widget.id || String(Math.random()).slice(2));
+                const raw = await def.getStaticCss(props, instanceId);
                 if (raw && typeof raw === 'string') {
                     const trimmed = raw.trim();
                     if (trimmed.length > 0) {
@@ -67,7 +68,7 @@ export async function compileStaticSite(
                         if (/[{}]/.test(trimmed)) {
                             collectedCss.push(trimmed);
                         } else {
-                            const sel = `.widget-instance-${widget.widgetId || widget.id}`;
+                            const sel = `.widget-instance-${instanceId}`;
                             collectedCss.push(`${sel} { ${trimmed} }`);
                         }
                     }
@@ -83,14 +84,14 @@ export async function compileStaticSite(
                 const el = def.render(props);
                 const inner = ReactDOMServer.renderToStaticMarkup(el as any);
                 // Wrap each widget with an instance-scoped class so per-instance CSS can target it
-                return `<div class="widget widget-instance-${widget.widgetId || widget.id}">${inner}</div>`;
-            } catch {
-                return `<div class="widget widget-instance-${widget.widgetId || widget.id}">[render error: ${String(e)}]</div>`;
+                return `<div class="widget widget-instance-${instanceId}">${inner}</div>`;
+            } catch (err) {
+                return `<div class="widget widget-instance-${instanceId}">[render error: ${escapeHtml(String(err))}]</div>`;
             }
         }
 
         // Fallback: basic JSON dump
-        return `<div class="widget widget-instance-${widget.widgetId || widget.id}"><pre>${escapeHtml(JSON.stringify(widget.props || {}, null, 2))}</pre></div>`;
+        return `<div class="widget widget-instance-${instanceId}"><pre>${escapeHtml(JSON.stringify(widget.props || {}, null, 2))}</pre></div>`;
     }
 
     for (const pageId of project.pageOrder) {
@@ -142,17 +143,20 @@ export async function compileStaticSite(
     // Add a small set of page/grid rules so exported widgets mirror the editor's
     // behavior: each widget will be treated as a contained block and clipped to
     // avoid children rendering outside their section (matches editor preview).
-    const baseCss = `* { box-sizing: border-box; }
-body { margin: 0; font-family: system-ui, -apple-system, 'Segoe UI', Roboto, Inter, sans-serif; color: var(--fg, #0f172a); }
-.container { max-width: 1100px; margin: 0 auto; padding: 36px; }
-.page-canvas { position: relative; margin: 0 auto; }
-.page-widget-wrapper { position: absolute; will-change: transform; }
-.widget { width: 100%; height: 100%; display: block; }
-.widget img,
-.widget video { max-width: 100%; max-height: 100%; display: block; }
-.widget-unknown,
-.widget-error { font-family: monospace; background: transparent; border: 1px dashed var(--border, #d1d5db); padding: 12px; border-radius: 6px; white-space: pre-wrap; }
-`;
+    const baseCss = [
+        '* { box-sizing: border-box; }',
+        'html, body { min-height: 100%; background: var(--bg, #0f172a); }',
+        "body { margin: 0; min-height: 100vh; font-family: system-ui, -apple-system, 'Segoe UI', Roboto, Inter, sans-serif; color: var(--fg, #0f172a); }",
+        'main { min-height: 100vh; background: inherit; }',
+        '.container { max-width: 1100px; margin: 0 auto; padding: 36px; }',
+        '.page-canvas { position: relative; margin: 0 auto; width: 100%; background: inherit; }',
+        '.page-widget-wrapper { position: absolute; will-change: transform; }',
+        '.widget { width: 100%; height: 100%; display: block; }',
+        '.widget img,',
+        '.widget video { max-width: 100%; max-height: 100%; display: block; }',
+        '.widget-unknown,',
+        ".widget-error { font-family: monospace; background: transparent; border: 1px dashed var(--border, #d1d5db); padding: 12px; border-radius: 6px; white-space: pre-wrap; }",
+    ].join('\n');
     const fullCss = [baseCss, ...collectedCss].join('\n\n');
     // Also emit theme variables and global styles so static output matches preview
     // Build theme CSS from project active theme when available
@@ -236,8 +240,17 @@ body { margin: 0; font-family: system-ui, -apple-system, 'Segoe UI', Roboto, Int
 
 function renderPageHtml(page: Page, widgetBodies: string, project: LocalProject, innerWidth: number, height: number): string {
     const meta = project.portfolioMeta as PortfolioMeta | undefined;
+    const pageBackground = typeof page.backgroundColor === 'string' && page.backgroundColor.trim().length > 0
+        ? page.backgroundColor.trim()
+        : null;
+    const themeBackground = project?.themes && project.themes[project.activeThemeId]?.colors?.background;
+    const effectiveBackground = pageBackground || themeBackground || '#0f172a';
+    const htmlStyle = effectiveBackground ? ` style="background:${effectiveBackground};"` : '';
+    const bodyStyle = effectiveBackground ? ` style="background:${effectiveBackground};"` : '';
+    const mainStyle = ` style="min-height:100vh;${pageBackground ? `background:${pageBackground};` : 'background:inherit;'}"`;
+    const canvasStyle = `height:${height}px;max-width:${innerWidth}px;${pageBackground ? `background:${pageBackground};` : ''}`;
     return `<!DOCTYPE html>
-<html lang="en">
+<html lang="en"${htmlStyle}>
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -246,14 +259,23 @@ function renderPageHtml(page: Page, widgetBodies: string, project: LocalProject,
     <link rel="stylesheet" href="./assets/theme.css" />
     <link rel="stylesheet" href="./site.css" />
 </head>
-<body>
-    <main>
+<body${bodyStyle}>
+    <main${mainStyle}>
         <div class="container">
-            <div class="page-canvas" style="height:${height}px;max-width:${innerWidth}px;">
+            <div class="page-canvas" style="${canvasStyle}">
                 ${widgetBodies}
             </div>
         </div>
     </main>
 </body>
 </html>`;
+}
+
+function escapeHtml(value: string): string {
+    return value
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
 }
