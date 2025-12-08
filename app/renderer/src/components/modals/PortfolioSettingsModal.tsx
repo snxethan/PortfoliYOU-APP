@@ -72,9 +72,10 @@ const toMetadataPayload = (draft: Draft): Partial<PortfolioMeta> => {
 
 const validateDraft = (draft: Draft) => {
     const errors: Record<string, string> = {};
-    if (!title) errors.siteTitle = "Portfolio name is required";
-    if (title && (title.length < 2 || title.length > 80)) errors.siteTitle = "Name must be 2-80 characters";
-    if (title && INVALID_FILENAME.test(title)) errors.siteTitle = "Remove special characters such as / : * ? \" < > |";
+    const siteTitle = draft.siteTitle?.trim() || "";
+    if (!siteTitle) errors.siteTitle = "Portfolio name is required";
+    if (siteTitle && (siteTitle.length < 2 || siteTitle.length > 80)) errors.siteTitle = "Name must be 2-80 characters";
+    if (siteTitle && INVALID_FILENAME.test(siteTitle)) errors.siteTitle = "Remove special characters such as / : * ? \" < > |";
     const urlCheck = (value: string) => {
         const trimmed = value.trim();
         if (!trimmed) return false;
